@@ -1,11 +1,15 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routers import courses
+
+from app.database import Base, engine
+from app.routers import auth, courses
+
+Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
     title="ConceptIntel API",
     description="Backend API for ConceptIntel — AI-powered educational intelligence platform",
-    version="0.1.0",
+    version="0.2.0",
 )
 
 app.add_middleware(
@@ -16,6 +20,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth.router, prefix="/api")
 app.include_router(courses.router, prefix="/api")
 
 
