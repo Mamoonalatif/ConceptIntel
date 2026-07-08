@@ -13,9 +13,11 @@ import { ReviewStep } from '../components/course-creation/ReviewStep';
 import { emptyCourseForm, type CourseFormData } from '../types/course';
 import { validateStep, generateEnrollmentCode, generateInviteLink } from '../lib/courseUtils';
 import { courseService } from '../services/courseService';
+import { useAuth } from '../context/AuthContext';
 
 export function CourseCreationPage() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [searchParams] = useSearchParams();
   const editId = searchParams.get('edit');
 
@@ -65,7 +67,11 @@ export function CourseCreationPage() {
     setSaving(true);
     try {
       const data = visibility ? { ...form, visibility } : form;
-      const saved = courseService.save(data, editId ?? undefined);
+      const saved = courseService.save(
+        data,
+        editId ?? undefined,
+        user ? { id: user.id, name: user.full_name } : undefined
+      );
       toast.success(
         visibility === 'draft'
           ? 'Course saved as draft'

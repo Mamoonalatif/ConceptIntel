@@ -1,5 +1,6 @@
 import type { Course, CourseFormData, CourseModule } from '../types/course';
 import { generateCourseId, generateEnrollmentCode, generateInviteLink, generateAiCourseStructure } from '../lib/courseUtils';
+import { authHeaders, getStoredToken } from './authService';
 
 const STORAGE_KEY = 'conceptintel_courses';
 const API_BASE = import.meta.env.VITE_API_URL ?? '/api';
@@ -28,12 +29,14 @@ export const courseService = {
     return readCourses().find((c) => c.id === id);
   },
 
-  save(form: CourseFormData, existingId?: string): Course {
+  save(form: CourseFormData, existingId?: string, teacher?: { id: string; name: string }): Course {
     const courses = readCourses();
     const now = new Date().toISOString();
     const enrollmentCode =
       form.enrollmentCode || generateEnrollmentCode(form.subject, form.semester);
     const inviteLink = form.inviteLink || generateInviteLink(enrollmentCode);
+    const teacherId = teacher?.id ?? 'teacher_001';
+    const teacherName = teacher?.name ?? 'Teacher';
 
     if (existingId) {
       const index = courses.findIndex((c) => c.id === existingId);
@@ -58,8 +61,8 @@ export const courseService = {
       inviteLink,
       createdAt: now,
       updatedAt: now,
-      teacherId: 'teacher_001',
-      teacherName: 'Dr. Smith',
+      teacherId,
+      teacherName,
     };
     courses.push(course);
     writeCourses(courses);
@@ -77,17 +80,23 @@ export const courseService = {
     clos: string[];
     prerequisites: string[];
   }): Promise<{ modules: CourseModule[]; clos: string[] }> {
-    try {
-      const res = await fetch(`${API_BASE}/courses/generate-structure`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      if (res.ok) {
-        return res.json();
+    const token = getStoredToken();
+    if (token) {
+      try {
+        const res = await fetch(`${API_BASE}/courses/generate-structure`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...authHeaders(),
+          },
+          body: JSON.stringify(payload),
+        });
+        if (res.ok) {
+          return res.json();
+        }
+      } catch {
+        // Fall through to client-side generation when backend is unavailable
       }
-    } catch {
-      // Fall through to client-side generation when backend is unavailable
     }
 
     const modules = generateAiCourseStructure(payload);

@@ -5,6 +5,7 @@ import { Card } from '../components/ui/card';
 import { Brain, Users, BookOpen, FileText, TrendingUp, AlertCircle, Plus } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { courseService } from '../services/courseService';
+import { useAuth } from '../context/AuthContext';
 
 const mockData = [
   { week: 'W1', mastery: 75 },
@@ -14,7 +15,9 @@ const mockData = [
 ];
 
 export function TeacherDashboard() {
+  const { user } = useAuth();
   const courses = courseService.getAll().slice(0, 5);
+  const displayName = user?.full_name ?? 'Teacher';
 
   return (
     <div className="max-w-7xl mx-auto px-4 md:px-6 py-8">
@@ -25,7 +28,7 @@ export function TeacherDashboard() {
       >
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
           <div>
-            <h1 className="text-3xl md:text-4xl font-bold mb-2">Welcome, Dr. Smith 👋</h1>
+            <h1 className="text-3xl md:text-4xl font-bold mb-2">Welcome, {displayName} 👋</h1>
             <p className="text-muted-foreground">Manage your courses and monitor student progress</p>
           </div>
           <Button size="lg" asChild>
