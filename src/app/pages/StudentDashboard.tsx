@@ -4,6 +4,8 @@ import { Button } from '../components/ui/button';
 import { Card } from '../components/ui/card';
 import { Progress } from '../components/ui/progress';
 import { useTheme } from '../context/ThemeContext';
+import { useAuth } from '../context/AuthContext';
+import { getFriendlyDisplayName, getInitials } from '../services/authService';
 import {
   Brain,
   Moon,
@@ -33,6 +35,9 @@ const mockProgressData = [
 
 export function StudentDashboard() {
   const { theme, toggleTheme } = useTheme();
+  const { user } = useAuth();
+  const displayName = user ? getFriendlyDisplayName(user.full_name) : 'Student';
+  const initials = user ? getInitials(user.full_name) : 'ST';
 
   return (
     <div className="min-h-screen">
@@ -57,7 +62,7 @@ export function StudentDashboard() {
               {theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
             </Button>
             <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary to-secondary flex items-center justify-center text-white font-medium">
-              JD
+              {initials}
             </div>
           </div>
         </div>
@@ -72,7 +77,7 @@ export function StudentDashboard() {
         >
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h1 className="text-4xl font-bold mb-2">Welcome back, John! 👋</h1>
+              <h1 className="text-4xl font-bold mb-2">Welcome back, {displayName}! 👋</h1>
               <p className="text-muted-foreground">Let's continue your learning journey</p>
             </div>
             
