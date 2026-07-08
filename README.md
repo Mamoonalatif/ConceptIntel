@@ -45,7 +45,57 @@ Open [http://localhost:5173](http://localhost:5173)
 
 **Teacher flow:** Login → `/teacher/dashboard` → **Create Course** (6-step wizard)
 
-### Backend (optional — enables AI structure API)
+## Authentication
+
+ConceptIntel includes JWT-based authentication with role-based access control.
+
+### Roles
+
+| Role | Access |
+|------|--------|
+| **Student** | `/student/*` routes |
+| **Teacher** | `/teacher/*` routes + AI course generation API |
+| **Admin** | `/admin/*` and `/coordinator/*` routes + admin-only API |
+
+### Auth API Endpoints
+
+| Endpoint | Method | Auth | Description |
+|----------|--------|------|-------------|
+| `/api/auth/register` | POST | Public | Register a new user |
+| `/api/auth/login` | POST | Public | Login and receive JWT |
+| `/api/auth/me` | GET | Bearer token | Get current user profile |
+| `/api/auth/logout` | POST | Bearer token | Logout (client clears token) |
+| `/api/auth/admin-only` | GET | Admin only | Role test endpoint |
+| `/api/courses/generate-structure` | POST | Teacher/Admin | Protected course AI endpoint |
+
+### Run backend + frontend together
+
+**Terminal 1 — Backend:**
+```bash
+cd backend
+python -m venv venv
+venv\Scripts\activate        # Windows
+pip install -r requirements.txt
+uvicorn main:app --reload --port 8000
+```
+
+**Terminal 2 — Frontend:**
+```bash
+npm install
+npm run dev
+```
+
+### Run authentication tests
+
+```bash
+cd backend
+venv\Scripts\activate
+pytest tests/ -v
+```
+
+Copy `backend/.env.example` to `backend/.env` and set a strong `JWT_SECRET_KEY` for production.
+
+---
 
 ```bash
 cd backend

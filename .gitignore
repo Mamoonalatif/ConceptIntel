@@ -6,6 +6,7 @@ dist/
 .env
 .env.local
 .env.*.local
+backend/.env
 
 # Python
 __pycache__/
@@ -22,6 +23,7 @@ venv/
 # OS
 .DS_Store
 Thumbs.db
+*.db
 
 # Logs
 *.log
@@ -29,3 +31,7 @@ npm-debug.log*
 
 # Build
 *.local
+
+# Local GitHub upload helpers 
+GITHUB_UPLOAD_*.local.md
+scripts/github-upload-*.ps1
