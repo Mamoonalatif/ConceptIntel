@@ -1,4 +1,5 @@
 import { createBrowserRouter } from 'react-router';
+import { PublicOnlyRoute } from './components/auth/ProtectedRoute';
 import { LandingPage } from './pages/LandingPage';
 import { LoginPage } from './pages/LoginPage';
 import { SignupPage } from './pages/SignupPage';
@@ -24,10 +25,26 @@ import {
   AdminLayout,
 } from './layouts/RoleLayouts';
 
+function PublicLoginPage() {
+  return (
+    <PublicOnlyRoute>
+      <LoginPage />
+    </PublicOnlyRoute>
+  );
+}
+
+function PublicSignupPage() {
+  return (
+    <PublicOnlyRoute>
+      <SignupPage />
+    </PublicOnlyRoute>
+  );
+}
+
 export const router = createBrowserRouter([
   { path: '/', Component: LandingPage },
-  { path: '/login', Component: LoginPage },
-  { path: '/signup', Component: SignupPage },
+  { path: '/login', Component: PublicLoginPage },
+  { path: '/signup', Component: PublicSignupPage },
 
   {
     path: '/teacher',

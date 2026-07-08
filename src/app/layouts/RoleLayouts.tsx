@@ -1,17 +1,34 @@
+import { ProtectedRoute } from '../components/auth/ProtectedRoute';
 import { DashboardLayout } from '../components/layout/DashboardLayout';
 
 export function TeacherLayout() {
-  return <DashboardLayout role="teacher" />;
+  return (
+    <ProtectedRoute allowedRoles={['teacher']}>
+      <DashboardLayout role="teacher" />
+    </ProtectedRoute>
+  );
 }
 
 export function StudentLayout() {
-  return <DashboardLayout role="student" />;
+  return (
+    <ProtectedRoute allowedRoles={['student']}>
+      <DashboardLayout role="student" />
+    </ProtectedRoute>
+  );
 }
 
 export function CoordinatorLayout() {
-  return <DashboardLayout role="coordinator" />;
+  return (
+    <ProtectedRoute allowedRoles={['admin']}>
+      <DashboardLayout role="coordinator" />
+    </ProtectedRoute>
+  );
 }
 
 export function AdminLayout() {
-  return <DashboardLayout role="admin" />;
+  return (
+    <ProtectedRoute allowedRoles={['admin']}>
+      <DashboardLayout role="admin" />
+    </ProtectedRoute>
+  );
 }

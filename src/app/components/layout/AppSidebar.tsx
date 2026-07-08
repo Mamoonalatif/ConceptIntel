@@ -1,8 +1,10 @@
-import { Link, useLocation } from 'react-router';
+import { Link, useLocation, useNavigate } from 'react-router';
 import { Brain, ChevronLeft, ChevronRight, Moon, Sun, LogOut } from 'lucide-react';
 import { cn } from '../ui/utils';
 import { Button } from '../ui/button';
 import { useTheme } from '../../context/ThemeContext';
+import { useAuth } from '../../context/AuthContext';
+import { getInitials } from '../../services/authService';
 import type { NavItem, UserRole } from '../../config/navigation';
 import { roleLabels } from '../../config/navigation';
 
@@ -24,7 +26,15 @@ export function AppSidebar({
   onMobileClose,
 }: AppSidebarProps) {
   const location = useLocation();
+  const navigate = useNavigate();
   const { theme, toggleTheme } = useTheme();
+  const { user, logout } = useAuth();
+
+  const handleLogout = async () => {
+    onMobileClose();
+    await logout();
+    navigate('/login', { replace: true });
+  };
 
   const isActive = (href: string) => {
     if (href.includes('/latest/')) return location.pathname.includes(href.split('/latest')[1]);
@@ -91,20 +101,18 @@ export function AppSidebar({
           variant="ghost"
           size={collapsed ? 'icon' : 'default'}
           className={cn('w-full text-muted-foreground', !collapsed && 'justify-start')}
-          asChild
+          onClick={handleLogout}
         >
-          <Link to="/login" onClick={onMobileClose}>
-            <LogOut className="w-5 h-5" />
-            {!collapsed && <span className="ml-2">Sign Out</span>}
-          </Link>
+          <LogOut className="w-5 h-5" />
+          {!collapsed && <span className="ml-2">Sign Out</span>}
         </Button>
-        {!collapsed && (
+        {!collapsed && user && (
           <div className="flex items-center gap-3 px-3 py-2 mt-2 rounded-xl bg-sidebar-accent">
             <div className="w-9 h-9 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-white text-sm font-medium shrink-0">
-              DS
+              {getInitials(user.full_name)}
             </div>
             <div className="min-w-0">
-              <p className="text-sm font-medium truncate">Dr. Smith</p>
+              <p className="text-sm font-medium truncate">{user.full_name}</p>
               <p className="text-xs text-muted-foreground truncate">{roleLabels[role]}</p>
             </div>
           </div>
