@@ -14,7 +14,7 @@ router = APIRouter(prefix="/courses", tags=["courses"])
 @router.post("/generate-structure", response_model=GenerateStructureResponse)
 async def generate_structure(
     request: GenerateStructureRequest,
-    _current_user: Annotated[User, Depends(require_roles(UserRole.teacher, UserRole.admin))],
+    _current_user: Annotated[User, Depends(require_roles(UserRole.teacher, UserRole.coordinator, UserRole.admin))],
 ):
     modules, clos = generate_course_structure(request)
     return GenerateStructureResponse(modules=modules, clos=clos)

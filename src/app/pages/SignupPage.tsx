@@ -126,7 +126,7 @@ export function SignupPage() {
               <RadioGroup
                 value={role}
                 onValueChange={(value) => setRole(value as AuthRole)}
-                className="grid grid-cols-3 gap-3"
+                className="grid grid-cols-2 gap-3"
               >
                 <div>
                   <RadioGroupItem value="student" id="student" className="peer sr-only" />
@@ -144,6 +144,15 @@ export function SignupPage() {
                     className="flex flex-col items-center justify-center rounded-xl border-2 border-muted bg-transparent p-4 hover:bg-accent hover:text-accent-foreground peer-data-[state=checked]:border-primary peer-data-[state=checked]:bg-primary/5 cursor-pointer transition-all"
                   >
                     <span className="text-sm font-medium">Teacher</span>
+                  </Label>
+                </div>
+                <div>
+                  <RadioGroupItem value="coordinator" id="coordinator" className="peer sr-only" />
+                  <Label
+                    htmlFor="coordinator"
+                    className="flex flex-col items-center justify-center rounded-xl border-2 border-muted bg-transparent p-4 hover:bg-accent hover:text-accent-foreground peer-data-[state=checked]:border-primary peer-data-[state=checked]:bg-primary/5 cursor-pointer transition-all"
+                  >
+                    <span className="text-sm font-medium">Coordinator</span>
                   </Label>
                 </div>
                 <div>

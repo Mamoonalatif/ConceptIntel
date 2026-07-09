@@ -1,5 +1,6 @@
 import { Navigate, useLocation } from 'react-router';
 import { useAuth, type AuthRole } from '../../context/AuthContext';
+import { dashboardPathForRole } from '../../services/authService';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -26,13 +27,7 @@ export function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) 
   }
 
   if (!allowedRoles.includes(user.role)) {
-    const fallback =
-      user.role === 'teacher'
-        ? '/teacher/dashboard'
-        : user.role === 'admin'
-          ? '/admin/dashboard'
-          : '/student/dashboard';
-    return <Navigate to={fallback} replace />;
+    return <Navigate to={dashboardPathForRole(user.role)} replace />;
   }
 
   return <>{children}</>;
@@ -54,13 +49,7 @@ export function PublicOnlyRoute({ children }: PublicOnlyRouteProps) {
   }
 
   if (isAuthenticated && user) {
-    const fallback =
-      user.role === 'teacher'
-        ? '/teacher/dashboard'
-        : user.role === 'admin'
-          ? '/admin/dashboard'
-          : '/student/dashboard';
-    return <Navigate to={fallback} replace />;
+    return <Navigate to={dashboardPathForRole(user.role)} replace />;
   }
 
   return <>{children}</>;

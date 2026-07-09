@@ -19,7 +19,7 @@ export function StudentLayout() {
 
 export function CoordinatorLayout() {
   return (
-    <ProtectedRoute allowedRoles={['admin']}>
+    <ProtectedRoute allowedRoles={['coordinator', 'admin']}>
       <DashboardLayout role="coordinator" />
     </ProtectedRoute>
   );

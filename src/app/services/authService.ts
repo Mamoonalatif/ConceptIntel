@@ -1,4 +1,4 @@
-export type AuthRole = 'student' | 'teacher' | 'admin';
+export type AuthRole = 'student' | 'teacher' | 'coordinator' | 'admin';
 
 export interface AuthUser {
   id: string;
@@ -111,6 +111,8 @@ export function dashboardPathForRole(role: AuthRole): string {
   switch (role) {
     case 'teacher':
       return '/teacher/dashboard';
+    case 'coordinator':
+      return '/coordinator/dashboard';
     case 'admin':
       return '/admin/dashboard';
     default:
