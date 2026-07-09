@@ -2,9 +2,14 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import Base, engine
-from app.routers import auth, courses
+from app.routers import auth, courses, supervision
+from app.services.supervision_service import seed_demo_content
+from app.database import SessionLocal
 
 Base.metadata.create_all(bind=engine)
+
+with SessionLocal() as db:
+    seed_demo_content(db)
 
 app = FastAPI(
     title="ConceptIntel API",
@@ -22,6 +27,7 @@ app.add_middleware(
 
 app.include_router(auth.router, prefix="/api")
 app.include_router(courses.router, prefix="/api")
+app.include_router(supervision.router, prefix="/api")
 
 
 @app.get("/api/health")
