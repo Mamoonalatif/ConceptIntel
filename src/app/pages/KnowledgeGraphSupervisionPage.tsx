@@ -1,9 +1,22 @@
+import { useEffect, useState } from 'react';
+import { Link } from 'react-router';
 import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Brain, Save, Undo, Redo } from 'lucide-react';
-import { Link } from 'react-router';
+import { supervisionService } from '../services/supervisionService';
+import { ContentTypeBadge, StatusBadge } from '../components/supervision/SupervisionBadges';
+import type { AiContent } from '../types/supervision';
 
 export function KnowledgeGraphSupervisionPage() {
+  const [pendingItems, setPendingItems] = useState<AiContent[]>([]);
+
+  useEffect(() => {
+    supervisionService
+      .listContent({ status: 'pending_review' })
+      .then(setPendingItems)
+      .catch(() => setPendingItems([]));
+  }, []);
+
   return (
     <div className="min-h-screen">
       <div className="border-b border-border bg-card/50 backdrop-blur-sm">
@@ -53,16 +66,31 @@ export function KnowledgeGraphSupervisionPage() {
             </Card>
 
             <Card className="p-6 bg-card/50">
-              <h3 className="font-semibold mb-4">Pending Approvals</h3>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-semibold">Pending Approvals</h3>
+                <Button variant="link" size="sm" asChild>
+                  <Link to="/coordinator/supervision">View all</Link>
+                </Button>
+              </div>
               <div className="space-y-2 text-sm">
-                <div className="p-3 rounded-xl bg-muted/30">
-                  <div className="font-medium">Dr. Smith</div>
-                  <div className="text-muted-foreground text-xs">Added 3 concepts</div>
-                </div>
-                <div className="p-3 rounded-xl bg-muted/30">
-                  <div className="font-medium">Prof. Johnson</div>
-                  <div className="text-muted-foreground text-xs">Modified relationships</div>
-                </div>
+                {pendingItems.length === 0 ? (
+                  <p className="text-muted-foreground">No pending AI content</p>
+                ) : (
+                  pendingItems.slice(0, 5).map((item) => (
+                    <Link
+                      key={item.id}
+                      to={`/coordinator/supervision/${item.id}`}
+                      className="block p-3 rounded-xl bg-muted/30 hover:bg-muted/50 transition-colors"
+                    >
+                      <div className="flex items-center gap-2 mb-1">
+                        <ContentTypeBadge type={item.content_type} />
+                        <StatusBadge status={item.status} />
+                      </div>
+                      <div className="font-medium">{item.title}</div>
+                      <div className="text-muted-foreground text-xs">{item.teacher_name} · {item.course_name}</div>
+                    </Link>
+                  ))
+                )}
               </div>
             </Card>
           </div>

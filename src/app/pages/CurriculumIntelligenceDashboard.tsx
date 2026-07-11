@@ -1,8 +1,11 @@
 import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
-import { Brain, Network, Target, TrendingUp, BookOpen, Users } from 'lucide-react';
+import { Brain, Network, Target, TrendingUp, BookOpen, Users, ClipboardCheck } from 'lucide-react';
 import { Link } from 'react-router';
+import { useEffect, useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar } from 'recharts';
+import { supervisionService } from '../services/supervisionService';
+import type { SupervisionStats } from '../types/supervision';
 
 const curriculumCoverage = [
   { subject: 'Data Structures', value: 92 },
@@ -13,6 +16,12 @@ const curriculumCoverage = [
 ];
 
 export function CurriculumIntelligenceDashboard() {
+  const [stats, setStats] = useState<SupervisionStats | null>(null);
+
+  useEffect(() => {
+    supervisionService.getStats().then(setStats).catch(() => setStats(null));
+  }, []);
+
   return (
     <div className="min-h-screen">
       <nav className="sticky top-0 z-50 backdrop-blur-md bg-card/80 border-b border-border">
@@ -30,17 +39,25 @@ export function CurriculumIntelligenceDashboard() {
       </nav>
 
       <div className="max-w-7xl mx-auto px-6 py-8">
-        <div className="mb-8">
-          <h1 className="text-4xl font-bold mb-2">Curriculum Intelligence</h1>
-          <p className="text-muted-foreground">Monitor curriculum consistency and knowledge alignment</p>
+        <div className="mb-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h1 className="text-4xl font-bold mb-2">Curriculum Intelligence</h1>
+            <p className="text-muted-foreground">Monitor curriculum consistency and knowledge alignment</p>
+          </div>
+          <Button asChild>
+            <Link to="/coordinator/supervision">
+              <ClipboardCheck className="w-4 h-4 mr-2" />
+              Review AI Content
+            </Link>
+          </Button>
         </div>
 
         <div className="grid md:grid-cols-4 gap-6 mb-8">
           {[
             { icon: BookOpen, label: 'Active Courses', value: '24', color: 'text-primary' },
             { icon: Users, label: 'Teachers', value: '18', color: 'text-secondary' },
-            { icon: Network, label: 'Total Concepts', value: '342', color: 'text-purple-500' },
-            { icon: Target, label: 'Alignment Score', value: '92%', color: 'text-[#22C55E]' },
+            { icon: ClipboardCheck, label: 'Pending AI Reviews', value: String(stats?.pending_review ?? 0), color: 'text-[#F59E0B]' },
+            { icon: Target, label: 'Approved Content', value: String(stats?.approved ?? 0), color: 'text-[#22C55E]' },
           ].map((stat, i) => (
             <Card key={i} className="p-6 bg-card/50">
               <div className={`w-12 h-12 rounded-xl bg-${stat.color.replace('text-', '')}/10 flex items-center justify-center mb-4`}>

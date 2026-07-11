@@ -1,11 +1,15 @@
 import { motion } from 'motion/react';
 import { Link } from 'react-router';
+import { useEffect, useState } from 'react';
 import { Button } from '../components/ui/button';
 import { Card } from '../components/ui/card';
-import { Brain, Users, BookOpen, FileText, TrendingUp, AlertCircle, Plus } from 'lucide-react';
+import { Brain, Users, BookOpen, FileText, TrendingUp, AlertCircle, Plus, ClipboardCheck } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { courseService } from '../services/courseService';
+import { supervisionService } from '../services/supervisionService';
 import { useAuth } from '../context/AuthContext';
+import type { AiContent } from '../types/supervision';
+import { ContentTypeBadge } from '../components/supervision/SupervisionBadges';
 
 const mockData = [
   { week: 'W1', mastery: 75 },
@@ -18,6 +22,24 @@ export function TeacherDashboard() {
   const { user } = useAuth();
   const courses = courseService.getAll().slice(0, 5);
   const displayName = user?.full_name ?? 'Teacher';
+  const [pendingItems, setPendingItems] = useState<AiContent[]>([]);
+  const [pendingCount, setPendingCount] = useState(0);
+
+  useEffect(() => {
+    async function loadSupervision() {
+      try {
+        const [items, stats] = await Promise.all([
+          supervisionService.listContent({ status: 'pending_review' }),
+          supervisionService.getStats(),
+        ]);
+        setPendingItems(items.slice(0, 4));
+        setPendingCount(stats.pending_review);
+      } catch {
+        // Backend may be offline — keep dashboard usable
+      }
+    }
+    loadSupervision();
+  }, []);
 
   return (
     <div className="max-w-7xl mx-auto px-4 md:px-6 py-8">
@@ -44,7 +66,7 @@ export function TeacherDashboard() {
         {[
           { icon: BookOpen, label: 'Active Courses', value: String(courses.filter(c => c.visibility === 'open').length || courses.length), color: 'text-primary', bg: 'bg-primary/10' },
           { icon: Users, label: 'Total Students', value: '342', color: 'text-secondary', bg: 'bg-secondary/10' },
-          { icon: FileText, label: 'Pending Reviews', value: '12', color: 'text-warning', bg: 'bg-warning/10' },
+          { icon: FileText, label: 'Pending AI Reviews', value: String(pendingCount), color: 'text-warning', bg: 'bg-warning/10' },
           { icon: TrendingUp, label: 'Avg. Performance', value: '78%', color: 'text-success', bg: 'bg-success/10' },
         ].map((stat, i) => (
           <motion.div
@@ -146,21 +168,32 @@ export function TeacherDashboard() {
           <Card className="p-6 bg-card/50">
             <div className="flex items-center gap-2 mb-4">
               <AlertCircle className="w-5 h-5 text-warning" />
-              <h2 className="text-xl font-bold">Pending Reviews</h2>
+              <h2 className="text-xl font-bold">AI Content Awaiting Review</h2>
             </div>
             <div className="space-y-3">
-              {[
-                { student: 'John Doe', assignment: 'DSA Assignment 3', time: '2h ago' },
-                { student: 'Jane Smith', assignment: 'ML Project', time: '5h ago' },
-              ].map((item, i) => (
-                <div key={i} className="p-3 rounded-xl bg-muted/30 hover:bg-muted/50 transition-colors cursor-pointer">
-                  <div className="font-medium text-sm mb-1">{item.student}</div>
-                  <div className="text-xs text-muted-foreground">{item.assignment}</div>
-                </div>
-              ))}
+              {pendingItems.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No pending AI content. Load demo content from AI Supervision.</p>
+              ) : (
+                pendingItems.map((item) => (
+                  <Link
+                    key={item.id}
+                    to={`/teacher/supervision/${item.id}`}
+                    className="block p-3 rounded-xl bg-muted/30 hover:bg-muted/50 transition-colors"
+                  >
+                    <div className="flex items-center gap-2 mb-1">
+                      <ContentTypeBadge type={item.content_type} />
+                    </div>
+                    <div className="font-medium text-sm mb-1">{item.title}</div>
+                    <div className="text-xs text-muted-foreground">{item.course_name}</div>
+                  </Link>
+                ))
+              )}
             </div>
             <Button variant="outline" className="w-full mt-4" asChild>
-              <Link to="/teacher/assignment/1/evaluate">View All</Link>
+              <Link to="/teacher/supervision">
+                <ClipboardCheck className="w-4 h-4 mr-2" />
+                Open AI Supervision
+              </Link>
             </Button>
           </Card>
 
