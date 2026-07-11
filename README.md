@@ -15,21 +15,27 @@ AI-powered educational intelligence platform (FYP). Phase 1 delivers the **Cours
 ## Project Structure
 
 ```
-├── src/                    # React frontend
-│   └── app/
-│       ├── components/     # UI + course creation wizard
-│       ├── config/         # Navigation config
-│       ├── layouts/        # Role-based dashboard layouts
-│       ├── pages/          # Route pages
-│       ├── services/       # Course API / localStorage
-│       └── types/          # TypeScript types
+├── frontend/               # React frontend
+│   ├── src/
+│   │   └── app/
+│   │       ├── components/     # UI + course creation wizard
+│   │       ├── config/         # Navigation config
+│   │       ├── layouts/        # Role-based dashboard layouts
+│   │       ├── pages/          # Route pages
+│   │       ├── services/       # Course API / localStorage
+│   │       └── types/          # TypeScript types
+│   ├── package.json
+│   └── vite.config.ts
 ├── backend/                # FastAPI backend
 │   ├── main.py
 │   └── app/
 │       ├── routers/        # API routes
 │       ├── schemas/        # Pydantic models
 │       └── services/       # AI course generator
-└── package.json
+├── docs/                   # Documentation
+│   ├── Guidelines.md
+│   └── Scope_Document (3).pdf
+└── README.md
 ```
 
 ## Getting Started
@@ -37,6 +43,7 @@ AI-powered educational intelligence platform (FYP). Phase 1 delivers the **Cours
 ### Frontend
 
 ```bash
+cd frontend
 npm install
 npm run dev
 ```
@@ -81,6 +88,7 @@ uvicorn main:app --reload --port 8000
 
 **Terminal 2 — Frontend:**
 ```bash
+cd frontend
 npm install
 npm run dev
 ```
@@ -127,6 +135,7 @@ Role-based sidebar navigation is available for Teacher, Student, Coordinator, an
 ## Build
 
 ```bash
+cd frontend
 npm run build
 ```
 
