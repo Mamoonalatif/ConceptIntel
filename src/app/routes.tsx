@@ -19,6 +19,12 @@ import { KnowledgeGraphSupervisionPage } from './pages/KnowledgeGraphSupervision
 import { AdminDashboard } from './pages/AdminDashboard';
 import { GamificationPage } from './pages/GamificationPage';
 import {
+  TeacherSupervisionRoute,
+  TeacherContentReviewRoute,
+  CoordinatorSupervisionRoute,
+  CoordinatorContentReviewRoute,
+} from './routes/SupervisionRoutes';
+import {
   TeacherLayout,
   StudentLayout,
   CoordinatorLayout,
@@ -57,6 +63,8 @@ export const router = createBrowserRouter([
       { path: 'course/:courseId/content', Component: ContentUploadPage },
       { path: 'course/:courseId/knowledge-graph', Component: KnowledgeGraphPage },
       { path: 'assignment/:assignmentId/evaluate', Component: AssignmentEvaluationPage },
+      { path: 'supervision', Component: TeacherSupervisionRoute },
+      { path: 'supervision/:contentId', Component: TeacherContentReviewRoute },
     ],
   },
 
@@ -79,6 +87,8 @@ export const router = createBrowserRouter([
     children: [
       { path: 'dashboard', Component: CurriculumIntelligenceDashboard },
       { path: 'knowledge-graph', Component: KnowledgeGraphSupervisionPage },
+      { path: 'supervision', Component: CoordinatorSupervisionRoute },
+      { path: 'supervision/:contentId', Component: CoordinatorContentReviewRoute },
     ],
   },
 
