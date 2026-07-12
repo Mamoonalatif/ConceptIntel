@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     jwt_secret_key: str = "change-me-in-production-use-a-long-random-string"
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 60 * 24  # 24 hours
-    database_url: str = "sqlite:///./conceptintel.db"
+    database_url: str = "postgresql://postgres:postgres@localhost:5432/conceptintel"
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

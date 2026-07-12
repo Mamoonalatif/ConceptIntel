@@ -8,7 +8,7 @@ AI-powered educational intelligence platform (FYP). Phase 1 delivers the **Cours
 |-------|------------|
 | Frontend | React, Vite, Tailwind CSS, Radix UI |
 | Backend | FastAPI (Python) |
-| Database | PostgreSQL / Supabase *(planned)* |
+| Database | PostgreSQL |
 | Graph DB | Neo4j *(planned)* |
 | AI | OpenAI GPT models *(integration point ready)* |
 
@@ -83,6 +83,7 @@ cd backend
 python -m venv venv
 venv\Scripts\activate        # Windows
 pip install -r requirements.txt
+# Ensure PostgreSQL is running and DATABASE_URL is set in .env
 uvicorn main:app --reload --port 8000
 ```
 
@@ -101,7 +102,43 @@ venv\Scripts\activate
 pytest tests/ -v
 ```
 
-Copy `backend/.env.example` to `backend/.env` and set a strong `JWT_SECRET_KEY` for production.
+Copy `backend/.env.example` to `backend/.env` and configure the following:
+
+```env
+JWT_SECRET_KEY=your-strong-secret-key
+DATABASE_URL=postgresql://user:password@localhost:5432/conceptintel
+```
+
+## PostgreSQL Setup
+
+### Local PostgreSQL Installation
+
+1. Install PostgreSQL 17 from [postgresql.org](https://www.postgresql.org/download/)
+2. During installation, set a password for the `postgres` user
+3. Use pgAdmin 4 (included with installation) to create the database:
+   - Open pgAdmin 4
+   - Connect to your PostgreSQL server
+   - Right-click on "Databases" → Create → Database
+   - Name: `conceptintel`
+4. Update `backend/.env` with your connection string:
+   ```
+   DATABASE_URL=postgresql://postgres:your-password@localhost:5432/conceptintel
+   ```
+
+### Cloud PostgreSQL (Alternative)
+
+You can use a cloud PostgreSQL service like Supabase, Railway, or Neon:
+
+1. Create a PostgreSQL database on your chosen platform
+2. Get the connection string from the platform
+3. Update `backend/.env` with the provided connection string
+
+### Environment Variables
+
+The backend reads the following from `.env`:
+
+- `DATABASE_URL`: Full PostgreSQL connection string (recommended)
+- `JWT_SECRET_KEY`: Secret key for JWT token signing
 
 ---
 
@@ -126,7 +163,7 @@ The course creation wizard includes:
 5. **AI & Roadmap** — GPT-powered module generation + editable roadmap preview
 6. **Review** — validation checklist and publish
 
-Courses are persisted in `localStorage` (frontend) until Supabase/PostgreSQL is connected.
+Courses are persisted in the PostgreSQL database.
 
 ## Navigation
 
