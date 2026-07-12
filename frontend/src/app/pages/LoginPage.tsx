@@ -4,7 +4,7 @@ import { Button } from '../components/ui/button';
 import { Card } from '../components/ui/card';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
-import { Brain, Mail, Lock, Github } from 'lucide-react';
+import { Brain, Mail, Lock, Eye, EyeOff } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
 import { useAuth } from '../context/AuthContext';
@@ -15,6 +15,8 @@ export function LoginPage() {
   const { login } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [rememberMe, setRememberMe] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const from = (location.state as { from?: string } | null)?.from;
@@ -23,7 +25,7 @@ export function LoginPage() {
     e.preventDefault();
     setLoading(true);
     try {
-      const dashboardPath = await login({ email, password });
+      const dashboardPath = await login({ email, password }, rememberMe);
       toast.success('Welcome back!');
       navigate(from ?? dashboardPath, { replace: true });
     } catch (err) {
@@ -90,43 +92,44 @@ export function LoginPage() {
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
                 <Input
                   id="password"
-                  type="password"
+                  type={showPassword ? 'text' : 'password'}
                   placeholder="••••••••"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="pl-10"
+                  className="pl-10 pr-10"
                   required
                   minLength={8}
                   disabled={loading}
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  disabled={loading}
+                >
+                  {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                </button>
               </div>
+            </div>
+
+            <div className="flex items-center space-x-2">
+              <input
+                type="checkbox"
+                id="remember"
+                checked={rememberMe}
+                onChange={(e) => setRememberMe(e.target.checked)}
+                className="w-4 h-4 rounded border-gray-300"
+                disabled={loading}
+              />
+              <Label htmlFor="remember" className="text-sm cursor-pointer">
+                Remember me
+              </Label>
             </div>
 
             <Button type="submit" className="w-full" disabled={loading}>
               {loading ? 'Signing in...' : 'Sign In'}
             </Button>
           </form>
-
-          <div className="mt-6">
-            <div className="relative">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-border" />
-              </div>
-              <div className="relative flex justify-center text-sm">
-                <span className="px-2 bg-card text-muted-foreground">Or continue with</span>
-              </div>
-            </div>
-
-            <div className="mt-6 grid grid-cols-2 gap-3">
-              <Button variant="outline" type="button" disabled>
-                Google
-              </Button>
-              <Button variant="outline" type="button" disabled>
-                <Github className="w-5 h-5 mr-2" />
-                GitHub
-              </Button>
-            </div>
-          </div>
 
           <p className="mt-8 text-center text-sm text-muted-foreground">
             Don't have an account?{' '}
