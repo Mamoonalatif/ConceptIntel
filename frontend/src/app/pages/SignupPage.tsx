@@ -4,7 +4,7 @@ import { Button } from '../components/ui/button';
 import { Card } from '../components/ui/card';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
-import { Brain, Mail, Lock, User, Github } from 'lucide-react';
+import { Brain, Mail, Lock, User, Eye, EyeOff } from 'lucide-react';
 import { useState } from 'react';
 import { RadioGroup, RadioGroupItem } from '../components/ui/radio-group';
 import { toast } from 'sonner';
@@ -17,21 +17,75 @@ export function SignupPage() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [role, setRole] = useState<AuthRole>('student');
+  const [rememberMe, setRememberMe] = useState(true);
   const [loading, setLoading] = useState(false);
 
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Name validation only for students
+    if (role === 'student') {
+      const nameRegex = /^[a-zA-Z\s]+$/;
+      if (!nameRegex.test(name)) {
+        toast.error('Name can only contain letters and spaces');
+        return;
+      }
+    }
+
+    // Password validation
+    const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*])[A-Za-z\d!@#$%^&*]{8,}$/;
+    if (!passwordRegex.test(password)) {
+      toast.error('Password must be at least 8 characters with uppercase, lowercase, number, and special character (!@#$%^&*)');
+      return;
+    }
+
+    // Confirm password validation
+    if (password !== confirmPassword) {
+      toast.error('Passwords do not match');
+      return;
+    }
+
     setLoading(true);
     try {
-      const dashboardPath = await register({
-        full_name: name,
-        email,
-        password,
-        role,
-      });
-      toast.success('Account created successfully!');
-      navigate(dashboardPath, { replace: true });
+      if (role === 'teacher') {
+        // Teacher password setup flow
+        const API_BASE = import.meta.env.VITE_API_URL ?? '/api';
+        const res = await fetch(`${API_BASE}/auth/teacher/setup-password`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password }),
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+          const detail = data.detail;
+          let message = 'Setup failed';
+          if (typeof detail === 'string') {
+            message = detail;
+          }
+          throw new Error(message);
+        }
+
+        // Store token and redirect
+        localStorage.setItem('conceptintel_token', data.access_token);
+        toast.success('Password set up successfully!');
+        navigate('/teacher/dashboard', { replace: true });
+      } else {
+        // Student registration flow
+        const dashboardPath = await register({
+          full_name: name,
+          email,
+          password,
+          role: 'student',
+        }, rememberMe);
+        toast.success('Account created successfully!');
+        navigate(dashboardPath, { replace: true });
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Registration failed');
     } finally {
@@ -69,64 +123,11 @@ export function SignupPage() {
 
           <form onSubmit={handleSignup} className="space-y-6">
             <div className="space-y-2">
-              <Label htmlFor="name">Full Name</Label>
-              <div className="relative">
-                <User className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
-                <Input
-                  id="name"
-                  type="text"
-                  placeholder="John Doe"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  className="pl-10"
-                  required
-                  disabled={loading}
-                />
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
-              <div className="relative">
-                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
-                <Input
-                  id="email"
-                  type="email"
-                  placeholder="student@university.edu"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="pl-10"
-                  required
-                  disabled={loading}
-                />
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
-              <div className="relative">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
-                <Input
-                  id="password"
-                  type="password"
-                  placeholder="••••••••"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="pl-10"
-                  required
-                  minLength={8}
-                  disabled={loading}
-                />
-              </div>
-              <p className="text-xs text-muted-foreground">Minimum 8 characters</p>
-            </div>
-
-            <div className="space-y-3">
-              <Label>Select Your Role</Label>
+              <Label htmlFor="role">I am a</Label>
               <RadioGroup
                 value={role}
                 onValueChange={(value) => setRole(value as AuthRole)}
-                className="grid grid-cols-3 gap-3"
+                className="grid grid-cols-2 gap-3"
               >
                 <div>
                   <RadioGroupItem value="student" id="student" className="peer sr-only" />
@@ -146,43 +147,118 @@ export function SignupPage() {
                     <span className="text-sm font-medium">Teacher</span>
                   </Label>
                 </div>
-                <div>
-                  <RadioGroupItem value="admin" id="admin" className="peer sr-only" />
-                  <Label
-                    htmlFor="admin"
-                    className="flex flex-col items-center justify-center rounded-xl border-2 border-muted bg-transparent p-4 hover:bg-accent hover:text-accent-foreground peer-data-[state=checked]:border-primary peer-data-[state=checked]:bg-primary/5 cursor-pointer transition-all"
-                  >
-                    <span className="text-sm font-medium">Admin</span>
-                  </Label>
-                </div>
               </RadioGroup>
+            </div>
+
+            {role === 'student' && (
+              <div className="space-y-2">
+                <Label htmlFor="name">Full Name</Label>
+                <div className="relative">
+                  <User className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
+                  <Input
+                    id="name"
+                    type="text"
+                    placeholder="John Doe"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    className="pl-10"
+                    required
+                    disabled={loading}
+                    pattern="[a-zA-Z\s]+"
+                    title="Name can only contain letters and spaces"
+                  />
+                </div>
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <Label htmlFor="email">Email</Label>
+              <div className="relative">
+                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
+                <Input
+                  id="email"
+                  type="email"
+                  placeholder={role === 'teacher' ? 'Teacher email provided by admin' : 'student@university.edu'}
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="pl-10"
+                  required
+                  disabled={loading}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="password">Password</Label>
+              <div className="relative">
+                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
+                <Input
+                  id="password"
+                  type={showPassword ? 'text' : 'password'}
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="pl-10 pr-10"
+                  required
+                  minLength={8}
+                  disabled={loading}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  disabled={loading}
+                >
+                  {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                </button>
+              </div>
+              <p className="text-xs text-muted-foreground">8+ chars with uppercase, lowercase, number, and special char (!@#$%^&*)</p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="confirmPassword">Confirm Password</Label>
+              <div className="relative">
+                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
+                <Input
+                  id="confirmPassword"
+                  type={showConfirmPassword ? 'text' : 'password'}
+                  placeholder="••••••••"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  className="pl-10 pr-10"
+                  required
+                  minLength={8}
+                  disabled={loading}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  disabled={loading}
+                >
+                  {showConfirmPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                </button>
+              </div>
+            </div>
+
+            <div className="flex items-center space-x-2">
+              <input
+                type="checkbox"
+                id="remember"
+                checked={rememberMe}
+                onChange={(e) => setRememberMe(e.target.checked)}
+                className="w-4 h-4 rounded border-gray-300"
+                disabled={loading}
+              />
+              <Label htmlFor="remember" className="text-sm cursor-pointer">
+                Remember me
+              </Label>
             </div>
 
             <Button type="submit" className="w-full" disabled={loading}>
               {loading ? 'Creating account...' : 'Create Account'}
             </Button>
           </form>
-
-          <div className="mt-6">
-            <div className="relative">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-border" />
-              </div>
-              <div className="relative flex justify-center text-sm">
-                <span className="px-2 bg-card text-muted-foreground">Or continue with</span>
-              </div>
-            </div>
-
-            <div className="mt-6 grid grid-cols-2 gap-3">
-              <Button variant="outline" type="button" disabled>
-                Google
-              </Button>
-              <Button variant="outline" type="button" disabled>
-                <Github className="w-5 h-5 mr-2" />
-                GitHub
-              </Button>
-            </div>
-          </div>
 
           <p className="mt-8 text-center text-sm text-muted-foreground">
             Already have an account?{' '}
