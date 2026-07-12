@@ -1,0 +1,274 @@
+AIR UNIVERSITY, ISLAMABAD
+Faculty of Computing & Artificial Intelligence
+FYP Proposal
+ConceptIntel: A Knowledge Graph-Based Concept Intelligence Platform for Teachers and Students Submitted By: 231662 Mamoona 231627 Laiba 231568 Muhammad Kashif
+Supervisor: Dr. Sumaira Farid
+Program: BS Computer Science Semester: Spring 2026
+
+Supervisor Meeting Log
+
+Page |1
+
+Page |2
+Table of Contents
+1. Introduction.............................................................................................................................. 4 2. Related System Analysis ......................................................................................................... 4 3. Problem Statement ................................................................................................................... 5 4. Problem Solution / Proposed Solution ..................................................................................... 5 5. Objectives ................................................................................................................................ 6 6. Scope........................................................................................................................................ 6 7. Modules ................................................................................................................................... 7
+7.1. User Authentication Module ....................................................................................................... 7 7.2. Course Management Module....................................................................................................... 7 7.3. Enrollment Module...................................................................................................................... 8 7.4. Content Upload Module .............................................................................................................. 8 7.5. Knowledge Graph Module .......................................................................................................... 8 7.6. Content Generation Module ........................................................................................................ 9 7.7. Teacher Supervision Module....................................................................................................... 9 7.8. Assignment Evaluation Module .................................................................................................. 9 7.9. Adaptive Engine ........................................................................................................................ 10 7.10. Analytics Dashboard............................................................................................................. 10 7.11. Gamification Module ............................................................................................................ 10 7.12. Notification Module.............................................................................................................. 11 System Workflow: ................................................................................................................................. 11
+8. System Limitations / Constraints ........................................................................................... 12 9. Data Gathering Approach ...................................................................................................... 12 10. Tools and Technologies ......................................................................................................... 13 11. Project Stakeholders and Roles.............................................................................................. 13 12. Module based work division.................................................................................................. 14 13. Gantt chart ............................................................................................................................. 14 14. Mockups ................................................................................................................................ 15 15. References.............................................................................................................................. 17
+
+Page |3
+Table of Figures
+Figure 1 - system architecture.......................................................................................................... 12 Figure 2 - Gantt Chart ...................................................................................................................... 14 Figure 3 - Knowledge graph page.................................................................................................... 15 Figure 4 - Assignment evaluation page ........................................................................................... 15 Figure 5 - teacher dashboard page ................................................................................................... 16 Figure 6 - Student dashboard page................................................................................................... 16
+Table of Tables
+Table 1 - related system summary ..................................................................................................... 4 Table 2 - tools and technologies ...................................................................................................... 13 Table 3 - module based work division among members ................................................................. 14
+
+Page |4
+1. Introduction
+Digital learning platforms are widely used in universities, but most focus on managing courses, distributing content, and recording grades. They function as administrative tools rather than intelligent learning systems and do not analyze how knowledge is structured or how students develop conceptual understanding. As a result, students often progress through courses without fully mastering prerequisite concepts. Teachers also face difficulty identifying which concepts students struggle with, as traditional systems provide only overall scores. AI tools may answer questions, but they are often disconnected from the curriculum and cannot provide structured guidance.
+To address this gap, ConceptIntel is an AI-powered concept intelligence platform supporting both teachers and students. It organizes course content as interconnected concepts in a knowledge graph, provides adaptive learning paths for students using Agentic AI to observe, analyze, plan, and act on learning needs, and generates personalized learning materials such as flashcards, study guides, and quizzes using Generative AI. The system also checks assignments in and provides explainable feedback, helping students identify gaps while allowing teachers to review, edit, and approve all AI-generated outputs for transparency.
+
+2. Related System Analysis
+Table 1 - related system summary
+
+Application
+
+Limitation
+
+Proposed System (ConceptIntel)
+
+Google Classroom
+
+Supports assignments but lacks adaptive learning insights.
+
+Tracks concept mastery and generates quizzes.
+
+Coursera
+
+Static learning paths with limited course customization.
+
+Creates dynamic knowledge graphs and adaptive paths.
+
+Khan Academy
+
+Uses predefined content; teachers cannot create concept graphs.
+
+Extracts concepts from uploaded materials automatically.
+
+Duolingo
+
+Mainly for language learning with fixed skill tree.
+
+Supports any subject using flexible concept graphs.
+
+Socratic
+
+Gives quick answers but does not track progress.
+
+Tracks concept-level progress and recommendations.
+
+Page |5
+
+ChatGPT Edkasa
+
+Explains topics but not linked to course progress.
+
+Connects AI with course content and analytics.
+
+Provides recorded lecs, prep but limited concept-level AI analysis.
+
+Uses knowledge graphs and adaptive learning to analyze conceptual understanding.
+
+3. Problem Statement
+Most digital learning platforms used in universities primarily focus on administrative tasks such as course management, content distribution, and grading. While these systems make it easier to deliver educational material, they provide very limited insight into how students actually understand and connect the underlying concepts of a subject. As a result, students often progress through courses without fully mastering prerequisite concepts, which leads to fragmented knowledge and cumulative learning gaps. Teachers also face difficulty identifying exactly which concepts students struggle with, since most platforms only provide overall grades rather than detailed concept-level analysis. Although modern AI tools can generate explanations, they are usually disconnected from the course curriculum and do not track student learning progress. Therefore, there is a need for an intelligent system that organizes educational content into interconnected concepts, tracks concept mastery, and provides adaptive guidance to improve both teaching and learning outcomes.
+4. Problem Solution / Proposed Solution
+ConceptIntel is an AI-powered concept intelligence platform that supports both students and teachers. It organizes course content into a knowledge graph, mapping concepts and their prerequisite relationships, allowing teachers to review, edit, and supervise curriculum structure. For students, the system leverages Agentic AI to provide adaptive learning paths, while Generative AI creates personalized learning materials based on concept mastery. It also checks assignments in soft form and provides explainable feedback, helping students understand exactly where they have gaps. Teachers can supervise all AI-generated content, approve outputs, and guide regeneration of materials when needed. By combining conceptlevel intelligence, adaptive learning, assignment feedback, and teacher oversight, The platform enhances student learning outcomes while enabling instructors to optimize instruction efficiently.
+
+Page |6
+5. Objectives
+The objectives of the proposed system include:
+· Develop a web-based AI platform supporting both students and teachers. · Extract key concepts from course materials and organize them into a knowledge
+graph. · Track concept-level mastery for students. · Generate adaptive learning materials including flashcards, study guides, quizzes, and
+assignments in soft form with explainable feedback. · Provide teachers with actionable insights into learning gaps, bottlenecks, and student
+progress. · Enable teacher supervision and approval of all AI-generated content, assignments,
+and adaptive recommendations. · Reinforce weak concepts using personalized guidance and gamified exercises. · Support continuous content improvement through feedback-driven regeneration.
+6. Scope
+The scope of ConceptIntel is to develop a prototype web-based learning system supporting both students and teachers across three selected subjects: Applied Physics, Digital Logic Design, and Calculus & Analytical Geometry. Applied Physics is considered a prerequisite for Digital Logic Design to demonstrate prerequisite-based concept relationships.
+Teachers can upload course materials such as slides, PDFs, textbooks, CLOs, PLOs, reference books, and HEC course outlines. If complete course content is not available, the system can generate an initial concept structure using outlines and reference materials. The system extracts concepts from uploaded materials and organizes them into a knowledge graph. Teachers can review, edit, and supervise the knowledge graph to monitor curriculum structure and student learning gaps.
+Students follow adaptive learning paths using personalized quizzes, study guides, flashcards, and assignments in soft form (Word/PDF). Assignments include explainable feedback to highlight learning gaps, while teachers can review and validate AI-generated outputs.
+
+Page |7
+The knowledge graph will be shared among teachers teaching the same course to maintain curriculum alignment. The system will also store knowledge graphs and learning resources so that future instructors can reuse existing course knowledge, preserving organizational knowledge. The system tracks progress at the concept level, reinforces weak concepts, and provides analytics and actionable insights for instructors. The project focuses on prototype implementation rather than full-scale deployment.
+7. Modules
+The proposed system will be implemented through a set of integrated modules that support course creation, concept intelligence, adaptive learning, and intelligent analytics.
+7.1. User Authentication Module
+Functions: · Sign up, login, and role-based access for students, teachers, and admins. · Manage user profiles and permissions. · Ensure secure authentication and session handling.
+Input: User email, password, role Output: Authenticated session and role-based access
+7.2. Course Management Module
+Functions: · Create, edit, or delete courses with metadata (name, subject, semester, prerequisites). · Schedule courses by defining start/end dates for lessons, quizzes, and assignments. · Change course status (Draft / Open / Closed).
+Input: Course name, subject, semester, prerequisites Output: Course created with unique course ID
+
+Page |8
+7.3. Enrollment Module
+Functions: · Generate course enrollment code. · Students can join courses using the code. · Ensure prerequisites are satisfied before enrollment. · Manage enrolled students list.
+Input: Enrollment code, student ID Output: Student enrolled in course
+7.4. Content Upload Module
+Functions: · Upload slides, PDFs, textbooks, CLOs, PLOs, reference books, and HEC outlines. · If full content is not available, the system can generate initial concepts from outlines or reference books. · Extract key concepts and learning objectives using Generative AI. · Validate content format and quality before processing.
+Input: Slides, PDFs, textbooks, CLOs, HEC outlines Output: Extracted text/content stored for AI processing
+7.5. Knowledge Graph Module
+Functions: · Build and visualize knowledge graph with concept dependencies. · Allow teachers to edit concept relationships. · Highlight prerequisite concepts for adaptive learning paths. · Shared knowledge graph for teachers teaching the same course.
+
+Page |9
+Input: Extracted concepts from course content or outlines Output: Concept nodes and prerequisite relationships stored in graph database
+7.6. Content Generation Module
+Functions: · Generate MCQs, flashcards, study guides, slides, case study examples, quizzes, and assignments using Generative AI. · Generate content based on concept nodes from the knowledge graph.
+Input: Concept nodes from knowledge graph Output: AI-generated quizzes, flashcards, study guides, assignments
+7.7. Teacher Supervision Module
+Functions: · Review, modify, and approve AI-generated content and assignments. · Ensure content accuracy and alignment with curriculum. · Track supervision actions for auditing and improvement.
+Input: AI-generated learning materials Output: Teacher-approved and validated content
+7.8. Assignment Evaluation Module
+Functions: · Evaluate Word/PDF assignments at concept level. · Detect misconceptions and similar assignments. · Provide explainable feedback on knowledge gaps.
+Input: Student assignment (PDF/Word) Output: Concept-level feedback and evaluation score
+
+7.9. Adaptive Engine
+Functions: · Observe, analyze, plan, and act on student learning (OAPA loop). · Personalize learning paths for each student. · Reinforce weak concepts using revision plans and gamified exercises.
+Input: Student quiz results and mastery data Output: Personalized learning path and revision recommendations
+7.10. Analytics Dashboard
+Functions: · Display concept-level mastery heatmaps. · Track student progress and identify learning bottlenecks. · Provide insights to teachers.
+Input: Student progress and mastery data Output: Concept mastery analytics and learning insights
+7.11. Gamification Module
+Functions: · Integrate mini-games linked to concept nodes. · Adapt difficulty based on student mastery. · Encourage engagement through rewards and challenges.
+Input: Student concept mastery level Output: Rewards, badges, and concept-based challenges
+
+P a g e | 10
+
+7.12. Notification Module
+Functions: · Send course announcements to students. · Alerts for new content, quizzes, assignments, and feedback.
+Input: System events (new quiz, assignment, feedback) Output: Alerts and notifications for students and teachers
+System Workflow:
+The system operates through the following workflow: 1. User logs in to the system through the authentication module. 2. Teacher creates a course and defines prerequisites. 3. Students enroll in the course using an enrollment code. 4. Teacher uploads course content or outlines. 5. System extracts concepts and builds the knowledge graph. 6. System generates quizzes, flashcards, study material, and assignments. 7. Teacher reviews and approves AI-generated content. 8. Students attempt quizzes and submit assignments. 9. System evaluates assignments and identifies concept-level weaknesses. 10. Adaptive engine updates personalized learning paths. 11. Analytics dashboard shows student progress and concept mastery. 12. System sends notifications and updates to users.
+
+P a g e | 11
+
+P a g e | 12
+Figure 1 - system architecture
+8. System Limitations / Constraints
+1. AI-based concept extraction may not always identify concepts perfectly and may require teacher adjustments
+2. The system focuses on prototype functionality rather than full-scale deployment 3. Large-scale real-time adaptation may require more computational resources 4. The system relies on the quality of uploaded educational materials
+9. Data Gathering Approach
+Data for the system will primarily consist of educational materials such as lecture slides, textbooks, and course outlines. These materials will be processed using AI techniques to extract conceptual information. Additionally, user interaction data such as quiz responses and learning progress will be collected to analyze conceptual understanding. Guidance from academic supervisors and analysis of existing digital learning systems will also contribute to the system design.
+
+P a g e | 13
+
+10. Tools and Technologies
+Table 2 - tools and technologies
+
+Tool / Technology
+
+Keywords / Use
+
+React
+
+Frontend, UI, responsive, components
+
+FastAPI
+
+Backend, API, REST, Python
+
+PostgreSQL / Supabase
+
+Auth, PostgreSQL, object storage, online ,Relational DB, structured data
+
+Neo4j
+
+Graph DB, knowledge graph, concepts
+
+OpenAI Models (GPT-5 mini, GPT-5 nano)
+
+AI content generation, assignment feedback, adaptive learning
+
+Langfuse
+
+LLM tracing, prompt management, model management
+
+Sentry
+
+Error monitoring, bug tracking
+
+Apache Airflow
+
+Job scheduling, batch tasks, pipelines
+
+11. Project Stakeholders and Roles
+Project Sponsor: Air University Islamabad
+Stakeholders:
+· Students (system users) · Teachers (course creators and supervisors) · Project Supervisor · Final Year Project Evaluation Committee
+
+P a g e | 14
+
+12. Module based work division
+Table 3 - module based work division among members
+
+Team Member
+
+Assigned Modules
+
+Key Responsibilities
+
+Mamoona
+
+User Management, Content Upload, Content Generation, Notification
+
+Implement authentication, manage content uploads, develop AI content generation, and notifications.
+
+Laiba
+
+Course Management, Knowledge Graph, Analytics Dashboard, Gamification
+
+Develop course management system, build knowledge graph, implement analytics, and gamified
+learning.
+
+Muhammad Kashif
+
+Enrollment, Teacher Supervision, Assignment Evaluation, Adaptive
+Engine
+
+Implement enrollment system, AI supervision workflow, assignment evaluation, and adaptive
+learning engine.
+
+13. Gantt chart
+
+Figure 2 - Gantt Chart
+
+14. Mockups
+Knowledge Graph Page
+Edit graph
+
+P a g e | 15
+
+Figure 3 - Knowledge graph page Description: Teachers interact with the concept knowledge graph, showing prerequisites and mastery levels.
+Assignment evaluation Page
+
+Figure 4 - Assignment evaluation page
+Description: Students submit assignments; AI feedback is displayed, and teachers can review or approve outputs.
+
+Teacher Dashboard Page
+
+P a g e | 16
+
+Figure 5 - teacher dashboard page Description: Teachers monitor student progress and manage courses and assignments.
+Student Dashboard Page
+
+Figure 6 - Student dashboard page
+Description: Students view enrolled courses, track concept mastery, receive notifications, and access assignments/quizzes.
+
+P a g e | 17
+15. References
+1. Q. Wang, Z. Mao, B. Wang and L. Guo, "Knowledge Graph Embedding: A Survey
+of Approaches and Applications," IEEE Transactions on Knowledge and Data Engineering, vol. 29, no. 12, pp. 2724­2743, Dec. 2017. https://doi.org/10.1109/TKDE.2017.2754499
+2. B. P. Woolf, Building Intelligent Interactive Tutors. Morgan Kaufmann, 2009.
+(Foundational work on adaptive learning & intelligent tutoring systems)
+3. F. Doshi-Velez and B. Kim, "Towards A Rigorous Science of Interpretable
+Machine Learning," arXiv:1702.08608, 2017. https://arxiv.org/abs/1702.08608
+4. Kavitha Ganesan and L. Raj, "Educational Data Mining and Learning Analytics,"
+arXiv, June 2017. https://arxiv.org/abs/1706.03327
+
+
