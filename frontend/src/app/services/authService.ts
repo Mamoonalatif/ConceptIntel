@@ -30,15 +30,23 @@ const TOKEN_KEY = 'conceptintel_token';
 const API_BASE = import.meta.env.VITE_API_URL ?? '/api';
 
 export function getStoredToken(): string | null {
-  return localStorage.getItem(TOKEN_KEY);
+  // Check localStorage first (remember me), then sessionStorage
+  return localStorage.getItem(TOKEN_KEY) || sessionStorage.getItem(TOKEN_KEY);
 }
 
-export function setStoredToken(token: string): void {
-  localStorage.setItem(TOKEN_KEY, token);
+export function setStoredToken(token: string, rememberMe: boolean = true): void {
+  if (rememberMe) {
+    localStorage.setItem(TOKEN_KEY, token);
+    sessionStorage.removeItem(TOKEN_KEY);
+  } else {
+    sessionStorage.setItem(TOKEN_KEY, token);
+    localStorage.removeItem(TOKEN_KEY);
+  }
 }
 
 export function clearStoredToken(): void {
   localStorage.removeItem(TOKEN_KEY);
+  sessionStorage.removeItem(TOKEN_KEY);
 }
 
 export function authHeaders(): HeadersInit {
@@ -62,25 +70,25 @@ async function handleResponse<T>(res: Response): Promise<T> {
 }
 
 export const authService = {
-  async register(payload: RegisterPayload): Promise<AuthResponse> {
+  async register(payload: RegisterPayload, rememberMe: boolean = true): Promise<AuthResponse> {
     const res = await fetch(`${API_BASE}/auth/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
     const data = await handleResponse<AuthResponse>(res);
-    setStoredToken(data.access_token);
+    setStoredToken(data.access_token, rememberMe);
     return data;
   },
 
-  async login(payload: LoginPayload): Promise<AuthResponse> {
+  async login(payload: LoginPayload, rememberMe: boolean = true): Promise<AuthResponse> {
     const res = await fetch(`${API_BASE}/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
     const data = await handleResponse<AuthResponse>(res);
-    setStoredToken(data.access_token);
+    setStoredToken(data.access_token, rememberMe);
     return data;
   },
 
