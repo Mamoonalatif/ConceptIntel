@@ -8,6 +8,7 @@ import { Brain, Mail, Lock, User, Eye, EyeOff } from 'lucide-react';
 import { useState } from 'react';
 import { RadioGroup, RadioGroupItem } from '../components/ui/radio-group';
 import { toast } from 'sonner';
+import { PasswordRequirements } from '../components/auth/PasswordRequirements';
 import { useAuth } from '../context/AuthContext';
 import type { AuthRole } from '../services/authService';
 
@@ -200,7 +201,6 @@ export function SignupPage() {
                   onChange={(e) => setPassword(e.target.value)}
                   className="pl-10 pr-10"
                   required
-                  minLength={8}
                   disabled={loading}
                 />
                 <button
@@ -212,7 +212,7 @@ export function SignupPage() {
                   {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                 </button>
               </div>
-              <p className="text-xs text-muted-foreground">8+ chars with uppercase, lowercase, number, and special char (!@#$%^&*)</p>
+              <PasswordRequirements password={password} />
             </div>
 
             <div className="space-y-2">
