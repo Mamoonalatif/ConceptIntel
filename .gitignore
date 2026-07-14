@@ -1,0 +1,45 @@
+# --- Python / backend ---
+backend/.venv/
+backend/__pycache__/
+**/__pycache__/
+*.pyc
+backend/.pytest_cache/
+**/.pytest_cache/
+backend/test.db
+backend/test_upload.db
+backend/*.db
+backend/.env
+
+# --- Node / frontend ---
+frontend/node_modules/
+frontend/dist/
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# --- Local Claude Code session config (machine-specific, not project source) ---
+.claude/settings.local.json
+
+# --- Editor / OS ---
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# --- Logs ---
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# --- Uploaded course material artifacts (local dev storage) ---
+backend/uploads/
