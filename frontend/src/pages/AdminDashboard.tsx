@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { adminService } from '../services/api';
+import { ChangePasswordModal } from '../components/ChangePasswordModal';
 import {
   LogOut, User, Shield, Mail, CheckCircle2, XCircle, Plus, RefreshCw, Copy, Check,
-  ClipboardList, UserPlus, AlertCircle
+  ClipboardList, UserPlus, AlertCircle, Users, KeyRound
 } from 'lucide-react';
 
 interface TeacherRequest {
@@ -14,10 +15,26 @@ interface TeacherRequest {
   status: string;
 }
 
+type StaffRole = 'teacher' | 'program_coordinator' | 'course_coordinator';
+
+interface StaffMember {
+  id: number;
+  email: string;
+  full_name: string;
+  role: StaffRole;
+}
+
+const ROLE_LABELS: Record<StaffRole, string> = {
+  teacher: 'Teacher',
+  program_coordinator: 'Program Coordinator',
+  course_coordinator: 'Course Coordinator',
+};
+
 const FULL_NAME_PATTERN = /^[A-Za-z]+(?: [A-Za-z]+)*$/;
 
 const AdminDashboard: React.FC = () => {
   const { user, logout } = useAuth();
+  const [showChangePassword, setShowChangePassword] = useState(false);
 
   const [requests, setRequests] = useState<TeacherRequest[]>([]);
   const [loading, setLoading] = useState(true);
@@ -33,6 +50,23 @@ const AdminDashboard: React.FC = () => {
   const [nameError, setNameError] = useState('');
   const [creating, setCreating] = useState(false);
 
+  // Staff role management: promote/demote an existing teacher/coordinator
+  const [staff, setStaff] = useState<StaffMember[]>([]);
+  const [staffLoading, setStaffLoading] = useState(true);
+  const [changingRoleId, setChangingRoleId] = useState<number | null>(null);
+
+  const fetchStaff = async () => {
+    try {
+      setStaffLoading(true);
+      const data = await adminService.listStaff();
+      setStaff(data);
+    } catch (err: any) {
+      setError('Failed to fetch staff accounts. Verify API connection.');
+    } finally {
+      setStaffLoading(false);
+    }
+  };
+
   const fetchRequests = async () => {
     try {
       setLoading(true);
@@ -47,6 +81,7 @@ const AdminDashboard: React.FC = () => {
 
   useEffect(() => {
     fetchRequests();
+    fetchStaff();
   }, []);
 
   const handleApprove = async (id: number) => {
@@ -107,6 +142,19 @@ const AdminDashboard: React.FC = () => {
     }
   };
 
+  const handleChangeRole = async (staffId: number, role: StaffRole) => {
+    setChangingRoleId(staffId);
+    setError('');
+    try {
+      await adminService.changeStaffRole(staffId, role);
+      fetchStaff();
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Failed to change role');
+    } finally {
+      setChangingRoleId(null);
+    }
+  };
+
   const copyPassword = () => {
     if (!credentials) return;
     navigator.clipboard.writeText(credentials.temporary_password).then(() => {
@@ -140,6 +188,13 @@ const AdminDashboard: React.FC = () => {
               <User className="w-3.5 h-3.5 text-primary" />
               <span className="font-semibold text-primary text-xs">{user?.full_name}</span>
             </div>
+            <button
+              onClick={() => setShowChangePassword(true)}
+              className="p-2 text-text-muted hover:text-primary rounded-lg hover:bg-primary-muted border border-transparent hover:border-primary/20 transition-all"
+              title="Change Password"
+            >
+              <KeyRound className="w-4 h-4" />
+            </button>
             <button
               onClick={logout}
               id="admin-logout"
@@ -232,6 +287,56 @@ const AdminDashboard: React.FC = () => {
           </form>
         </div>
 
+        {/* Manage Staff Roles: promote/demote an existing teacher/coordinator */}
+        <div>
+          <div className="flex items-center gap-2 mb-4">
+            <Users className="w-4 h-4 text-primary" />
+            <h3 className="text-base font-bold text-text-primary">Manage Staff Roles</h3>
+          </div>
+          <p className="text-xs text-text-muted mb-4 max-w-2xl">
+            Program Coordinator and Course Coordinator are role changes on an existing account -
+            no new account or password is created. Pick a teacher/coordinator below and assign them a role.
+          </p>
+
+          {staffLoading ? (
+            <div className="glass-panel rounded-2xl p-8 border border-border text-center text-sm text-text-muted">
+              Loading staff...
+            </div>
+          ) : staff.length === 0 ? (
+            <div className="glass-panel rounded-2xl p-8 border border-border text-center text-sm text-text-muted">
+              No teacher/coordinator accounts yet. Create a teacher above, then promote them here.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {staff.map((member) => (
+                <div key={member.id} className="glass-panel rounded-2xl p-5 border border-border shadow-card flex items-center justify-between gap-4 flex-wrap">
+                  <div>
+                    <p className="font-bold text-text-primary">{member.full_name}</p>
+                    <p className="text-xs text-text-muted flex items-center gap-1 mt-0.5">
+                      <Mail className="w-3 h-3" /> {member.email}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs font-bold px-2.5 py-1 rounded-full border bg-primary-muted text-primary border-primary/20">
+                      {ROLE_LABELS[member.role]}
+                    </span>
+                    <select
+                      className="input-light text-xs py-1.5"
+                      value={member.role}
+                      disabled={changingRoleId === member.id}
+                      onChange={(e) => handleChangeRole(member.id, e.target.value as StaffRole)}
+                    >
+                      <option value="teacher">Teacher</option>
+                      <option value="program_coordinator">Program Coordinator</option>
+                      <option value="course_coordinator">Course Coordinator</option>
+                    </select>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
         {/* Teacher Requests */}
         <div>
           <div className="flex items-center gap-2 mb-4">
@@ -298,6 +403,8 @@ const AdminDashboard: React.FC = () => {
           )}
         </div>
       </main>
+
+      {showChangePassword && <ChangePasswordModal onClose={() => setShowChangePassword(false)} />}
     </div>
   );
 };

@@ -1,11 +1,25 @@
 import React, { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { GoogleSignInButton } from '../components/GoogleSignInButton';
+import { isValidEmail } from '../lib/validators';
 import { Brain, Lock, Mail, AlertCircle, Loader2, Sparkles, BookOpen, Network, Eye, EyeOff } from 'lucide-react';
+
+const dashboardPathForRole = (role: string) => {
+  if (role === 'admin') return '/admin';
+  if (role === 'teacher') return '/teacher';
+  if (role === 'program_coordinator') return '/program-coordinator';
+  if (role === 'course_coordinator') return '/course-coordinator';
+  return '/student';
+};
 
 const Login: React.FC = () => {
   const { login } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  // e.g. /login?redirect=/join/ABCD1234 - sends the user straight back to the join
+  // link they clicked instead of their default dashboard, after signing in.
+  const redirect = searchParams.get('redirect');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -13,19 +27,21 @@ const Login: React.FC = () => {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
+  const emailInvalid = email.length > 0 && !isValidEmail(email);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+
+    if (!isValidEmail(email)) {
+      setError('Enter a valid email address.');
+      return;
+    }
+
     setLoading(true);
     try {
       const data = await login({ email, password }, rememberMe);
-      if (data.role === 'admin') {
-        navigate('/admin');
-      } else if (data.role === 'teacher') {
-        navigate('/teacher');
-      } else {
-        navigate('/student');
-      }
+      navigate(redirect || dashboardPathForRole(data.role));
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Invalid email or password');
       setLoading(false);
@@ -111,19 +127,22 @@ const Login: React.FC = () => {
                   Email Address
                 </label>
                 <div className="relative">
-                  <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-text-muted">
-                    <Mail className="w-4.5 h-4.5" />
+                  <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-text-muted pointer-events-none">
+                    <Mail className="w-4 h-4" />
                   </span>
                   <input
                     id="email"
                     type="email"
                     required
-                    className="input-light pl-10"
+                    className={`input-light pl-10 ${emailInvalid ? 'input-error' : ''}`}
                     placeholder="you@university.edu"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                   />
                 </div>
+                {emailInvalid && (
+                  <p className="text-xs text-red-600 mt-1.5">Enter a valid email address</p>
+                )}
               </div>
 
               <div>
@@ -131,8 +150,8 @@ const Login: React.FC = () => {
                   Password
                 </label>
                 <div className="relative">
-                  <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-text-muted">
-                    <Lock className="w-4.5 h-4.5" />
+                  <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-text-muted pointer-events-none">
+                    <Lock className="w-4 h-4" />
                   </span>
                   <input
                     id="password"
@@ -184,6 +203,18 @@ const Login: React.FC = () => {
                 )}
               </button>
             </form>
+
+            <div className="flex items-center gap-3 my-6">
+              <div className="h-px flex-1 bg-border" />
+              <span className="text-xs font-medium text-text-muted">OR</span>
+              <div className="h-px flex-1 bg-border" />
+            </div>
+
+            <GoogleSignInButton
+              rememberMe={rememberMe}
+              onSuccess={(role) => navigate(redirect || dashboardPathForRole(role))}
+              onError={setError}
+            />
 
             <div className="mt-6 pt-6 border-t border-border text-center">
               <p className="text-sm text-text-secondary">

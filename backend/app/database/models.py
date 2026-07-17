@@ -7,10 +7,13 @@ class User(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String, unique=True, index=True, nullable=False)
-    hashed_password = Column(String, nullable=False)
+    # Nullable because Google-only accounts (see auth/routes.py google_login) have no password.
+    hashed_password = Column(String, nullable=True)
     full_name = Column(String, nullable=False)
     role = Column(String, nullable=False)  # "teacher", "student", or "admin"
     is_active = Column(Boolean, default=True, nullable=False)
+    # Google account identifier ("sub" claim), set the first time a user signs in with Google.
+    google_id = Column(String, unique=True, index=True, nullable=True)
     # Only meaningful for students; used for the optional semester-match enrollment check
     # (see enrollment/services.py). Nullable because teachers/admins don't have one and
     # older student rows may predate this field.
@@ -68,6 +71,10 @@ class Course(Base):
     # Catalog entry this course instance was created from
     catalog_id = Column(Integer, ForeignKey("course_catalog.id"), nullable=True)
     catalog_entry = relationship("CourseCatalog")
+
+    # Knowledge graph review state, set by a Course Coordinator - students may only
+    # view a course's knowledge graph once it is "Approved" (see knowledge_graph/routes.py).
+    graph_status = Column(String, default="Pending", nullable=False)  # "Pending", "Approved", "Rejected"
 
     # Self-referencing prerequisite course relationship. Derived server-side from the
     # catalog entry's prerequisite_catalog_id at creation time (see courses/routes.py) -

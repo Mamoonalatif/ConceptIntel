@@ -41,7 +41,8 @@ def seed_course_catalog():
         db.add(physics)
         db.flush()
 
-        dld = CourseCatalog(name="Digital Logic Design", code="DLD201")
+        # Digital Logic Design requires Applied Physics as a prerequisite.
+        dld = CourseCatalog(name="Digital Logic Design", code="DLD201", prerequisite_catalog_id=physics.id)
         db.add(dld)
         db.flush()
 

@@ -51,6 +51,24 @@ class UserLogin(BaseModel):
     password: str
 
 
+class ChangePasswordRequest(BaseModel):
+    """current_password is optional only because a Google-only account (no password
+    set yet) is allowed to set its first password without proving one it never had -
+    see auth/routes.py change_password."""
+    current_password: Optional[str] = None
+    new_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def check_new_password(cls, v: str) -> str:
+        return validate_password_strength(v)
+
+
+class GoogleAuthRequest(BaseModel):
+    """ID token returned by Google Identity Services on the frontend, verified server-side."""
+    id_token: str
+
+
 class UserResponse(BaseModel):
     id: int
     email: str
@@ -65,6 +83,20 @@ class UserResponse(BaseModel):
 class UserStatusUpdate(BaseModel):
     """Admin-only payload to suspend/reactivate a user account."""
     is_active: bool
+
+
+class StaffRoleUpdate(BaseModel):
+    """Admin-only payload to move an existing teacher/program-coordinator/
+    course-coordinator account between those three roles."""
+    role: str  # "teacher" | "program_coordinator" | "course_coordinator"
+
+    @field_validator("role")
+    @classmethod
+    def check_role(cls, v: str) -> str:
+        allowed = ("teacher", "program_coordinator", "course_coordinator")
+        if v not in allowed:
+            raise ValueError(f"role must be one of {allowed}")
+        return v
 
 
 class Token(BaseModel):

@@ -50,7 +50,12 @@ const EnrollmentCodeForm: React.FC<EnrollmentCodeFormProps> = ({ onEnrolled, onC
   const displayedError = clientError || serverError;
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setCode(e.target.value.toUpperCase());
+    // A pasted join link (e.g. https://app/join/ABCD1234) works here too - only the
+    // trailing code segment is kept, so students can paste either the code or the link.
+    const raw = e.target.value;
+    const linkMatch = raw.match(/\/join\/([A-Za-z0-9]+)\s*$/);
+    const value = linkMatch ? linkMatch[1] : raw;
+    setCode(value.toUpperCase());
     setServerError('');
     setPreview(null);
   };

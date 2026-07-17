@@ -3,10 +3,11 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { enrollmentService } from '../services/api';
 import EnrollmentCodeForm from '../components/EnrollmentCodeForm';
+import { ChangePasswordModal } from '../components/ChangePasswordModal';
 import {
   GraduationCap, LogOut, BookOpen, User, Hash, ArrowRight,
   Sparkles, CheckCircle, AlertCircle, Plus,
-  TrendingUp, Award, BarChart3, ChevronRight
+  TrendingUp, Award, BarChart3, ChevronRight, KeyRound
 } from 'lucide-react';
 
 interface EnrollmentDetail {
@@ -38,6 +39,7 @@ const getBannerGradient = (id: number) => BANNER_GRADIENTS[Math.abs(id) % BANNER
 const StudentDashboard: React.FC = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const [showChangePassword, setShowChangePassword] = useState(false);
 
   const [enrollments, setEnrollments] = useState<EnrollmentDetail[]>([]);
   const [loading, setLoading] = useState(true);
@@ -110,6 +112,13 @@ const StudentDashboard: React.FC = () => {
               <span className="font-semibold text-primary text-xs">{user?.full_name}</span>
             </div>
             <button
+              onClick={() => setShowChangePassword(true)}
+              className="p-2 text-text-muted hover:text-primary rounded-lg hover:bg-primary-muted border border-transparent hover:border-primary/20 transition-all"
+              title="Change Password"
+            >
+              <KeyRound className="w-4 h-4" />
+            </button>
+            <button
               onClick={logout}
               id="student-logout"
               className="p-2 text-text-muted hover:text-rose-500 rounded-lg hover:bg-rose-50 border border-transparent hover:border-rose-200 transition-all"
@@ -132,6 +141,8 @@ const StudentDashboard: React.FC = () => {
           </div>
         </div>
       )}
+
+      {showChangePassword && <ChangePasswordModal onClose={() => setShowChangePassword(false)} />}
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-8 relative z-10 flex flex-col lg:flex-row gap-6 items-start">
 

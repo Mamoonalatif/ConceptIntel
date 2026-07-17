@@ -2,9 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { courseService } from '../services/api';
+import { ChangePasswordModal } from '../components/ChangePasswordModal';
 import {
   Plus, LogOut, BookOpen, User, Hash, Users, ArrowRight, ShieldCheck,
-  Sparkles, RefreshCw, X, HelpCircle, BarChart3, Network, GraduationCap, FileText
+  Sparkles, RefreshCw, X, HelpCircle, BarChart3, Network, GraduationCap, FileText, KeyRound,
+  Check, Link as LinkIcon
 } from 'lucide-react';
 
 interface Course {
@@ -31,8 +33,10 @@ interface CatalogEntry {
   prerequisite_catalog_id: number | null;
 }
 
-const DESCRIPTION_MIN = 20;
-const DESCRIPTION_MAX = 100;
+const DESCRIPTION_MIN_WORDS = 5;
+const DESCRIPTION_MAX_WORDS = 250;
+const wordCount = (text: string) => (text.trim() ? text.trim().split(/\s+/).length : 0);
+const todayStr = () => new Date().toISOString().slice(0, 10);
 
 // Classroom-style banner palette — cycles through the app's existing brand
 // colors plus a few standard Tailwind accents, picked by course id so each
@@ -49,6 +53,8 @@ const getBannerGradient = (id: number) => BANNER_GRADIENTS[Math.abs(id) % BANNER
 const TeacherDashboard: React.FC = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const [showChangePassword, setShowChangePassword] = useState(false);
+  const [copiedCourseId, setCopiedCourseId] = useState<number | null>(null);
 
   const [courses, setCourses] = useState<Course[]>([]);
   const [catalog, setCatalog] = useState<CatalogEntry[]>([]);
@@ -110,28 +116,46 @@ const TeacherDashboard: React.FC = () => {
     ? catalog.find(c => c.id === selectedCatalogEntry.prerequisite_catalog_id)
     : null;
 
-  const validateForm = (): string | null => {
-    if (!catalogId) return 'Please select a course from the catalog.';
-    if (!enrollmentStart || !enrollmentEnd || !startDate || !endDate) return 'All dates are required.';
-    if (description.length < DESCRIPTION_MIN || description.length > DESCRIPTION_MAX) {
-      return `Description must be between ${DESCRIPTION_MIN} and ${DESCRIPTION_MAX} characters.`;
-    }
-    if (enrollmentStart >= enrollmentEnd) return 'Enrollment start must be before enrollment end.';
-    if (enrollmentEnd > startDate) return 'Enrollment end must be before or equal to the course start date.';
-    const today = new Date().toISOString().slice(0, 10);
-    if (startDate < today) return 'Course start date must not be in the past.';
-    if (endDate <= startDate) return 'Course end date must be after the start date.';
-    return null;
-  };
+  // Per-field, live-computed validation - recalculated every render from current
+  // field values, so each message appears the moment the relevant field changes
+  // rather than only after clicking Create Course.
+  const today = todayStr();
+  const descWordCount = wordCount(description);
+  const descriptionError = description && (descWordCount < DESCRIPTION_MIN_WORDS || descWordCount > DESCRIPTION_MAX_WORDS)
+    ? `Description must be between ${DESCRIPTION_MIN_WORDS} and ${DESCRIPTION_MAX_WORDS} words.`
+    : '';
+  const enrollmentStartError = enrollmentStart && enrollmentStart < today
+    ? 'Enrollment start must not be in the past.'
+    : '';
+  const enrollmentEndError = enrollmentEnd && enrollmentStart && enrollmentStart >= enrollmentEnd
+    ? 'Enrollment end must be after enrollment start.'
+    : enrollmentEnd && startDate && enrollmentEnd > startDate
+    ? 'Enrollment end must be on or before the course start date.'
+    : '';
+  const startDateError = startDate && startDate < today
+    ? 'Course start date must not be in the past.'
+    : '';
+  const endDateError = endDate && startDate && endDate <= startDate
+    ? 'Course end date must be after the course start date.'
+    : '';
+
+  const hasFieldErrors = Boolean(descriptionError || enrollmentStartError || enrollmentEndError || startDateError || endDateError);
 
   const handleCreateCourse = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setFormError('');
 
-    const validationError = validateForm();
-    if (validationError) {
-      setFormError(validationError);
+    if (!catalogId) {
+      setFormError('Please select a course from the catalog.');
+      return;
+    }
+    if (!enrollmentStart || !enrollmentEnd || !startDate || !endDate) {
+      setFormError('All dates are required.');
+      return;
+    }
+    if (hasFieldErrors) {
+      setFormError('Fix the errors below before creating the course.');
       return;
     }
 
@@ -158,6 +182,14 @@ const TeacherDashboard: React.FC = () => {
   };
 
   const totalOpen = courses.filter(c => c.status.toLowerCase() === 'open').length;
+
+  const copyJoinLink = (courseId: number, code: string) => {
+    const link = `${window.location.origin}/join/${code}`;
+    navigator.clipboard.writeText(link).then(() => {
+      setCopiedCourseId(courseId);
+      setTimeout(() => setCopiedCourseId(null), 2000);
+    });
+  };
 
   return (
     <div className="min-h-screen bg-background pb-16">
@@ -188,6 +220,13 @@ const TeacherDashboard: React.FC = () => {
               title="Create a new class"
             >
               <Plus className="w-5 h-5" />
+            </button>
+            <button
+              onClick={() => setShowChangePassword(true)}
+              className="p-2 text-text-muted hover:text-primary rounded-lg hover:bg-primary-muted border border-transparent hover:border-primary/20 transition-all"
+              title="Change Password"
+            >
+              <KeyRound className="w-4 h-4" />
             </button>
             <button
               onClick={logout}
@@ -349,21 +388,34 @@ const TeacherDashboard: React.FC = () => {
                         )}
                       </div>
 
-                      <div className="border-t border-border pt-3.5 flex items-center justify-between">
+                      <div className="border-t border-border pt-3.5 flex items-center justify-between gap-2">
                         <div>
                           <p className="text-[10px] text-text-muted uppercase tracking-wider font-medium">Join Code</p>
                           <p className="text-sm font-mono font-extrabold text-text-primary tracking-widest bg-background border border-border px-2 py-0.5 rounded-lg mt-0.5 select-all">
                             {course.enrollment_code}
                           </p>
                         </div>
-                        <button
-                          id={`manage-course-${course.id}`}
-                          onClick={(e) => { e.stopPropagation(); navigate(`/course/${course.id}`); }}
-                          className="flex items-center gap-1.5 text-xs font-bold text-primary hover:text-primary-hover transition-all"
-                        >
-                          <span>Manage</span>
-                          <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
-                        </button>
+                        <div className="flex items-center gap-3 shrink-0">
+                          <button
+                            onClick={(e) => { e.stopPropagation(); copyJoinLink(course.id, course.enrollment_code); }}
+                            className="flex items-center gap-1 text-xs font-bold text-text-secondary hover:text-primary transition-all"
+                            title="Copy a shareable join link for students"
+                          >
+                            {copiedCourseId === course.id ? (
+                              <><Check className="w-3.5 h-3.5 text-emerald-600" /> Copied</>
+                            ) : (
+                              <><LinkIcon className="w-3.5 h-3.5" /> Copy Link</>
+                            )}
+                          </button>
+                          <button
+                            id={`manage-course-${course.id}`}
+                            onClick={(e) => { e.stopPropagation(); navigate(`/course/${course.id}`); }}
+                            className="flex items-center gap-1.5 text-xs font-bold text-primary hover:text-primary-hover transition-all"
+                          >
+                            <span>Manage</span>
+                            <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -444,19 +496,19 @@ const TeacherDashboard: React.FC = () => {
               <div>
                 <label className="block text-sm font-semibold text-text-secondary mb-1.5 flex items-center justify-between">
                   <span className="flex items-center gap-1"><FileText className="w-3.5 h-3.5" /> Description *</span>
-                  <span className={`text-xs font-normal ${description.length < DESCRIPTION_MIN || description.length > DESCRIPTION_MAX ? 'text-rose-500' : 'text-emerald-600'}`}>
-                    {description.length}/{DESCRIPTION_MAX}
+                  <span className={`text-xs font-normal ${descriptionError ? 'text-rose-500' : 'text-emerald-600'}`}>
+                    {descWordCount}/{DESCRIPTION_MAX_WORDS} words
                   </span>
                 </label>
                 <textarea
                   required
-                  rows={3}
-                  maxLength={DESCRIPTION_MAX}
-                  placeholder="Briefly describe this course (20-100 characters)"
-                  className="input-light resize-none"
+                  rows={4}
+                  placeholder={`Briefly describe this course (${DESCRIPTION_MIN_WORDS}-${DESCRIPTION_MAX_WORDS} words)`}
+                  className={`input-light resize-none ${descriptionError ? 'input-error' : ''}`}
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                 />
+                {descriptionError && <p className="text-xs text-red-600 mt-1.5">{descriptionError}</p>}
               </div>
 
               <div className="grid grid-cols-2 gap-4">
@@ -465,20 +517,22 @@ const TeacherDashboard: React.FC = () => {
                   <input
                     type="date"
                     required
-                    className="input-light"
+                    className={`input-light ${enrollmentStartError ? 'input-error' : ''}`}
                     value={enrollmentStart}
                     onChange={(e) => setEnrollmentStart(e.target.value)}
                   />
+                  {enrollmentStartError && <p className="text-xs text-red-600 mt-1.5">{enrollmentStartError}</p>}
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-text-secondary mb-1.5">Enrollment End *</label>
                   <input
                     type="date"
                     required
-                    className="input-light"
+                    className={`input-light ${enrollmentEndError ? 'input-error' : ''}`}
                     value={enrollmentEnd}
                     onChange={(e) => setEnrollmentEnd(e.target.value)}
                   />
+                  {enrollmentEndError && <p className="text-xs text-red-600 mt-1.5">{enrollmentEndError}</p>}
                 </div>
               </div>
 
@@ -488,20 +542,22 @@ const TeacherDashboard: React.FC = () => {
                   <input
                     type="date"
                     required
-                    className="input-light"
+                    className={`input-light ${startDateError ? 'input-error' : ''}`}
                     value={startDate}
                     onChange={(e) => setStartDate(e.target.value)}
                   />
+                  {startDateError && <p className="text-xs text-red-600 mt-1.5">{startDateError}</p>}
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-text-secondary mb-1.5">Course End *</label>
                   <input
                     type="date"
                     required
-                    className="input-light"
+                    className={`input-light ${endDateError ? 'input-error' : ''}`}
                     value={endDate}
                     onChange={(e) => setEndDate(e.target.value)}
                   />
+                  {endDateError && <p className="text-xs text-red-600 mt-1.5">{endDateError}</p>}
                 </div>
               </div>
 
@@ -537,6 +593,8 @@ const TeacherDashboard: React.FC = () => {
           </div>
         </div>
       )}
+
+      {showChangePassword && <ChangePasswordModal onClose={() => setShowChangePassword(false)} />}
     </div>
   );
 };

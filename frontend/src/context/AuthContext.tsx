@@ -5,7 +5,7 @@ interface User {
   id: number;
   email: string;
   full_name: string;
-  role: 'teacher' | 'student' | 'admin';
+  role: 'teacher' | 'student' | 'admin' | 'program_coordinator' | 'course_coordinator';
 }
 
 interface AuthContextType {
@@ -13,6 +13,7 @@ interface AuthContextType {
   token: string | null;
   isLoading: boolean;
   login: (credentials: any, rememberMe?: boolean) => Promise<any>;
+  loginWithGoogle: (idToken: string, rememberMe?: boolean) => Promise<any>;
   register: (userData: any) => Promise<any>;
   logout: () => void;
 }
@@ -23,6 +24,17 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 // sessionStorage (cleared when the browser closes), depending on what was chosen at login.
 const getStoredToken = (): string | null =>
   localStorage.getItem('token') || sessionStorage.getItem('token');
+
+const storeToken = (accessToken: string, rememberMe: boolean) => {
+  // Clear both first so switching remember-me preference doesn't leave a stale copy
+  localStorage.removeItem('token');
+  sessionStorage.removeItem('token');
+  if (rememberMe) {
+    localStorage.setItem('token', accessToken);
+  } else {
+    sessionStorage.setItem('token', accessToken);
+  }
+};
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
@@ -51,14 +63,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setIsLoading(true);
     try {
       const data = await authService.login(credentials);
-      // Clear both first so switching remember-me preference doesn't leave a stale copy
-      localStorage.removeItem('token');
-      sessionStorage.removeItem('token');
-      if (rememberMe) {
-        localStorage.setItem('token', data.access_token);
-      } else {
-        sessionStorage.setItem('token', data.access_token);
-      }
+      storeToken(data.access_token, rememberMe);
+      setToken(data.access_token);
+      return data;
+    } catch (error) {
+      setIsLoading(false);
+      throw error;
+    }
+  };
+
+  const loginWithGoogle = async (idToken: string, rememberMe: boolean = false) => {
+    setIsLoading(true);
+    try {
+      const data = await authService.google(idToken);
+      storeToken(data.access_token, rememberMe);
       setToken(data.access_token);
       return data;
     } catch (error) {
@@ -88,7 +106,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, isLoading, login, register, logout }}>
+    <AuthContext.Provider value={{ user, token, isLoading, login, loginWithGoogle, register, logout }}>
       {children}
     </AuthContext.Provider>
   );

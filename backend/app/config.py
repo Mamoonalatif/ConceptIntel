@@ -19,6 +19,15 @@ class Settings:
     JWT_ALGORITHM: str = os.getenv("JWT_ALGORITHM", "HS256")
     ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "1440"))
 
+    # Google Sign-In (OAuth 2.0 client ID from Google Cloud Console, "Web application" type)
+    GOOGLE_CLIENT_ID: str = os.getenv("GOOGLE_CLIENT_ID", "")
+
+    # Outbound email (Gmail SMTP with an App Password - free, no third-party signup).
+    # Leave unset to skip email delivery; credentials are still shown in the API
+    # response either way, so nothing breaks if this isn't configured.
+    SMTP_EMAIL: str = os.getenv("SMTP_EMAIL", "")
+    SMTP_APP_PASSWORD: str = os.getenv("SMTP_APP_PASSWORD", "")
+
     # Neo4j Graph DB Configuration
 
     NEO4J_URI: str = os.getenv("NEO4J_URI", "bolt://localhost:7687")

@@ -31,6 +31,14 @@ class GraphResponse(BaseModel):
     edges: List[Any]
 
 
+class CourseGraphStatusResponse(BaseModel):
+    id: int
+    graph_status: str
+
+    class Config:
+        from_attributes = True
+
+
 class RelationshipCreate(BaseModel):
     course_id: int
     source_name: str

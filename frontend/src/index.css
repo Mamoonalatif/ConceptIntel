@@ -222,25 +222,40 @@
 /* ─────────────────────────────────────────────
    FORM INPUT OVERRIDES
 ───────────────────────────────────────────── */
-.input-light {
-  width: 100%;
-  background: #f8faff;
-  border: 1.5px solid #dde3f0;
-  border-radius: 10px;
-  padding: 0.6rem 1rem;
-  font-size: 0.875rem;
-  color: #0f172a;
-  transition: border-color 0.2s, box-shadow 0.2s;
-  outline: none;
-}
+@layer components {
+  /* Defined inside @layer components so Tailwind utilities (pl-10/pr-10 etc, which
+     compile into @layer utilities) win the cascade and can override this padding -
+     otherwise the icon overlaps the input text since both rules have equal
+     specificity and this one used to come later in the stylesheet. */
+  /* Google Classroom-style field: flat surface, 2px border, simple focus/error border swap -
+     matches the look already used by EnrollmentCodeForm's "Join class" dialog. */
+  .input-light {
+    width: 100%;
+    background: #f8faff;
+    border: 2px solid #dde3f0;
+    border-radius: 8px;
+    padding: 0.6rem 1rem;
+    font-size: 0.875rem;
+    color: #0f172a;
+    transition: border-color 0.2s;
+    outline: none;
+  }
 
-.input-light::placeholder {
-  color: #94a3b8;
-}
+  .input-light::placeholder {
+    color: #94a3b8;
+  }
 
-.input-light:focus {
-  border-color: #6366f1;
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.12);
+  .input-light:focus {
+    border-color: #0891b2;
+  }
+
+  .input-light.input-error {
+    border-color: #fca5a5;
+  }
+
+  .input-light.input-error:focus {
+    border-color: #ef4444;
+  }
 }
 
 /* ─────────────────────────────────────────────

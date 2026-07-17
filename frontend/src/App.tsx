@@ -10,19 +10,24 @@ import RequestTeacherAccess from './pages/RequestTeacherAccess';
 import TeacherDashboard from './pages/TeacherDashboard';
 import StudentDashboard from './pages/StudentDashboard';
 import AdminDashboard from './pages/AdminDashboard';
+import ProgramCoordinatorDashboard from './pages/ProgramCoordinatorDashboard';
+import CourseCoordinatorDashboard from './pages/CourseCoordinatorDashboard';
 import CourseDetail from './pages/CourseDetail';
 import KnowledgeGraph from './pages/KnowledgeGraph';
+import JoinCourse from './pages/JoinCourse';
 
 const queryClient = new QueryClient();
 
 const defaultDashboardFor = (role: string) => {
   if (role === 'admin') return '/admin';
   if (role === 'teacher') return '/teacher';
+  if (role === 'program_coordinator') return '/program-coordinator';
+  if (role === 'course_coordinator') return '/course-coordinator';
   return '/student';
 };
 
 // Route wrapper to check if user is authenticated
-const PrivateRoute: React.FC<{ children: React.ReactElement; requiredRole?: 'teacher' | 'student' | 'admin' }> = ({
+const PrivateRoute: React.FC<{ children: React.ReactElement; requiredRole?: 'teacher' | 'student' | 'admin' | 'program_coordinator' | 'course_coordinator' }> = ({
   children,
   requiredRole
 }) => {
@@ -74,6 +79,7 @@ const AppContent: React.FC = () => {
         <Route path="/login" element={<GuestRoute><Login /></GuestRoute>} />
         <Route path="/register" element={<GuestRoute><Register /></GuestRoute>} />
         <Route path="/request-teacher-access" element={<RequestTeacherAccess />} />
+        <Route path="/join/:code" element={<JoinCourse />} />
 
         {/* Teacher Protected Dashboard */}
         <Route
@@ -101,6 +107,26 @@ const AppContent: React.FC = () => {
           element={
             <PrivateRoute requiredRole="admin">
               <AdminDashboard />
+            </PrivateRoute>
+          }
+        />
+
+        {/* Program Coordinator Protected Dashboard */}
+        <Route
+          path="/program-coordinator"
+          element={
+            <PrivateRoute requiredRole="program_coordinator">
+              <ProgramCoordinatorDashboard />
+            </PrivateRoute>
+          }
+        />
+
+        {/* Course Coordinator Protected Dashboard */}
+        <Route
+          path="/course-coordinator"
+          element={
+            <PrivateRoute requiredRole="course_coordinator">
+              <CourseCoordinatorDashboard />
             </PrivateRoute>
           }
         />

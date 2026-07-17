@@ -1,22 +1,19 @@
 import React, { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { GoogleSignInButton } from '../components/GoogleSignInButton';
+import { PasswordChecklist, isPasswordValid } from '../components/PasswordChecklist';
+import { isValidEmail } from '../lib/validators';
 import { Brain, Lock, Mail, User, AlertCircle, Loader2, Eye, EyeOff, CheckCircle2, XCircle } from 'lucide-react';
 
 const FULL_NAME_PATTERN = /^[A-Za-z]+(?: [A-Za-z]+)*$/;
-const SPECIAL_CHARS = '!@#$%^&*';
-
-const passwordChecks = (password: string) => ({
-  length: password.length >= 8,
-  upper: /[A-Z]/.test(password),
-  lower: /[a-z]/.test(password),
-  digit: /[0-9]/.test(password),
-  special: [...password].some((ch) => SPECIAL_CHARS.includes(ch)),
-});
+const ILLEGAL_NAME_CHAR_PATTERN = /[^A-Za-z ]/;
 
 const Register: React.FC = () => {
   const { register } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const redirect = searchParams.get('redirect');
 
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
@@ -25,12 +22,16 @@ const Register: React.FC = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [fullNameError, setFullNameError] = useState('');
-  const [confirmError, setConfirmError] = useState('');
+  const [passwordFocused, setPasswordFocused] = useState(false);
+  const [confirmTouched, setConfirmTouched] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const checks = passwordChecks(password);
-  const passwordValid = Object.values(checks).every(Boolean);
+  // Live (per-keystroke) match check, not just on blur - mismatch shows red the
+  // moment it happens, and clears the moment the two fields agree again.
+  const confirmMismatch = confirmTouched && confirmPassword.length > 0 && confirmPassword !== password;
+  const confirmMatches = confirmPassword.length > 0 && confirmPassword === password;
+  const emailInvalid = email.length > 0 && !isValidEmail(email);
 
   const validateFullName = (value: string) => {
     if (!value.trim()) {
@@ -47,7 +48,12 @@ const Register: React.FC = () => {
 
   const handleFullNameChange = (value: string) => {
     setFullName(value);
-    if (fullNameError) validateFullName(value);
+    // Digits/symbols are invalid the instant they're typed - no need to wait for blur.
+    if (ILLEGAL_NAME_CHAR_PATTERN.test(value)) {
+      setFullNameError('Only letters and spaces are allowed (no digits or symbols)');
+    } else if (fullNameError) {
+      validateFullName(value);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -57,21 +63,25 @@ const Register: React.FC = () => {
     const isNameValid = validateFullName(fullName);
     if (!isNameValid) return;
 
-    if (!passwordValid) {
+    if (!isValidEmail(email)) {
+      setError('Enter a valid email address.');
+      return;
+    }
+
+    if (!isPasswordValid(password)) {
       setError('Password does not meet the requirements below.');
       return;
     }
 
+    setConfirmTouched(true);
     if (password !== confirmPassword) {
-      setConfirmError('Passwords do not match');
       return;
     }
-    setConfirmError('');
 
     setLoading(true);
     try {
       await register({ email, password, full_name: fullName.trim(), role: 'student' });
-      navigate('/login');
+      navigate(redirect ? `/login?redirect=${encodeURIComponent(redirect)}` : '/login');
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Registration failed. Check inputs.');
       setLoading(false);
@@ -117,7 +127,7 @@ const Register: React.FC = () => {
                   id="fullName"
                   type="text"
                   required
-                  className="input-light pl-10"
+                  className={`input-light pl-10 ${fullNameError ? 'input-error' : ''}`}
                   placeholder="Your full name"
                   value={fullName}
                   onChange={(e) => handleFullNameChange(e.target.value)}
@@ -141,12 +151,15 @@ const Register: React.FC = () => {
                   id="reg-email"
                   type="email"
                   required
-                  className="input-light pl-10"
+                  className={`input-light pl-10 ${emailInvalid ? 'input-error' : ''}`}
                   placeholder="you@university.edu"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                 />
               </div>
+              {emailInvalid && (
+                <p className="text-xs text-red-600 mt-1.5">Enter a valid email address</p>
+              )}
             </div>
 
             <div>
@@ -161,10 +174,11 @@ const Register: React.FC = () => {
                   id="reg-password"
                   type={showPassword ? 'text' : 'password'}
                   required
-                  className="input-light pl-10 pr-10"
+                  className={`input-light pl-10 pr-10 ${password && !isPasswordValid(password) ? 'input-error' : ''}`}
                   placeholder="Min. 8 characters"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
+                  onFocus={() => setPasswordFocused(true)}
                 />
                 <button
                   type="button"
@@ -177,24 +191,7 @@ const Register: React.FC = () => {
                 </button>
               </div>
 
-              {/* Requirements checklist */}
-              <ul className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
-                {[
-                  { key: 'length', label: 'At least 8 characters' },
-                  { key: 'upper', label: 'One uppercase letter' },
-                  { key: 'lower', label: 'One lowercase letter' },
-                  { key: 'digit', label: 'One digit' },
-                  { key: 'special', label: `One special char (${SPECIAL_CHARS})` },
-                ].map(({ key, label }) => {
-                  const passed = (checks as any)[key];
-                  return (
-                    <li key={key} className={`flex items-center gap-1.5 ${passed ? 'text-emerald-600' : 'text-text-muted'}`}>
-                      {passed ? <CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> : <XCircle className="w-3.5 h-3.5 shrink-0" />}
-                      {label}
-                    </li>
-                  );
-                })}
-              </ul>
+              <PasswordChecklist password={password} visible={passwordFocused} />
             </div>
 
             <div>
@@ -209,17 +206,13 @@ const Register: React.FC = () => {
                   id="confirm-password"
                   type={showConfirmPassword ? 'text' : 'password'}
                   required
-                  className="input-light pl-10 pr-10"
+                  className={`input-light pl-10 pr-10 ${confirmMismatch ? 'input-error' : ''}`}
                   placeholder="Re-enter your password"
                   value={confirmPassword}
-                  onChange={(e) => {
-                    setConfirmPassword(e.target.value);
-                    if (confirmError) setConfirmError('');
-                  }}
-                  onBlur={() => {
-                    if (confirmPassword && confirmPassword !== password) {
-                      setConfirmError('Passwords do not match');
-                    }
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  onFocus={() => {
+                    setConfirmTouched(true);
+                    setPasswordFocused(false);
                   }}
                 />
                 <button
@@ -232,9 +225,17 @@ const Register: React.FC = () => {
                   {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
-              {confirmError && (
-                <p className="text-xs text-red-600 mt-1.5">{confirmError}</p>
-              )}
+              {confirmMismatch ? (
+                <p className="flex items-center gap-1.5 text-xs text-red-600 mt-1.5">
+                  <XCircle className="w-3.5 h-3.5 shrink-0" />
+                  Passwords do not match
+                </p>
+              ) : confirmMatches ? (
+                <p className="flex items-center gap-1.5 text-xs text-emerald-600 mt-1.5">
+                  <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                  Passwords match
+                </p>
+              ) : null}
             </div>
 
             <button
@@ -253,6 +254,24 @@ const Register: React.FC = () => {
               )}
             </button>
           </form>
+
+          <div className="flex items-center gap-3 my-6">
+            <div className="h-px flex-1 bg-border" />
+            <span className="text-xs font-medium text-text-muted">OR</span>
+            <div className="h-px flex-1 bg-border" />
+          </div>
+
+          <GoogleSignInButton
+            onSuccess={(role) => {
+              if (redirect) navigate(redirect);
+              else if (role === 'admin') navigate('/admin');
+              else if (role === 'teacher') navigate('/teacher');
+              else if (role === 'program_coordinator') navigate('/program-coordinator');
+              else if (role === 'course_coordinator') navigate('/course-coordinator');
+              else navigate('/student');
+            }}
+            onError={setError}
+          />
 
           <div className="mt-6 pt-5 border-t border-border text-center space-y-2">
             <p className="text-sm text-text-secondary">

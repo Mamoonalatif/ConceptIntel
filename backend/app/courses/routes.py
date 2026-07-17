@@ -10,7 +10,10 @@ from app.courses.schemas import (
     CourseCatalogCreate, CourseCatalogUpdate, CourseCatalogResponse,
     AdminCourseUpdate, CourseLookupResponse,
 )
-from app.auth.routes import get_current_teacher, get_current_user, get_current_admin
+from app.auth.routes import (
+    get_current_teacher, get_current_user,
+    get_current_program_coordinator, get_current_course_manager,
+)
 
 router = APIRouter(prefix="/courses", tags=["Courses"])
 
@@ -62,7 +65,7 @@ def list_catalog(db: Session = Depends(get_db), current_user: User = Depends(get
 # --- Admin: Course Catalog management ---
 
 @router.get("/admin/catalog", response_model=List[CourseCatalogResponse])
-def admin_list_catalog(db: Session = Depends(get_db), current_admin: User = Depends(get_current_admin)):
+def admin_list_catalog(db: Session = Depends(get_db), current_user: User = Depends(get_current_program_coordinator)):
     return db.query(CourseCatalog).all()
 
 
@@ -70,7 +73,7 @@ def admin_list_catalog(db: Session = Depends(get_db), current_admin: User = Depe
 def admin_create_catalog_entry(
     entry_in: CourseCatalogCreate,
     db: Session = Depends(get_db),
-    current_admin: User = Depends(get_current_admin)
+    current_user: User = Depends(get_current_program_coordinator)
 ):
     if entry_in.prerequisite_catalog_id:
         _get_catalog_entry_or_404(db, entry_in.prerequisite_catalog_id)
@@ -91,7 +94,7 @@ def admin_update_catalog_entry(
     id: int,
     entry_in: CourseCatalogUpdate,
     db: Session = Depends(get_db),
-    current_admin: User = Depends(get_current_admin)
+    current_user: User = Depends(get_current_program_coordinator)
 ):
     entry = _get_catalog_entry_or_404(db, id)
 
@@ -113,7 +116,7 @@ def admin_update_catalog_entry(
 def admin_delete_catalog_entry(
     id: int,
     db: Session = Depends(get_db),
-    current_admin: User = Depends(get_current_admin)
+    current_user: User = Depends(get_current_program_coordinator)
 ):
     entry = _get_catalog_entry_or_404(db, id)
     db.delete(entry)
@@ -175,10 +178,11 @@ def get_all_courses(db: Session = Depends(get_db), current_user: User = Depends(
 def lookup_course_by_code(
     enrollment_code: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
 ):
-    """Read-only, no-side-effect lookup used by the student enrollment form to
-    preview a course before joining. Only exposes name/code - nothing else."""
+    """Read-only, no-side-effect, PUBLIC lookup (no auth) - used both by the student
+    enrollment form and by the /join/:code landing page, which a logged-out visitor
+    can land on straight from a shared join link before they've signed in. Only
+    exposes name/code - nothing else."""
     code = enrollment_code.strip().upper()
     course = db.query(Course).filter(Course.enrollment_code == code).first()
     if not course:
@@ -277,13 +281,25 @@ def admin_update_course(
     id: int,
     course_in: AdminCourseUpdate,
     db: Session = Depends(get_db),
-    current_admin: User = Depends(get_current_admin)
+    current_user: User = Depends(get_current_course_manager)
 ):
+    """Shared course-info update endpoint for admin / program coordinator / course
+    coordinator. Catalog reassignment and prerequisite mapping are Program Coordinator
+    (or admin) duties only - a Course Coordinator may update everything else (status,
+    dates, description, capacity) but is blocked from those two fields."""
     course = db.query(Course).filter(Course.id == id).first()
     if not course:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
 
     update_data = course_in.model_dump(exclude_unset=True)
+    role = current_user.role.lower()
+    is_catalog_manager = role in ("admin", "program_coordinator")
+
+    if not is_catalog_manager and ("catalog_id" in update_data or "prerequisite_course_id" in update_data):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only a Program Coordinator (or admin) may change a course's catalog entry or prerequisite mapping."
+        )
 
     if "catalog_id" in update_data and update_data["catalog_id"] is not None:
         catalog_entry = _get_catalog_entry_or_404(db, update_data["catalog_id"])
@@ -311,7 +327,7 @@ def admin_update_course(
 def admin_delete_course(
     id: int,
     db: Session = Depends(get_db),
-    current_admin: User = Depends(get_current_admin)
+    current_user: User = Depends(get_current_program_coordinator)
 ):
     course = db.query(Course).filter(Course.id == id).first()
     if not course:

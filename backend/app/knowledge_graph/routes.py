@@ -2,9 +2,9 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from app.database.connection import get_db
 from app.database.models import Course, UploadedFile, User
-from app.knowledge_graph.schemas import ConceptNodeUpdate, RelationshipCreate, GraphResponse
+from app.knowledge_graph.schemas import ConceptNodeUpdate, RelationshipCreate, GraphResponse, CourseGraphStatusResponse
 from app.knowledge_graph.services import neo4j_service, trigger_concept_extraction
-from app.auth.routes import get_current_teacher, get_current_user
+from app.auth.routes import get_current_teacher, get_current_user, get_current_course_coordinator
 
 router = APIRouter(prefix="/graph", tags=["Knowledge Graph"])
 
@@ -16,17 +16,58 @@ def get_graph_by_course(
     db: Session = Depends(get_db), 
     current_user: User = Depends(get_current_user)
 ):
-    """Retrieve full concept nodes and edges list for a course."""
-    # Validate course exists
+    """Retrieve full concept nodes and edges list for a course. Students may only view
+    a course's graph once a Course Coordinator has approved it; teachers/admin/
+    coordinators can always see it (they need to review/build it before approval)."""
     course = db.query(Course).filter(Course.id == course_id).first()
     if not course:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Course not found"
         )
-    
+
+    if current_user.role.lower() == "student" and course.graph_status != "Approved":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This course's knowledge graph is pending coordinator approval."
+        )
+
     # Return graph representation from Neo4j
     return neo4j_service.get_course_graph(course_id)
+
+
+@router.post("/course/{course_id}/approve", response_model=CourseGraphStatusResponse)
+def approve_course_graph(
+    course_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_course_coordinator)
+):
+    """Course Coordinator (or admin) approves a course's knowledge graph, making it
+    visible to enrolled students."""
+    course = db.query(Course).filter(Course.id == course_id).first()
+    if not course:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
+    course.graph_status = "Approved"
+    db.commit()
+    db.refresh(course)
+    return course
+
+
+@router.post("/course/{course_id}/reject", response_model=CourseGraphStatusResponse)
+def reject_course_graph(
+    course_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_course_coordinator)
+):
+    """Course Coordinator (or admin) rejects a course's knowledge graph - it remains
+    hidden from students until re-approved."""
+    course = db.query(Course).filter(Course.id == course_id).first()
+    if not course:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
+    course.graph_status = "Rejected"
+    db.commit()
+    db.refresh(course)
+    return course
 
 
 @router.post("/build/{course_id}", status_code=status.HTTP_202_ACCEPTED)

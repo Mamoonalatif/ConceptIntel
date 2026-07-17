@@ -59,6 +59,14 @@ export const authService = {
     const res = await api.get('/auth/me');
     return res.data;
   },
+  google: async (idToken: string) => {
+    const res = await api.post('/auth/google', { id_token: idToken });
+    return res.data;
+  },
+  changePassword: async (data: { current_password?: string; new_password: string }) => {
+    const res = await api.post('/auth/change-password', data);
+    return res.data;
+  },
   requestTeacherAccess: async (data: { email: string; full_name: string; reason?: string }) => {
     const res = await api.post('/auth/teacher-requests', data);
     return res.data;
@@ -83,6 +91,62 @@ export const adminService = {
   },
   rejectTeacherRequest: async (id: number) => {
     const res = await api.post(`/auth/admin/teacher-requests/${id}/reject`);
+    return res.data;
+  },
+  // Program/Course Coordinators are never created fresh - they're always an existing
+  // teacher whose role is changed here, so they keep their existing login credentials.
+  listStaff: async (role?: 'teacher' | 'program_coordinator' | 'course_coordinator') => {
+    const res = await api.get('/auth/admin/staff', { params: role ? { role } : undefined });
+    return res.data;
+  },
+  changeStaffRole: async (userId: number, role: 'teacher' | 'program_coordinator' | 'course_coordinator') => {
+    const res = await api.patch(`/auth/admin/staff/${userId}/role`, { role });
+    return res.data;
+  },
+};
+
+// Program Coordinator Services: predefined-course catalog CRUD, prerequisite mapping,
+// course deletion. Admin can hit the same endpoints too (see backend/app/auth/routes.py).
+export const programCoordinatorService = {
+  listCatalog: async () => {
+    const res = await api.get('/courses/admin/catalog');
+    return res.data;
+  },
+  createCatalogEntry: async (data: { name: string; code: string; prerequisite_catalog_id?: number | null }) => {
+    const res = await api.post('/courses/admin/catalog', data);
+    return res.data;
+  },
+  updateCatalogEntry: async (id: number, data: { name?: string; code?: string; prerequisite_catalog_id?: number | null }) => {
+    const res = await api.put(`/courses/admin/catalog/${id}`, data);
+    return res.data;
+  },
+  deleteCatalogEntry: async (id: number) => {
+    const res = await api.delete(`/courses/admin/catalog/${id}`);
+    return res.data;
+  },
+  updateCourse: async (id: number, data: any) => {
+    const res = await api.put(`/courses/admin/${id}`, data);
+    return res.data;
+  },
+  deleteCourse: async (id: number) => {
+    const res = await api.delete(`/courses/admin/${id}`);
+    return res.data;
+  },
+};
+
+// Course Coordinator Services: knowledge-graph approve/reject, course-info updates
+// (status/dates/description/capacity - not catalog or prerequisite, see backend).
+export const courseCoordinatorService = {
+  updateCourse: async (id: number, data: any) => {
+    const res = await api.put(`/courses/admin/${id}`, data);
+    return res.data;
+  },
+  approveGraph: async (courseId: number) => {
+    const res = await api.post(`/graph/course/${courseId}/approve`);
+    return res.data;
+  },
+  rejectGraph: async (courseId: number) => {
+    const res = await api.post(`/graph/course/${courseId}/reject`);
     return res.data;
   },
 };
