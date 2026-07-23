@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { adminService } from '../services/api';
 import { ChangePasswordModal } from '../components/ChangePasswordModal';
+import { useAutoRefresh } from '../hooks/useAutoRefresh';
 import {
   LogOut, User, Shield, Mail, CheckCircle2, XCircle, Plus, RefreshCw, Copy, Check,
   ClipboardList, UserPlus, AlertCircle, Users, KeyRound
@@ -55,27 +56,27 @@ const AdminDashboard: React.FC = () => {
   const [staffLoading, setStaffLoading] = useState(true);
   const [changingRoleId, setChangingRoleId] = useState<number | null>(null);
 
-  const fetchStaff = async () => {
+  const fetchStaff = async (silent = false) => {
     try {
-      setStaffLoading(true);
+      if (!silent) setStaffLoading(true);
       const data = await adminService.listStaff();
       setStaff(data);
     } catch (err: any) {
-      setError('Failed to fetch staff accounts. Verify API connection.');
+      if (!silent) setError('Failed to fetch staff accounts. Verify API connection.');
     } finally {
-      setStaffLoading(false);
+      if (!silent) setStaffLoading(false);
     }
   };
 
-  const fetchRequests = async () => {
+  const fetchRequests = async (silent = false) => {
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       const data = await adminService.listTeacherRequests();
       setRequests(data);
     } catch (err: any) {
-      setError('Failed to fetch teacher requests. Verify API connection.');
+      if (!silent) setError('Failed to fetch teacher requests. Verify API connection.');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
@@ -83,6 +84,14 @@ const AdminDashboard: React.FC = () => {
     fetchRequests();
     fetchStaff();
   }, []);
+
+  // Keeps this page live without a manual refresh - polls every 15s and refetches
+  // immediately whenever the tab regains focus (e.g. admin switches back after a
+  // student submitted a teacher request).
+  useAutoRefresh(() => {
+    fetchRequests(true);
+    fetchStaff(true);
+  });
 
   const handleApprove = async (id: number) => {
     setProcessingId(id);

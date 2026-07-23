@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { programCoordinatorService, courseService } from '../services/api';
 import { ChangePasswordModal } from '../components/ChangePasswordModal';
+import { useAutoRefresh } from '../hooks/useAutoRefresh';
 import {
   LogOut, User, Layers, Plus, RefreshCw, AlertCircle, Pencil, Trash2, X, Check, KeyRound,
 } from 'lucide-react';
@@ -45,8 +46,8 @@ const ProgramCoordinatorDashboard: React.FC = () => {
   const [editPrereq, setEditPrereq] = useState('');
   const [savingEdit, setSavingEdit] = useState(false);
 
-  const fetchAll = async () => {
-    setLoading(true);
+  const fetchAll = async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const [catalogData, coursesData] = await Promise.all([
         programCoordinatorService.listCatalog(),
@@ -55,11 +56,13 @@ const ProgramCoordinatorDashboard: React.FC = () => {
       setCatalog(catalogData);
       setCourses(coursesData);
     } catch (err: any) {
-      setError('Failed to load catalog/courses. Verify API connection.');
+      if (!silent) setError('Failed to load catalog/courses. Verify API connection.');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
+
+  useAutoRefresh(() => fetchAll(true));
 
   useEffect(() => {
     fetchAll();

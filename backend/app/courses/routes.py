@@ -14,6 +14,7 @@ from app.auth.routes import (
     get_current_teacher, get_current_user,
     get_current_program_coordinator, get_current_course_manager,
 )
+from app.courses.access import assert_course_access
 
 router = APIRouter(prefix="/courses", tags=["Courses"])
 
@@ -202,6 +203,7 @@ def get_course_details(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Course not found"
         )
+    assert_course_access(db, course, current_user)
     return course
 
 

@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { enrollmentService } from '../services/api';
 import EnrollmentCodeForm from '../components/EnrollmentCodeForm';
 import { ChangePasswordModal } from '../components/ChangePasswordModal';
+import { useAutoRefresh } from '../hooks/useAutoRefresh';
 import {
   GraduationCap, LogOut, BookOpen, User, Hash, ArrowRight,
   Sparkles, CheckCircle, AlertCircle, Plus,
@@ -47,21 +48,23 @@ const StudentDashboard: React.FC = () => {
   const [success, setSuccess] = useState('');
   const [showJoinModal, setShowJoinModal] = useState(false);
 
-  const fetchEnrollments = async () => {
+  const fetchEnrollments = async (silent = false) => {
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       const data = await enrollmentService.getMyCourses();
       setEnrollments(data);
     } catch (err: any) {
-      setError('Failed to fetch enrollment roster.');
+      if (!silent) setError('Failed to fetch enrollment roster.');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
   useEffect(() => {
     fetchEnrollments();
   }, []);
+
+  useAutoRefresh(() => fetchEnrollments(true));
 
   const handleEnrolled = (message: string) => {
     setError('');

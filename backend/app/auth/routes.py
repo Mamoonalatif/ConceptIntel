@@ -15,6 +15,10 @@ from app.auth.schemas import (
     UserStatusUpdate, GoogleAuthRequest, StaffRoleUpdate, ChangePasswordRequest,
 )
 from app.auth.utils import hash_password, verify_password, create_access_token, decode_access_token, generate_temporary_password
+from app.supabase_auth import (
+    is_supabase_auth_configured, create_supabase_user, verify_supabase_password,
+    get_or_create_supabase_user_by_email, update_supabase_user_password,
+)
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -132,12 +136,27 @@ def register(user_in: UserCreate, db: Session = Depends(get_db)):
             detail="Self-registration is only available for the 'student' role."
         )
 
-    # Create new user
+    # Password is now owned by Supabase Auth, not stored/verified locally - create
+    # the Supabase auth user first so we never end up with a local account that has
+    # no way to authenticate (if this fails, nothing local has been created yet).
+    supabase_uid = None
+    if is_supabase_auth_configured():
+        try:
+            supabase_uid = create_supabase_user(user_in.email, user_in.password)
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Could not create account (auth service error): {str(e)}"
+            )
+
     new_user = User(
         email=user_in.email,
-        hashed_password=hash_password(user_in.password),
+        # Legacy fallback only - if Supabase Auth isn't configured, keep the old
+        # local bcrypt behavior so the app still works without it.
+        hashed_password=None if supabase_uid else hash_password(user_in.password),
         full_name=user_in.full_name,
-        role=role_lower
+        role=role_lower,
+        supabase_uid=supabase_uid,
     )
     db.add(new_user)
     db.commit()
@@ -148,7 +167,22 @@ def register(user_in: UserCreate, db: Session = Depends(get_db)):
 @router.post("/login", response_model=Token)
 def login(credentials: UserLogin, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == credentials.email).first()
-    if not user or not user.hashed_password or not verify_password(credentials.password, user.hashed_password):
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    # Accounts linked to Supabase Auth (the norm going forward) are verified there;
+    # legacy accounts created before this migration (no supabase_uid yet) still fall
+    # back to the local bcrypt hash they were created with.
+    if user.supabase_uid:
+        password_ok = verify_supabase_password(credentials.email, credentials.password)
+    else:
+        password_ok = bool(user.hashed_password) and verify_password(credentials.password, user.hashed_password)
+
+    if not password_ok:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
@@ -232,6 +266,17 @@ def google_login(payload: GoogleAuthRequest, db: Session = Depends(get_db)):
             detail="This email is linked to a different Google account.",
         )
 
+    # Link (or create) a matching Supabase auth user for identity consistency - no
+    # password is set here, Google's own ID token is the credential. Best-effort:
+    # a failure here shouldn't block sign-in, since our own JWT is still what
+    # authorizes every subsequent request.
+    if is_supabase_auth_configured() and not user.supabase_uid:
+        try:
+            user.supabase_uid = get_or_create_supabase_user_by_email(email, full_name)
+            db.commit()
+        except Exception as e:
+            print(f"Warning: failed to link Supabase auth user for {email}: {e}")
+
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -263,15 +308,24 @@ def change_password(
     """Self-service password change for any authenticated user. If the account already
     has a password, current_password must match it. A Google-only account (no password
     yet) may set its first password without proving one it never had."""
-    if current_user.hashed_password:
-        if not payload.current_password or not verify_password(payload.current_password, current_user.hashed_password):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Current password is incorrect."
-            )
+    if current_user.supabase_uid:
+        # Verify the current password via Supabase first (unless the account has none
+        # yet, e.g. a Google-only sign-in setting its first password).
+        current_password_matches = verify_supabase_password(current_user.email, payload.current_password or "")
+        if not current_password_matches and payload.current_password:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect.")
+        try:
+            update_supabase_user_password(current_user.supabase_uid, payload.new_password)
+        except Exception as e:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"Could not update password: {str(e)}")
+    else:
+        # Legacy local-bcrypt account (pre-migration).
+        if current_user.hashed_password:
+            if not payload.current_password or not verify_password(payload.current_password, current_user.hashed_password):
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect.")
+        current_user.hashed_password = hash_password(payload.new_password)
+        db.commit()
 
-    current_user.hashed_password = hash_password(payload.new_password)
-    db.commit()
     return {"message": "Password updated successfully."}
 
 
@@ -313,11 +367,23 @@ def _create_staff_account(db: Session, email: str, full_name: str, role: str) ->
         )
 
     temp_password = generate_temporary_password()
+
+    supabase_uid = None
+    if is_supabase_auth_configured():
+        try:
+            supabase_uid = create_supabase_user(email, temp_password)
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Could not create account (auth service error): {str(e)}"
+            )
+
     new_user = User(
         email=email,
-        hashed_password=hash_password(temp_password),
+        hashed_password=None if supabase_uid else hash_password(temp_password),
         full_name=full_name,
-        role=role
+        role=role,
+        supabase_uid=supabase_uid,
     )
     db.add(new_user)
     db.commit()

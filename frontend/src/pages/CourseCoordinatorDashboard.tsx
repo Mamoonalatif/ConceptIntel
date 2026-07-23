@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { courseCoordinatorService, courseService } from '../services/api';
 import { ChangePasswordModal } from '../components/ChangePasswordModal';
+import { useAutoRefresh } from '../hooks/useAutoRefresh';
 import {
   LogOut, User, Network, AlertCircle, CheckCircle2, XCircle, Pencil, X, Check, KeyRound,
 } from 'lucide-react';
@@ -42,21 +43,23 @@ const CourseCoordinatorDashboard: React.FC = () => {
   const [editMaxStudents, setEditMaxStudents] = useState('');
   const [savingEdit, setSavingEdit] = useState(false);
 
-  const fetchCourses = async () => {
-    setLoading(true);
+  const fetchCourses = async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const data = await courseService.getAll();
       setCourses(data);
     } catch (err: any) {
-      setError('Failed to load courses. Verify API connection.');
+      if (!silent) setError('Failed to load courses. Verify API connection.');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
   useEffect(() => {
     fetchCourses();
   }, []);
+
+  useAutoRefresh(() => fetchCourses(true));
 
   const approve = async (courseId: number) => {
     setProcessingId(courseId);

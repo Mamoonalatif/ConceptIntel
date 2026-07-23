@@ -59,42 +59,31 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
+  // Deliberately does NOT touch isLoading below - that flag means "still checking
+  // for a saved session at app startup" and gates whether GuestRoute/PrivateRoute
+  // render the page at all. Reusing it for "a login request is in flight" caused a
+  // real bug: it briefly went true mid-login, GuestRoute rendered null instead of
+  // the Login page, tearing down (unmounting) the exact component instance whose
+  // catch block was about to call setError - so the error silently vanished into a
+  // component that no longer existed. Callers (Login.tsx etc.) already track their
+  // own local `loading` state for the button/spinner - that's the correct layer for
+  // per-request loading state, not this context-wide flag.
   const login = async (credentials: any, rememberMe: boolean = false) => {
-    setIsLoading(true);
-    try {
-      const data = await authService.login(credentials);
-      storeToken(data.access_token, rememberMe);
-      setToken(data.access_token);
-      return data;
-    } catch (error) {
-      setIsLoading(false);
-      throw error;
-    }
+    const data = await authService.login(credentials);
+    storeToken(data.access_token, rememberMe);
+    setToken(data.access_token);
+    return data;
   };
 
   const loginWithGoogle = async (idToken: string, rememberMe: boolean = false) => {
-    setIsLoading(true);
-    try {
-      const data = await authService.google(idToken);
-      storeToken(data.access_token, rememberMe);
-      setToken(data.access_token);
-      return data;
-    } catch (error) {
-      setIsLoading(false);
-      throw error;
-    }
+    const data = await authService.google(idToken);
+    storeToken(data.access_token, rememberMe);
+    setToken(data.access_token);
+    return data;
   };
 
   const register = async (userData: any) => {
-    setIsLoading(true);
-    try {
-      const data = await authService.register(userData);
-      setIsLoading(false);
-      return data;
-    } catch (error) {
-      setIsLoading(false);
-      throw error;
-    }
+    return authService.register(userData);
   };
 
   const logout = () => {

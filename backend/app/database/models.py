@@ -1,4 +1,5 @@
 from sqlalchemy import Column, Integer, String, Float, ForeignKey, DateTime, Date, Text, Boolean, UniqueConstraint, func
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import relationship
 from app.database.connection import Base
 
@@ -14,6 +15,12 @@ class User(Base):
     is_active = Column(Boolean, default=True, nullable=False)
     # Google account identifier ("sub" claim), set the first time a user signs in with Google.
     google_id = Column(String, unique=True, index=True, nullable=True)
+    # Bridge to Supabase Auth's auth.users.id (UUID) - set once a user authenticates
+    # through Supabase Auth (email/password or Google via Supabase). This table's own
+    # integer id stays the source of truth for every foreign key in the app (courses,
+    # enrollments, uploaded_files, etc.) - only this column changes to support Supabase
+    # Auth, avoiding an integer -> UUID migration across the whole schema.
+    supabase_uid = Column(String, unique=True, index=True, nullable=True)
     # Only meaningful for students; used for the optional semester-match enrollment check
     # (see enrollment/services.py). Nullable because teachers/admins don't have one and
     # older student rows may predate this field.
@@ -128,4 +135,34 @@ class UploadedFile(Base):
     # Relationships
     course = relationship("Course", back_populates="uploaded_files")
     teacher = relationship("User", back_populates="uploaded_files")
+    chunks = relationship("ContentChunk", back_populates="file", cascade="all, delete-orphan")
+
+
+class ContentChunk(Base):
+    """A single retrievable unit for RAG: either a text passage, a whole table, or an
+    image caption. Embedding is stored as a plain float array (not pgvector) since the
+    vector extension isn't installed on this Postgres server - at this scale (a
+    handful of courses) brute-force cosine similarity in Python is effectively instant,
+    so no ANN index is needed. See app/rag/retrieval.py. Swapping to pgvector later
+    only requires changing this column's type and the similarity query - the rest of
+    the pipeline is unaffected."""
+    __tablename__ = "content_chunks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    course_id = Column(Integer, ForeignKey("courses.id"), nullable=False, index=True)
+    file_id = Column(Integer, ForeignKey("uploaded_files.id"), nullable=False, index=True)
+    chunk_index = Column(Integer, nullable=False)
+    text = Column(Text, nullable=False)
+    embedding = Column(ARRAY(Float), nullable=False)
+    token_count = Column(Integer, nullable=False)
+    # SHA-256 of the normalized chunk text - lets reprocessing skip re-embedding
+    # identical chunks (e.g. a teacher re-uploading the same slide deck).
+    chunk_hash = Column(String, nullable=False, index=True)
+    section_heading = Column(String, nullable=True)  # nearest heading/slide title, for context
+    source_type = Column(String, nullable=False, default="text")  # "text" | "table" | "image_caption"
+    page_number = Column(Integer, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+    course = relationship("Course")
+    file = relationship("UploadedFile", back_populates="chunks")
 

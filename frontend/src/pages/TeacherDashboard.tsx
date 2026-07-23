@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { courseService } from '../services/api';
 import { ChangePasswordModal } from '../components/ChangePasswordModal';
+import { useAutoRefresh } from '../hooks/useAutoRefresh';
 import {
   Plus, LogOut, BookOpen, User, Hash, Users, ArrowRight, ShieldCheck,
   Sparkles, RefreshCw, X, HelpCircle, BarChart3, Network, GraduationCap, FileText, KeyRound,
@@ -73,15 +74,15 @@ const TeacherDashboard: React.FC = () => {
   const [formError, setFormError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  const fetchCourses = async () => {
+  const fetchCourses = async (silent = false) => {
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       const data = await courseService.getTeacherCourses();
       setCourses(data);
     } catch (err: any) {
-      setError('Failed to fetch courses. Verify API connection.');
+      if (!silent) setError('Failed to fetch courses. Verify API connection.');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
@@ -98,6 +99,10 @@ const TeacherDashboard: React.FC = () => {
     fetchCourses();
     fetchCatalog();
   }, []);
+
+  // Live-updates without a manual refresh (e.g. a course's file-processing status
+  // or graph_status changing in the background).
+  useAutoRefresh(() => fetchCourses(true));
 
   const resetForm = () => {
     setCatalogId('');

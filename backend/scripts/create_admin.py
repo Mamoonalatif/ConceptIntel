@@ -25,6 +25,7 @@ from app.database.connection import SessionLocal, engine
 from app.database import models
 from app.database.models import User
 from app.auth.utils import hash_password
+from app.supabase_auth import is_supabase_auth_configured, create_supabase_user
 
 
 def main():
@@ -47,16 +48,21 @@ def main():
             print(f"A user with email {args.email} already exists (role={existing.role}). Aborting.")
             return
 
+        supabase_uid = None
+        if is_supabase_auth_configured():
+            supabase_uid = create_supabase_user(args.email, args.password)
+
         admin_user = User(
             email=args.email,
-            hashed_password=hash_password(args.password),
+            hashed_password=None if supabase_uid else hash_password(args.password),
             full_name=args.full_name,
             role="admin",
+            supabase_uid=supabase_uid,
         )
         db.add(admin_user)
         db.commit()
         db.refresh(admin_user)
-        print(f"Admin user created: id={admin_user.id} email={admin_user.email}")
+        print(f"Admin user created: id={admin_user.id} email={admin_user.email} (supabase_uid={supabase_uid})")
     finally:
         db.close()
 

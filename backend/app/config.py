@@ -8,11 +8,10 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(dotenv_path=BASE_DIR / ".env")
 
 class Settings:
-    # PostgreSQL Configuration
-    DATABASE_URL: str = os.getenv(
-        "DATABASE_URL", 
-        "postgresql://postgres:postgres@localhost:5432/postgres"
-    )
+    # Postgres Configuration - hosted on Supabase (Project Settings -> Database ->
+    # Connection string, Session/Transaction pooler URI). No local Postgres install
+    # is part of this project anymore - DATABASE_URL must be set in .env.
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "")
 
     # JWT Authentication
     JWT_SECRET: str = os.getenv("JWT_SECRET", "super_secret_conceptintel_token_signing_key_2026")
@@ -38,6 +37,14 @@ class Settings:
     # OpenAI API Key & Model Configuration
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
     OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+
+    # AWS S3 File Storage (Optional - takes priority over Supabase/local when set).
+    # Bucket is expected to be PRIVATE - files are read/written via authenticated
+    # boto3 calls, never a public URL (see app/upload/services.py).
+    AWS_ACCESS_KEY_ID: str = os.getenv("AWS_ACCESS_KEY_ID", "")
+    AWS_SECRET_ACCESS_KEY: str = os.getenv("AWS_SECRET_ACCESS_KEY", "")
+    AWS_REGION: str = os.getenv("AWS_REGION", "us-east-1")
+    AWS_S3_BUCKET: str = os.getenv("AWS_S3_BUCKET", "")
 
     # Supabase File Storage (Optional)
     SUPABASE_URL: str = os.getenv("SUPABASE_URL", "")

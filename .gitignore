@@ -20,6 +20,7 @@ dist-ssr/
 
 # --- Local Claude Code session config (machine-specific, not project source) ---
 .claude/settings.local.json
+.claude/launch.json
 
 # --- Editor / OS ---
 .vscode/*

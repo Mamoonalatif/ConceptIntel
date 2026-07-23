@@ -5,6 +5,7 @@ from app.database.models import Course, UploadedFile, User
 from app.knowledge_graph.schemas import ConceptNodeUpdate, RelationshipCreate, GraphResponse, CourseGraphStatusResponse
 from app.knowledge_graph.services import neo4j_service, trigger_concept_extraction
 from app.auth.routes import get_current_teacher, get_current_user, get_current_course_coordinator
+from app.courses.access import assert_course_access
 
 router = APIRouter(prefix="/graph", tags=["Knowledge Graph"])
 
@@ -25,6 +26,7 @@ def get_graph_by_course(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Course not found"
         )
+    assert_course_access(db, course, current_user)
 
     if current_user.role.lower() == "student" and course.graph_status != "Approved":
         raise HTTPException(
@@ -231,6 +233,7 @@ def get_graph_stats(
     course = db.query(Course).filter(Course.id == course_id).first()
     if not course:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
+    assert_course_access(db, course, current_user)
     return neo4j_service.get_graph_stats(course_id)
 
 
@@ -245,6 +248,7 @@ def search_course_concepts(
     course = db.query(Course).filter(Course.id == course_id).first()
     if not course:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
+    assert_course_access(db, course, current_user)
     results = neo4j_service.search_concepts(course_id, q)
     return {"results": results, "count": len(results)}
 

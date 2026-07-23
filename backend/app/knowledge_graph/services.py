@@ -7,6 +7,7 @@ from openai import OpenAI
 
 from app.config import settings
 from app.upload.services import chunk_text
+from app.observability import trace_ai_call
 import os
 import certifi
 
@@ -260,6 +261,7 @@ def trigger_concept_extraction(course_id: int, text: str):
             logger.error(f"Failed to extract from chunk {i+1}: {str(e)}")
 
 
+@trace_ai_call("concept-extraction")
 def extract_concepts_from_chunk_ai(chunk: str) -> Dict[str, Any]:
     """
     Calls OpenAI API with an enhanced academic prompt to extract structured concepts.

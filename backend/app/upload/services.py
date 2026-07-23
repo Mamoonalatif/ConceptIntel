@@ -94,28 +94,88 @@ def get_content_type(extension: str) -> str:
     return "application/octet-stream"
 
 
+def _s3_client():
+    import boto3
+    return boto3.client(
+        "s3",
+        region_name=settings.AWS_REGION,
+        aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+        aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+    )
+
+
+def _parse_s3_ref(s3_ref: str) -> tuple[str, str]:
+    """s3://bucket/key/... -> (bucket, key)."""
+    without_scheme = s3_ref[len("s3://"):]
+    bucket, _, key = without_scheme.partition("/")
+    return bucket, key
+
+
+def upload_file_to_s3(file_content: bytes, filename: str, content_type: str, course_id: int) -> str:
+    """Uploads to a PRIVATE S3 bucket and returns an internal 's3://bucket/key'
+    reference (never a public URL - the bucket has no public access, files are only
+    ever read back through authenticated boto3 calls in this backend). Raises
+    ValueError if AWS credentials/bucket aren't configured."""
+    if not (settings.AWS_ACCESS_KEY_ID and settings.AWS_SECRET_ACCESS_KEY and settings.AWS_S3_BUCKET):
+        raise ValueError("AWS S3 credentials and bucket are not configured.")
+
+    safe_filename = Path(filename).name
+    key = f"course_{course_id}/{safe_filename}"
+    client = _s3_client()
+    client.put_object(Bucket=settings.AWS_S3_BUCKET, Key=key, Body=file_content, ContentType=content_type)
+    return f"s3://{settings.AWS_S3_BUCKET}/{key}"
+
+
+def download_file_from_s3(s3_ref: str) -> bytes:
+    bucket, key = _parse_s3_ref(s3_ref)
+    client = _s3_client()
+    obj = client.get_object(Bucket=bucket, Key=key)
+    return obj["Body"].read()
+
+
+def delete_file_from_s3(s3_ref: str) -> None:
+    bucket, key = _parse_s3_ref(s3_ref)
+    client = _s3_client()
+    try:
+        client.delete_object(Bucket=bucket, Key=key)
+    except Exception as e:
+        print(f"Warning: Failed to delete S3 object {s3_ref}: {e}")
+
+
+def _supabase_headers(content_type: str = None) -> dict:
+    headers = {
+        "Authorization": f"Bearer {settings.SUPABASE_KEY}",
+        "apikey": settings.SUPABASE_KEY,
+    }
+    if content_type:
+        headers["Content-Type"] = content_type
+    return headers
+
+
+def _parse_supabase_ref(ref: str) -> tuple[str, str]:
+    """supabase://bucket/key/... -> (bucket, key)."""
+    without_scheme = ref[len("supabase://"):]
+    bucket, _, key = without_scheme.partition("/")
+    return bucket, key
+
+
 def upload_file_to_supabase(file_content: bytes, filename: str, content_type: str, course_id: int) -> str:
     """
-    Uploads a file to Supabase Storage and returns the public URL.
-    If Supabase settings are missing, raises a ValueError.
+    Uploads to Supabase Storage and returns an internal 'supabase://bucket/key'
+    reference (NOT a public URL) - the bucket is private, so files are only ever
+    read back through authenticated calls (see download_file_from_supabase), same
+    approach as the S3 backend. If Supabase settings are missing, raises ValueError.
     """
     if not settings.SUPABASE_URL or not settings.SUPABASE_KEY:
         raise ValueError("Supabase URL and Key are not configured.")
 
     bucket = settings.SUPABASE_BUCKET
-    # Clean the filename
     safe_filename = Path(filename).name
     file_path = f"course_{course_id}/{safe_filename}"
 
-    # Supabase storage REST API upload endpoint
     url = f"{settings.SUPABASE_URL}/storage/v1/object/{bucket}/{file_path}"
-
-    headers = {
-        "Authorization": f"Bearer {settings.SUPABASE_KEY}",
-        "apikey": settings.SUPABASE_KEY,
-        "Content-Type": content_type,
-        "x-upsert": "true"  # Overwrite if it already exists
-    }
+    headers = _supabase_headers(content_type)
+    headers["x-upsert"] = "true"  # Overwrite if it already exists
 
     with httpx.Client() as client:
         response = client.post(url, content=file_content, headers=headers, timeout=30.0)
@@ -123,35 +183,33 @@ def upload_file_to_supabase(file_content: bytes, filename: str, content_type: st
     if response.status_code not in (200, 201):
         raise Exception(f"Supabase storage upload failed with status {response.status_code}: {response.text}")
 
-    # Return standard public URL for the file
-    return f"{settings.SUPABASE_URL}/storage/v1/object/public/{bucket}/{file_path}"
+    return f"supabase://{bucket}/{file_path}"
 
 
-def delete_file_from_supabase(file_url: str) -> None:
-    """
-    Deletes a file from Supabase Storage given its public URL.
-    """
+def download_file_from_supabase(ref: str) -> bytes:
+    """Authenticated download from a private Supabase bucket."""
+    bucket, key = _parse_supabase_ref(ref)
+    url = f"{settings.SUPABASE_URL}/storage/v1/object/{bucket}/{key}"
+    with httpx.Client() as client:
+        response = client.get(url, headers=_supabase_headers(), timeout=30.0)
+    if response.status_code != 200:
+        raise Exception(f"Supabase storage download failed with status {response.status_code}: {response.text}")
+    return response.content
+
+
+def delete_file_from_supabase(ref: str) -> None:
+    """Deletes a file from Supabase Storage given its 'supabase://bucket/key' reference."""
     if not settings.SUPABASE_URL or not settings.SUPABASE_KEY:
         return
-
-    bucket = settings.SUPABASE_BUCKET
-    prefix = f"{settings.SUPABASE_URL}/storage/v1/object/public/{bucket}/"
-    if not file_url.startswith(prefix):
+    if not ref.startswith("supabase://"):
         return
 
-    # Extract the file path relative to the bucket
-    file_path = file_url[len(prefix):]
-    url = f"{settings.SUPABASE_URL}/storage/v1/object/{bucket}/{file_path}"
-
-    headers = {
-        "Authorization": f"Bearer {settings.SUPABASE_KEY}",
-        "apikey": settings.SUPABASE_KEY
-    }
+    bucket, key = _parse_supabase_ref(ref)
+    url = f"{settings.SUPABASE_URL}/storage/v1/object/{bucket}/{key}"
 
     with httpx.Client() as client:
-        response = client.delete(url, headers=headers, timeout=15.0)
+        response = client.delete(url, headers=_supabase_headers(), timeout=15.0)
 
     if response.status_code not in (200, 204):
-        # Log a warning to stdout/stderr
         print(f"Warning: Failed to delete file from Supabase Storage: {response.status_code} - {response.text}")
 

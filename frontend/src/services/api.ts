@@ -31,6 +31,15 @@ export interface CourseLookup {
   code: string | null;
 }
 
+// Shape returned by GET /files/course/{id}/search - a semantic search hit over the
+// course's uploaded material (text chunks + image captions).
+export interface ContentSearchResult {
+  text: string;
+  score: number;
+  source_type: string;
+  citation: string;
+}
+
 // Shape returned by POST /enrollment/join - includes the joined course's name/code
 // so the UI can render "Successfully enrolled in {name} ({code})." without another round trip.
 export interface EnrollmentJoinResult {
@@ -229,6 +238,10 @@ export const uploadService = {
   },
   getCourseFiles: async (courseId: number) => {
     const res = await api.get(`/files/course/${courseId}`);
+    return res.data;
+  },
+  searchContent: async (courseId: number, query: string): Promise<ContentSearchResult[]> => {
+    const res = await api.get(`/files/course/${courseId}/search`, { params: { q: query } });
     return res.data;
   },
   deleteFile: async (fileId: number) => {

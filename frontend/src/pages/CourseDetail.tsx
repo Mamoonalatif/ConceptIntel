@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { courseService, uploadService, enrollmentService, graphService } from '../services/api';
+import { courseService, uploadService, enrollmentService, graphService, type ContentSearchResult } from '../services/api';
+import { useAutoRefresh } from '../hooks/useAutoRefresh';
 import {
   ArrowLeft, BookOpen, Upload, FileText, Trash2, RefreshCw,
   Users, CheckCircle2, AlertTriangle, Play, Network, Copy, Download,
-  Zap, TrendingUp, Clock
+  Zap, TrendingUp, Clock, Search
 } from 'lucide-react';
 
 interface Course {
@@ -64,11 +65,29 @@ const CourseDetail: React.FC = () => {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<ContentSearchResult[] | null>(null);
+  const [searching, setSearching] = useState(false);
+
   const isTeacher = user?.role === 'teacher';
 
-  const fetchData = async () => {
+  const handleSearch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!searchQuery.trim()) return;
+    setSearching(true);
     try {
-      setLoading(true);
+      const results = await uploadService.searchContent(idNum, searchQuery.trim());
+      setSearchResults(results);
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Search failed.');
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  const fetchData = async (silent = false) => {
+    try {
+      if (!silent) setLoading(true);
       const courseData = await courseService.getDetails(idNum);
       setCourse(courseData);
       const filesData = await uploadService.getCourseFiles(idNum);
@@ -78,11 +97,15 @@ const CourseDetail: React.FC = () => {
         setStudents(studentsData);
       }
     } catch (err: any) {
-      setError('Failed to load course details. Ensure backend connection is active.');
+      if (!silent) setError('Failed to load course details. Ensure backend connection is active.');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
+
+  // Especially useful here: a file's status (Uploaded -> Processing -> Completed)
+  // updates in the background - this shows that progress without a manual refresh.
+  useAutoRefresh(() => { if (idNum) fetchData(true); });
 
   useEffect(() => {
     if (idNum) fetchData();
@@ -427,6 +450,52 @@ const CourseDetail: React.FC = () => {
                     </tbody>
                   </table>
                 </div>
+              )}
+            </div>
+
+            {/* Content Search - tests the RAG retrieval pipeline directly from the UI */}
+            <div className="bg-surface rounded-2xl p-6 border border-border animate-fade-up">
+              <h3 className="text-base font-bold text-text-primary mb-1 flex items-center gap-2">
+                <Search className="w-4.5 h-4.5 text-secondary" />
+                Content Search
+              </h3>
+              <p className="text-xs text-text-muted mb-4">
+                Semantic search over this course's uploaded material (text and image captions).
+              </p>
+              <form onSubmit={handleSearch} className="flex gap-2 mb-4">
+                <input
+                  type="text"
+                  className="input-light flex-1"
+                  placeholder="e.g. Newton's second law"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                />
+                <button type="submit" disabled={searching || !searchQuery.trim()} className="btn-primary disabled:opacity-60">
+                  {searching ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+                  Search
+                </button>
+              </form>
+
+              {searchResults !== null && (
+                searchResults.length === 0 ? (
+                  <div className="text-center py-8 text-text-muted text-sm border-2 border-dashed border-border rounded-xl">
+                    Nothing relevant found in the uploaded material for that query.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {searchResults.map((r, i) => (
+                      <div key={i} className="bg-background rounded-xl p-4 border border-border">
+                        <div className="flex items-center justify-between gap-2 mb-1.5">
+                          <span className="text-xs font-semibold text-primary">{r.citation}</span>
+                          <span className="text-[10px] font-bold text-text-muted uppercase tracking-wider">
+                            {(r.score * 100).toFixed(0)}% match
+                          </span>
+                        </div>
+                        <p className="text-sm text-text-secondary line-clamp-3">{r.text}</p>
+                      </div>
+                    ))}
+                  </div>
+                )
               )}
             </div>
           </div>
