@@ -3,8 +3,9 @@ import string
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List
+from pydantic import BaseModel
 from app.database.connection import get_db
-from app.database.models import Course, User, CourseCatalog
+from app.database.models import Course, User, CourseCatalog, CourseCoordinatorAssignment
 from app.courses.schemas import (
     CourseCreate, CourseResponse, CourseUpdate,
     CourseCatalogCreate, CourseCatalogUpdate, CourseCatalogResponse,
@@ -13,10 +14,21 @@ from app.courses.schemas import (
 from app.auth.routes import (
     get_current_teacher, get_current_user,
     get_current_program_coordinator, get_current_course_manager,
+    ProgramScope, resolve_program_ids, resolve_course_ids,
 )
 from app.courses.access import assert_course_access
 
 router = APIRouter(prefix="/courses", tags=["Courses"])
+
+
+def _assert_program_in_scope(scope: ProgramScope, program_id):
+    """403 if the caller is a scoped Program Coordinator and program_id isn't one of
+    theirs. Admins have program_ids=None (unrestricted)."""
+    if scope.program_ids is not None and program_id not in scope.program_ids:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You are not a coordinator for this program."
+        )
 
 def generate_unique_code(db: Session) -> str:
     """Generates a unique 8-character alphanumeric enrollment code."""
@@ -66,22 +78,27 @@ def list_catalog(db: Session = Depends(get_db), current_user: User = Depends(get
 # --- Admin: Course Catalog management ---
 
 @router.get("/admin/catalog", response_model=List[CourseCatalogResponse])
-def admin_list_catalog(db: Session = Depends(get_db), current_user: User = Depends(get_current_program_coordinator)):
-    return db.query(CourseCatalog).all()
+def admin_list_catalog(db: Session = Depends(get_db), scope: ProgramScope = Depends(get_current_program_coordinator)):
+    query = db.query(CourseCatalog)
+    if scope.program_ids is not None:
+        query = query.filter(CourseCatalog.program_id.in_(scope.program_ids))
+    return query.all()
 
 
 @router.post("/admin/catalog", response_model=CourseCatalogResponse, status_code=status.HTTP_201_CREATED)
 def admin_create_catalog_entry(
     entry_in: CourseCatalogCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_program_coordinator)
+    scope: ProgramScope = Depends(get_current_program_coordinator)
 ):
+    _assert_program_in_scope(scope, entry_in.program_id)
     if entry_in.prerequisite_catalog_id:
         _get_catalog_entry_or_404(db, entry_in.prerequisite_catalog_id)
 
     new_entry = CourseCatalog(
         name=entry_in.name,
         code=entry_in.code,
+        program_id=entry_in.program_id,
         prerequisite_catalog_id=entry_in.prerequisite_catalog_id,
     )
     db.add(new_entry)
@@ -95,11 +112,14 @@ def admin_update_catalog_entry(
     id: int,
     entry_in: CourseCatalogUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_program_coordinator)
+    scope: ProgramScope = Depends(get_current_program_coordinator)
 ):
     entry = _get_catalog_entry_or_404(db, id)
+    _assert_program_in_scope(scope, entry.program_id)
 
     update_data = entry_in.model_dump(exclude_unset=True)
+    if "program_id" in update_data and update_data["program_id"] is not None:
+        _assert_program_in_scope(scope, update_data["program_id"])
     if "prerequisite_catalog_id" in update_data and update_data["prerequisite_catalog_id"]:
         if update_data["prerequisite_catalog_id"] == id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A catalog entry cannot be its own prerequisite.")
@@ -117,9 +137,10 @@ def admin_update_catalog_entry(
 def admin_delete_catalog_entry(
     id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_program_coordinator)
+    scope: ProgramScope = Depends(get_current_program_coordinator)
 ):
     entry = _get_catalog_entry_or_404(db, id)
+    _assert_program_in_scope(scope, entry.program_id)
     db.delete(entry)
     db.commit()
     return None
@@ -293,8 +314,29 @@ def admin_update_course(
     if not course:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
 
-    update_data = course_in.model_dump(exclude_unset=True)
     role = current_user.role.lower()
+
+    # Scope check applies regardless of which fields are being changed - a
+    # course/program coordinator may only touch courses/programs they're assigned to.
+    # get_current_course_manager returns a raw User (shared across all 3 roles), so
+    # scope is resolved here rather than in the dependency itself.
+    if role == "course_coordinator":
+        course_ids = resolve_course_ids(db, current_user)
+        if course_ids is not None and course.id not in course_ids:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You are not assigned as this course's Course Coordinator."
+            )
+    elif role == "program_coordinator":
+        program_ids = resolve_program_ids(db, current_user)
+        program_id = course.catalog_entry.program_id if course.catalog_entry else None
+        if program_ids is not None and program_id not in program_ids:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You are not a coordinator for this course's program."
+            )
+
+    update_data = course_in.model_dump(exclude_unset=True)
     is_catalog_manager = role in ("admin", "program_coordinator")
 
     if not is_catalog_manager and ("catalog_id" in update_data or "prerequisite_course_id" in update_data):
@@ -329,11 +371,118 @@ def admin_update_course(
 def admin_delete_course(
     id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_program_coordinator)
+    scope: ProgramScope = Depends(get_current_program_coordinator)
 ):
     course = db.query(Course).filter(Course.id == id).first()
     if not course:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
+    program_id = course.catalog_entry.program_id if course.catalog_entry else None
+    _assert_program_in_scope(scope, program_id)
     db.delete(course)
     db.commit()
     return None
+
+
+# --- Program Coordinators assign/unassign Course Coordinators for their own courses ---
+
+class CourseCoordinatorAssignRequest(BaseModel):
+    user_id: int
+
+
+class CourseCoordinatorEntry(BaseModel):
+    id: int
+    full_name: str
+    email: str
+
+    class Config:
+        from_attributes = True
+
+
+def _get_course_or_404(db: Session, course_id: int) -> Course:
+    course = db.query(Course).filter(Course.id == course_id).first()
+    if not course:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
+    return course
+
+
+def _assert_course_program_in_scope(db: Session, scope: ProgramScope, course: Course):
+    program_id = course.catalog_entry.program_id if course.catalog_entry else None
+    _assert_program_in_scope(scope, program_id)
+
+
+@router.post("/{course_id}/coordinator", status_code=status.HTTP_201_CREATED)
+def assign_course_coordinator(
+    course_id: int,
+    payload: CourseCoordinatorAssignRequest,
+    db: Session = Depends(get_db),
+    scope: ProgramScope = Depends(get_current_program_coordinator)
+):
+    """A Program Coordinator (or admin) designates a Course Coordinator for a course
+    under their own program(s), without needing to go through admin. Reuses the same
+    CourseCoordinatorAssignment table as the admin-driven scope editor.
+
+    A Course Coordinator is now scoped to exactly one course (see
+    auth/routes.py change_staff_role, which rejects more than one course_id in a
+    single call). To keep this endpoint consistent with that one-course rule, assigning
+    someone here REPLACES any course(s) they previously coordinated rather than adding
+    to them - the same "replace the whole scope" behavior change_staff_role already
+    uses, just triggered incrementally one course at a time instead of via a full list."""
+    course = _get_course_or_404(db, course_id)
+    _assert_course_program_in_scope(db, scope, course)
+
+    target_user = db.query(User).filter(User.id == payload.user_id).first()
+    if not target_user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    if target_user.role.lower() != "course_coordinator":
+        target_user.role = "course_coordinator"
+
+    # Replace this user's entire course-coordinator scope with just this course, so
+    # they always end up coordinating exactly one course - mirrors change_staff_role's
+    # "drop all existing assignment rows, then insert the new ones" pattern.
+    db.query(CourseCoordinatorAssignment).filter(
+        CourseCoordinatorAssignment.user_id == target_user.id
+    ).delete()
+    db.add(CourseCoordinatorAssignment(user_id=target_user.id, course_id=course.id))
+
+    db.commit()
+    return {"message": f"{target_user.full_name} assigned as Course Coordinator for {course.name}."}
+
+
+@router.delete("/{course_id}/coordinator/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+def remove_course_coordinator(
+    course_id: int,
+    user_id: int,
+    db: Session = Depends(get_db),
+    scope: ProgramScope = Depends(get_current_program_coordinator)
+):
+    course = _get_course_or_404(db, course_id)
+    _assert_course_program_in_scope(db, scope, course)
+
+    assignment = db.query(CourseCoordinatorAssignment).filter(
+        CourseCoordinatorAssignment.user_id == user_id,
+        CourseCoordinatorAssignment.course_id == course.id,
+    ).first()
+    if not assignment:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course coordinator assignment not found")
+
+    db.delete(assignment)
+    db.commit()
+    return None
+
+
+@router.get("/{course_id}/coordinators", response_model=List[CourseCoordinatorEntry])
+def list_course_coordinators(
+    course_id: int,
+    db: Session = Depends(get_db),
+    scope: ProgramScope = Depends(get_current_program_coordinator)
+):
+    course = _get_course_or_404(db, course_id)
+    _assert_course_program_in_scope(db, scope, course)
+
+    return (
+        db.query(User)
+        .join(CourseCoordinatorAssignment, CourseCoordinatorAssignment.user_id == User.id)
+        .filter(CourseCoordinatorAssignment.course_id == course.id)
+        .all()
+    )

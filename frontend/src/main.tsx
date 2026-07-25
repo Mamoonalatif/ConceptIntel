@@ -2,6 +2,7 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { GoogleOAuthProvider } from '@react-oauth/google'
 import App from './App.tsx'
+import { ThemeProvider } from './contexts/ThemeContext'
 import './index.css'
 
 // Empty string is a valid (inert) clientId for GoogleOAuthProvider - the Google button
@@ -11,7 +12,9 @@ const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID ?? ''
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <GoogleOAuthProvider clientId={googleClientId}>
-      <App />
+      <ThemeProvider>
+        <App />
+      </ThemeProvider>
     </GoogleOAuthProvider>
   </React.StrictMode>,
 )

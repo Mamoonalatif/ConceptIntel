@@ -18,12 +18,16 @@ def check_description_word_count(v: str) -> str:
 class CourseCatalogCreate(BaseModel):
     name: str
     code: str
+    # Required so a new catalog entry is always scoped to a Program - see
+    # courses/routes.py admin_create_catalog_entry for the in-scope check.
+    program_id: int
     prerequisite_catalog_id: Optional[int] = None
 
 
 class CourseCatalogUpdate(BaseModel):
     name: Optional[str] = None
     code: Optional[str] = None
+    program_id: Optional[int] = None
     prerequisite_catalog_id: Optional[int] = None
 
 
@@ -31,6 +35,7 @@ class CourseCatalogResponse(BaseModel):
     id: int
     name: str
     code: str
+    program_id: Optional[int] = None
     prerequisite_catalog_id: Optional[int] = None
 
     class Config:

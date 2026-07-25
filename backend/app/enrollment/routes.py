@@ -8,6 +8,8 @@ from app.database.models import Course, Enrollment, User
 from app.enrollment.schemas import EnrollmentJoinRequest, EnrollmentResponse, EnrollmentDetailResponse
 from app.enrollment.services import join_course_service, EnrollmentError
 from app.auth.routes import get_current_student, get_current_teacher, get_current_user
+from app.notifications.service import create_notification
+from app.notifications.types import NotificationType
 
 router = APIRouter(prefix="/enrollment", tags=["Enrollments"])
 
@@ -32,6 +34,26 @@ def join_course(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Unable to enroll. Please try again later."
         )
+
+    # Best-effort: a notification failure must never turn a successful enrollment
+    # into an error response for the student.
+    try:
+        course = enrollment.course
+        if course:
+            create_notification(
+                db, current_student.id, NotificationType.ENROLLMENT_JOINED,
+                title="Enrolled successfully",
+                message=f"You joined {course.name} ({course.code or course.semester}).",
+                link=f"/course/{course.id}",
+            )
+            create_notification(
+                db, course.teacher_id, NotificationType.ENROLLMENT_NEW_STUDENT,
+                title="New student enrolled",
+                message=f"{current_student.full_name} joined {course.name}.",
+                link=f"/course/{course.id}",
+            )
+    except Exception as e:
+        print(f"Warning: failed to create enrollment notifications: {str(e)}")
 
     return EnrollmentResponse(
         id=enrollment.id,

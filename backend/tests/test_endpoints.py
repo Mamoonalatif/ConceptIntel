@@ -5,7 +5,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.main import app
 from app.database.connection import Base, get_db
-from app.database.models import User, Course, Enrollment
+from app.database.models import User, Course, Enrollment, CourseCatalog
 from app.auth.utils import hash_password, create_access_token
 
 # Setup SQLite test database
@@ -56,7 +56,7 @@ def test_register_user():
         "/api/auth/register",
         json={
             "email": "newuser@test.com",
-            "password": "mypassword",
+            "password": "Pass1234!",
             "full_name": "Test User",
             "role": "student"
         }
@@ -81,6 +81,12 @@ def test_login_user():
 
 def test_course_creation():
     client = TestClient(app)
+    db = TestingSessionLocal()
+    catalog_entry = CourseCatalog(name="Calculus & Analytical Geometry", code="CAL-101")
+    db.add(catalog_entry)
+    db.commit()
+    db.refresh(catalog_entry)
+
     # Generate teacher JWT
     token = create_access_token({"sub": "teacher@test.com", "role": "teacher", "user_id": 1})
     headers = {"Authorization": f"Bearer {token}"}
@@ -88,9 +94,13 @@ def test_course_creation():
     response = client.post(
         "/api/courses",
         json={
-            "name": "Calculus & Analytical Geometry",
-            "code": "CAL-101",
+            "catalog_id": catalog_entry.id,
             "semester": "Spring 2026",
+            "description": "Fundamental course covering limits derivatives and integration concepts for engineering students.",
+            "enrollment_start": "2026-08-01",
+            "enrollment_end": "2026-08-15",
+            "start_date": "2026-08-15",
+            "end_date": "2026-12-15",
             "max_students": 30
         },
         headers=headers
@@ -145,7 +155,7 @@ def test_enrollment_validation():
         headers=headers
     )
     assert response.status_code == 400
-    assert "Prerequisite course" in response.json()["detail"]
+    assert "complete" in response.json()["detail"].lower()
 
     # Complete Physics prerequisite
     enrollment = Enrollment(

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, ForeignKey, DateTime, Date, Text, Boolean, UniqueConstraint, func
+from sqlalchemy import Column, Integer, String, Float, ForeignKey, DateTime, Date, Text, Boolean, UniqueConstraint, JSON, func
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import relationship
 from app.database.connection import Base
@@ -25,11 +25,18 @@ class User(Base):
     # (see enrollment/services.py). Nullable because teachers/admins don't have one and
     # older student rows may predate this field.
     current_semester = Column(Integer, nullable=True)
+    # Storage reference for the user's profile photo (local disk path, "s3://..." or
+    # "supabase://..." - same private-storage convention as UploadedFile.file_url, see
+    # app/upload/services.py). NOT a directly-loadable URL - the frontend fetches the
+    # actual bytes through GET /auth/users/{id}/avatar (see auth/routes.py), same
+    # pattern as course material attachments.
+    avatar_url = Column(String, nullable=True)
 
     # Relationships
     courses_taught = relationship("Course", back_populates="teacher", cascade="all, delete-orphan")
     enrollments = relationship("Enrollment", back_populates="student", cascade="all, delete-orphan")
     uploaded_files = relationship("UploadedFile", back_populates="teacher", cascade="all, delete-orphan")
+    notifications = relationship("Notification", back_populates="user", cascade="all, delete-orphan")
 
 
 class TeacherRequest(Base):
@@ -44,9 +51,26 @@ class TeacherRequest(Base):
     created_at = Column(DateTime, server_default=func.now())
 
 
+class Program(Base):
+    """A degree program (e.g. "Computer Science") that groups CourseCatalog entries.
+    A Program Coordinator is scoped to one or more Programs (see
+    ProgramCoordinatorAssignment) - courses don't carry a program directly, it's
+    always derived through course.catalog_entry.program_id."""
+    __tablename__ = "programs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, nullable=False)
+    code = Column(String, nullable=True)
+    description = Column(Text, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+    catalog_entries = relationship("CourseCatalog", back_populates="program")
+
+
 class CourseCatalog(Base):
-    """Predefined catalog of course offerings. Only admins may add/edit/remove entries;
-    teachers may only pick from this list when creating a Course instance."""
+    """Predefined catalog of course offerings. Only admins/program coordinators may
+    add/edit/remove entries; teachers may only pick from this list when creating a
+    Course instance."""
     __tablename__ = "course_catalog"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -56,6 +80,12 @@ class CourseCatalog(Base):
     # Self-referencing prerequisite mapping (lives on the catalog, not the course instance)
     prerequisite_catalog_id = Column(Integer, ForeignKey("course_catalog.id"), nullable=True)
     prerequisite = relationship("CourseCatalog", remote_side=[id], backref="dependent_catalog_entries")
+
+    # Nullable because this column was added after CourseCatalog already existed in
+    # production (see backend/scripts/add_program_column.py for the one-time backfill) -
+    # new rows should always set it going forward.
+    program_id = Column(Integer, ForeignKey("programs.id"), nullable=True)
+    program = relationship("Program", back_populates="catalog_entries")
 
 
 class Course(Base):
@@ -153,7 +183,7 @@ class ContentChunk(Base):
     file_id = Column(Integer, ForeignKey("uploaded_files.id"), nullable=False, index=True)
     chunk_index = Column(Integer, nullable=False)
     text = Column(Text, nullable=False)
-    embedding = Column(ARRAY(Float), nullable=False)
+    embedding = Column(ARRAY(Float).with_variant(JSON, "sqlite"), nullable=False)
     token_count = Column(Integer, nullable=False)
     # SHA-256 of the normalized chunk text - lets reprocessing skip re-embedding
     # identical chunks (e.g. a teacher re-uploading the same slide deck).
@@ -165,4 +195,251 @@ class ContentChunk(Base):
 
     course = relationship("Course")
     file = relationship("UploadedFile", back_populates="chunks")
+
+
+class Notification(Base):
+    """An in-app notification for a single user, generated server-side in response
+    to events elsewhere in the system (enrollment, upload processing, graph review,
+    etc.) - see app/notifications/service.py for the emitters and
+    app/notifications/types.py for the fixed set of `type` values."""
+    __tablename__ = "notifications"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    type = Column(String, nullable=False, index=True)
+    title = Column(String, nullable=False)
+    message = Column(Text, nullable=False)
+    # Frontend route to navigate to when the notification is clicked, e.g.
+    # "/course/12". Nullable since some notifications (e.g. account approved) have
+    # no natural destination beyond the dashboard the user is already on.
+    link = Column(String, nullable=True)
+    # Drives icon/color on the frontend: "info" | "success" | "warning" | "error"
+    priority = Column(String, nullable=False, default="info")
+    is_read = Column(Boolean, default=False, nullable=False, index=True)
+    created_at = Column(DateTime, server_default=func.now(), index=True)
+    read_at = Column(DateTime, nullable=True)
+
+    user = relationship("User", back_populates="notifications")
+
+
+class NotificationPreference(Base):
+    """Per-user opt-out toggles for notification creation, one row per user - created
+    lazily on first GET /notification-preferences/me (see
+    app/notification_preferences/routes.py). Each column gates one or more
+    NotificationType values - see NOTIFICATION_TYPE_TO_PREFERENCE_FIELD in
+    app/notifications/service.py for the exact mapping, which is where these columns
+    are actually enforced (create_notification/notify_many skip creation when the
+    relevant column is False). All default True so existing/new users keep receiving
+    everything until they explicitly opt out, mirroring Google Classroom's
+    default-on behavior. Classroom's per-class "Class notifications" overrides are
+    intentionally NOT modeled here (global toggles only) - noted as a future gap."""
+    __tablename__ = "notification_preferences"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), unique=True, nullable=False, index=True)
+
+    # Classroom's "Classes you're enrolled in - work and other posts from teachers":
+    # announcements, materials, meetings, and new processed course content.
+    course_posts = Column(Boolean, default=True, nullable=False)
+    # Classroom's due-date reminders / new classwork: assignment_posted.
+    assignment_updates = Column(Boolean, default=True, nullable=False)
+    # Classroom's "Returned work and grades". This app has no grade-returned
+    # notification yet (left to the separate Assignment Evaluation module), so for
+    # now this gates the closest existing analogue, assignment_submitted
+    # (teacher-facing "a student turned something in").
+    grading_updates = Column(Boolean, default=True, nullable=False)
+    # Classroom's "Invitations to join classes as a student": enrollment_joined
+    # (student side) and enrollment_new_student (teacher side).
+    enrollment_updates = Column(Boolean, default=True, nullable=False)
+    # No direct Classroom equivalent - this app's content pipeline (file
+    # parsing/RAG + knowledge graph review) has its own async status separate from
+    # a teacher's regular posts, so it gets its own toggle rather than being folded
+    # into course_posts: file_processing_completed/failed, graph_approved/rejected.
+    content_processing_updates = Column(Boolean, default=True, nullable=False)
+    # Account/staffing lifecycle: teacher_request_submitted (-> admins) and
+    # account_approved (-> newly approved staff user).
+    system_updates = Column(Boolean, default=True, nullable=False)
+
+    user = relationship("User")
+
+
+class ChatMessage(Base):
+    """A single message in a user's ongoing AI assistant conversation (the
+    "Gemini"-style sidebar chat, OpenAI-backed - see app/assistant/). One
+    continuous thread per user for this first pass, not scoped per-course."""
+    __tablename__ = "chat_messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    role = Column(String, nullable=False)  # "user" | "assistant"
+    content = Column(Text, nullable=False)
+    created_at = Column(DateTime, server_default=func.now(), index=True)
+
+    user = relationship("User")
+
+
+class Announcement(Base):
+    """A teacher's post to a course's class stream (Google Classroom-style). Visible
+    to the teacher and any user with course access (see courses/access.py) - students
+    only once actively enrolled."""
+    __tablename__ = "announcements"
+
+    id = Column(Integer, primary_key=True, index=True)
+    course_id = Column(Integer, ForeignKey("courses.id"), nullable=False, index=True)
+    teacher_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    content = Column(Text, nullable=False)
+    created_at = Column(DateTime, server_default=func.now(), index=True)
+    updated_at = Column(DateTime, nullable=True)
+
+    course = relationship("Course")
+    teacher = relationship("User")
+
+
+class Assignment(Base):
+    """A teacher-posted assignment ("Classwork" in Google Classroom terms) with an
+    optional due date, point value, and reference attachment. Submissions live in
+    AssignmentSubmission - grading/AI-feedback fields there are left for the
+    Assignment Evaluation module to populate; this module only covers posting and
+    file submission."""
+    __tablename__ = "assignments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    course_id = Column(Integer, ForeignKey("courses.id"), nullable=False, index=True)
+    teacher_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    title = Column(String, nullable=False)
+    description = Column(Text, nullable=True)
+    due_date = Column(DateTime, nullable=True)
+    points = Column(Integer, nullable=True)
+    # Teacher's own reference material for the assignment (instructions, template) -
+    # distinct from what students submit back (see AssignmentSubmission.file_url).
+    attachment_url = Column(String, nullable=True)
+    attachment_filename = Column(String, nullable=True)
+    created_at = Column(DateTime, server_default=func.now(), index=True)
+    updated_at = Column(DateTime, nullable=True)
+
+    course = relationship("Course")
+    teacher = relationship("User")
+    submissions = relationship("AssignmentSubmission", back_populates="assignment", cascade="all, delete-orphan")
+
+
+class AssignmentSubmission(Base):
+    """A single student's submission for an assignment. Resubmitting before the
+    teacher grades it overwrites the file/timestamp in place (one row per student)."""
+    __tablename__ = "assignment_submissions"
+    __table_args__ = (
+        UniqueConstraint("assignment_id", "student_id", name="uq_assignment_student_submission"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    assignment_id = Column(Integer, ForeignKey("assignments.id"), nullable=False, index=True)
+    student_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    file_url = Column(String, nullable=False)
+    file_filename = Column(String, nullable=False)
+    submitted_at = Column(DateTime, server_default=func.now())
+    is_late = Column(Boolean, default=False, nullable=False)
+    # Left nullable for the (separate) Assignment Evaluation module to populate.
+    grade = Column(Float, nullable=True)
+    feedback = Column(Text, nullable=True)
+
+    assignment = relationship("Assignment", back_populates="submissions")
+    student = relationship("User")
+
+
+class Material(Base):
+    """A teacher-posted resource/multimedia post ("Material" in Google Classroom
+    terms) - no due date, no grading, just reference content for students. Either an
+    uploaded attachment, an external link, or both may be set (see
+    app/materials/routes.py, which reuses app/upload/services.py the same way
+    Assignment.attachment_url does)."""
+    __tablename__ = "materials"
+
+    id = Column(Integer, primary_key=True, index=True)
+    course_id = Column(Integer, ForeignKey("courses.id"), nullable=False, index=True)
+    teacher_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    title = Column(String, nullable=False)
+    description = Column(Text, nullable=True)
+    attachment_url = Column(String, nullable=True)
+    attachment_filename = Column(String, nullable=True)
+    external_link = Column(String, nullable=True)
+    created_at = Column(DateTime, server_default=func.now(), index=True)
+    updated_at = Column(DateTime, nullable=True)
+
+    course = relationship("Course")
+    teacher = relationship("User")
+
+
+class Meeting(Base):
+    """A teacher-posted live-session/lecture link (e.g. Zoom/Meet) with a scheduled
+    time - purely informational, the app itself does not host the call."""
+    __tablename__ = "meetings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    course_id = Column(Integer, ForeignKey("courses.id"), nullable=False, index=True)
+    teacher_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    title = Column(String, nullable=False)
+    description = Column(Text, nullable=True)
+    meeting_link = Column(String, nullable=False)
+    scheduled_at = Column(DateTime, nullable=False)
+    duration_minutes = Column(Integer, nullable=True)
+    created_at = Column(DateTime, server_default=func.now(), index=True)
+    updated_at = Column(DateTime, nullable=True)
+
+    course = relationship("Course")
+    teacher = relationship("User")
+
+
+class Comment(Base):
+    """A private note thread on a piece of course content (assignment,
+    announcement, or material). Only the author and the course's teacher(s)
+    can see a given thread - other students never see each other's comments,
+    keeping this a 1:1 student<->teacher channel rather than a public reply
+    feed."""
+    __tablename__ = "comments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    course_id = Column(Integer, ForeignKey("courses.id"), nullable=False, index=True)
+    target_type = Column(String, nullable=False, index=True)  # "assignment" | "announcement" | "material"
+    target_id = Column(Integer, nullable=False, index=True)
+    author_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    content = Column(Text, nullable=False)
+    created_at = Column(DateTime, server_default=func.now(), index=True)
+
+    course = relationship("Course")
+    author = relationship("User")
+
+
+class ProgramCoordinatorAssignment(Base):
+    """M2M: which Program(s) a given Program Coordinator user is scoped to. Absence of
+    any row for a user does NOT mean unrestricted access - only "admin" role bypasses
+    scoping entirely (see auth/routes.py resolve_program_ids)."""
+    __tablename__ = "program_coordinator_assignments"
+    __table_args__ = (
+        UniqueConstraint("user_id", "program_id", name="uq_program_coordinator_assignment"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    program_id = Column(Integer, ForeignKey("programs.id"), nullable=False, index=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+    user = relationship("User", backref="program_coordinator_assignments")
+    program = relationship("Program", backref="coordinator_assignments")
+
+
+class CourseCoordinatorAssignment(Base):
+    """M2M: which Course(s) a given Course Coordinator user is scoped to. A course
+    coordinator's scope is the union of every course any program coordinator (or
+    admin) has assigned them to - see courses/routes.py assign_course_coordinator."""
+    __tablename__ = "course_coordinator_assignments"
+    __table_args__ = (
+        UniqueConstraint("user_id", "course_id", name="uq_course_coordinator_assignment"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    course_id = Column(Integer, ForeignKey("courses.id"), nullable=False, index=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+    user = relationship("User", backref="course_coordinator_assignments")
+    course = relationship("Course", backref="coordinator_assignments")
 

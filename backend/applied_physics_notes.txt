@@ -1,0 +1,40 @@
+Applied Physics — Course Notes: Mechanics and Waves
+
+Unit 1: Kinematics
+Kinematics is the branch of mechanics that describes the motion of objects without
+considering the forces that cause the motion. Key quantities include displacement,
+velocity, and acceleration. Displacement is a vector quantity representing the change
+in position of an object. Velocity is the rate of change of displacement with respect
+to time, while acceleration is the rate of change of velocity with respect to time.
+Understanding kinematics is a prerequisite for understanding Newton's Laws of Motion.
+
+Unit 2: Newton's Laws of Motion
+Newton's First Law states that an object remains at rest or in uniform motion unless
+acted upon by a net external force. Newton's Second Law relates force, mass, and
+acceleration through the equation F = ma. Newton's Third Law states that for every
+action there is an equal and opposite reaction. These laws build directly on the
+concepts of displacement, velocity, and acceleration introduced in kinematics, and
+form the foundation for understanding work and energy.
+
+Unit 3: Work, Energy, and Power
+Work is done when a force causes displacement of an object in the direction of the
+force. Kinetic energy is the energy an object possesses due to its motion, while
+potential energy is stored energy due to an object's position. The work-energy
+theorem connects the net work done on an object to its change in kinetic energy.
+Power is the rate at which work is done. Mastery of Newton's Laws is required before
+students can fully grasp work-energy relationships.
+
+Unit 4: Simple Harmonic Motion and Waves
+Simple harmonic motion (SHM) describes periodic motion where the restoring force is
+proportional to displacement, such as in a mass-spring system or a pendulum. Wave
+motion generalizes oscillatory behavior to propagation through a medium, characterized
+by wavelength, frequency, and amplitude. Understanding SHM requires prior mastery of
+force and energy concepts. Waves are further classified into transverse and
+longitudinal waves, with sound being a key example of a longitudinal wave.
+
+Unit 5: Electromagnetism Fundamentals
+Electric charge is a fundamental property of matter that gives rise to electric and
+magnetic forces. Coulomb's Law describes the force between two point charges. Electric
+fields represent the influence a charge has on the space around it. This unit
+introduces the foundational concepts required for later coursework in Digital Logic
+Design, particularly the behavior of voltage and current in circuits.

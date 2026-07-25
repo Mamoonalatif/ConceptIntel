@@ -8,45 +8,53 @@ export default {
   theme: {
     extend: {
       colors: {
-        // ── Light Theme Backgrounds ──
-        background: "#f0f4ff",       // soft blue-white page bg
-        surface:    "#ffffff",        // white cards / panels
-        card:       "#f8faff",        // very light card bg
-        border:     "#dde3f0",        // light neutral border
+        // ── Theme-aware surface tokens ──
+        // All resolve through CSS variables (see src/index.css :root / .dark) so the
+        // same className works in both light and dark without any `dark:` prefix.
+        // The `<alpha-value>` placeholder lets Tailwind opacity modifiers (e.g. bg-surface/50) keep working.
+        background: "rgb(var(--bg) / <alpha-value>)",
+        surface:    "rgb(var(--surface) / <alpha-value>)",
+        card:       "rgb(var(--card) / <alpha-value>)",
+        border:     "rgb(var(--border) / <alpha-value>)",
 
-        // ── Brand Accent Palette ──
+        // ── Brand Accent Palette (same hue in both themes, per design) ──
         primary: {
-          DEFAULT: "#4f46e5",         // vivid indigo
-          hover:   "#4338ca",
-          light:   "#6366f1",
-          muted:   "#eef2ff",         // indigo tint bg
+          DEFAULT: "rgb(var(--primary) / <alpha-value>)",
+          hover:   "rgb(var(--primary-hover) / <alpha-value>)",
+          light:   "rgb(var(--primary-light) / <alpha-value>)",
+          muted:   "rgb(var(--primary-muted) / <alpha-value>)",
         },
         secondary: {
-          DEFAULT: "#0891b2",         // cyan
-          hover:   "#0e7490",
-          light:   "#06b6d4",
-          muted:   "#ecfeff",         // cyan tint bg
+          DEFAULT: "rgb(var(--secondary) / <alpha-value>)",
+          hover:   "rgb(var(--secondary-hover) / <alpha-value>)",
+          light:   "rgb(var(--secondary-light) / <alpha-value>)",
+          muted:   "rgb(var(--secondary-muted) / <alpha-value>)",
         },
 
         // ── Text Colors ──
         text: {
-          primary:   "#0f172a",       // near-black
-          secondary: "#475569",       // slate medium
-          muted:     "#94a3b8",       // slate light
+          primary:   "rgb(var(--text-primary) / <alpha-value>)",
+          secondary: "rgb(var(--text-secondary) / <alpha-value>)",
+          muted:     "rgb(var(--text-muted) / <alpha-value>)",
         },
       },
       fontFamily: {
-        sans: ['Outfit', 'Inter', 'system-ui', 'sans-serif'],
+        // Inter first: a neutral, highly-legible UI typeface (same family used by most
+        // professional education/productivity dashboards) - 'Outfit' kept only as a
+        // fallback, not the primary voice of the app anymore.
+        sans: ['Inter', 'Outfit', 'system-ui', 'sans-serif'],
       },
       backdropBlur: {
         xs: '2px',
       },
       boxShadow: {
-        'soft':   '0 1px 3px 0 rgba(15,23,42,0.06), 0 1px 2px -1px rgba(15,23,42,0.04)',
-        'card':   '0 4px 16px -4px rgba(79,70,229,0.08), 0 1px 4px 0 rgba(15,23,42,0.06)',
-        'focus':  '0 0 0 3px rgba(79,70,229,0.2)',
-        'glow':   '0 8px 32px -8px rgba(79,70,229,0.25)',
-        'hover':  '0 12px 36px -8px rgba(79,70,229,0.18), 0 4px 12px -4px rgba(15,23,42,0.08)',
+        // Flat, neutral shadows (no colored glow) - a plain elevation cue rather than
+        // a brand-tinted halo, matching a calmer "education app" look.
+        'soft':   '0 1px 2px 0 rgba(15,23,42,0.04), 0 1px 3px -1px rgba(15,23,42,0.06)',
+        'card':   '0 1px 3px 0 rgba(15,23,42,0.06), 0 2px 8px -2px rgba(15,23,42,0.06)',
+        'focus':  '0 0 0 3px rgba(37,99,235,0.18)',
+        'glow':   '0 4px 14px -4px rgba(15,23,42,0.12)',
+        'hover':  '0 4px 16px -4px rgba(15,23,42,0.14)',
       },
       keyframes: {
         'slide-in': {
@@ -62,8 +70,8 @@ export default {
           '100%': { opacity: '1', transform: 'translateY(0)' },
         },
         'pulse-glow': {
-          '0%, 100%': { boxShadow: '0 0 0 0 rgba(79,70,229,0)' },
-          '50%':       { boxShadow: '0 0 20px 4px rgba(79,70,229,0.12)' },
+          '0%, 100%': { boxShadow: '0 0 0 0 rgba(37,99,235,0)' },
+          '50%':       { boxShadow: '0 0 12px 2px rgba(37,99,235,0.10)' },
         },
         'spin-slow': {
           '0%':   { transform: 'rotate(0deg)' },

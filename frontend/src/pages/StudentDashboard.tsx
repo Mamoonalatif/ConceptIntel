@@ -3,12 +3,14 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { enrollmentService } from '../services/api';
 import EnrollmentCodeForm from '../components/EnrollmentCodeForm';
-import { ChangePasswordModal } from '../components/ChangePasswordModal';
+import { AppShell, type NavItem } from '../components/AppShell';
+import { ToDoList } from '../components/ToDoList';
+import { EmptyStateIllustration } from '../components/illustrations';
 import { useAutoRefresh } from '../hooks/useAutoRefresh';
 import {
-  GraduationCap, LogOut, BookOpen, User, Hash, ArrowRight,
-  Sparkles, CheckCircle, AlertCircle, Plus,
-  TrendingUp, Award, BarChart3, ChevronRight, KeyRound
+  GraduationCap, BookOpen, User, Hash, ArrowRight,
+  Star, CheckCircle, AlertCircle, Plus,
+  TrendingUp, Award, BarChart3, ChevronRight, ListChecks, LayoutGrid
 } from 'lucide-react';
 
 interface EnrollmentDetail {
@@ -38,15 +40,15 @@ const BANNER_GRADIENTS = [
 const getBannerGradient = (id: number) => BANNER_GRADIENTS[Math.abs(id) % BANNER_GRADIENTS.length];
 
 const StudentDashboard: React.FC = () => {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const navigate = useNavigate();
-  const [showChangePassword, setShowChangePassword] = useState(false);
 
   const [enrollments, setEnrollments] = useState<EnrollmentDetail[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [showJoinModal, setShowJoinModal] = useState(false);
+  const [activeTab, setActiveTab] = useState<'classes' | 'todo'>('classes');
 
   const fetchEnrollments = async (silent = false) => {
     try {
@@ -79,60 +81,51 @@ const StudentDashboard: React.FC = () => {
     : 0;
 
   const getDifficultyColor = (progress: number) => {
-    if (progress >= 70) return 'text-emerald-600';
-    if (progress >= 40) return 'text-amber-600';
-    return 'text-rose-500';
+    if (progress >= 70) return 'text-emerald-600 dark:text-emerald-400';
+    if (progress >= 40) return 'text-amber-600 dark:text-amber-400';
+    return 'text-rose-500 dark:text-rose-400';
   };
 
+  const navItems: NavItem[] = [
+    {
+      key: 'classes',
+      label: 'My Classes',
+      icon: LayoutGrid,
+      active: activeTab === 'classes',
+      onClick: () => setActiveTab('classes'),
+    },
+    ...enrollments.map((enr) => ({
+      key: `course-${enr.course.id}`,
+      label: enr.course.name,
+      icon: BookOpen,
+      nested: true,
+      onClick: () => navigate(`/course/${enr.course.id}`),
+    })),
+    {
+      key: 'todo',
+      label: 'To-Do',
+      icon: ListChecks,
+      active: activeTab === 'todo',
+      onClick: () => setActiveTab('todo'),
+    },
+  ];
+
   return (
-    <div className="min-h-screen bg-background pb-16">
-      <div className="page-bg-decoration" />
-
-      {/* Header */}
-      <header className="glass-panel sticky top-0 z-30 border-b border-border shadow-soft">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 bg-gradient-to-tr from-primary to-secondary rounded-xl flex items-center justify-center shadow-glow">
-              <GraduationCap className="w-5 h-5 text-white" />
-            </div>
-            <div>
-              <h1 className="text-lg font-bold gradient-text leading-tight">ConceptIntel</h1>
-              <p className="text-[10px] text-text-muted">Student Hub</p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => setShowJoinModal(true)}
-              id="join-class-btn"
-              title="Join a class"
-              className="w-9 h-9 flex items-center justify-center bg-gradient-to-tr from-secondary to-secondary-hover text-white rounded-full shadow-soft active:scale-95 transition-all"
-            >
-              <Plus className="w-4.5 h-4.5" />
-            </button>
-            <div className="flex items-center gap-2 bg-primary-muted border border-primary/20 rounded-lg px-3 py-1.5 text-sm">
-              <User className="w-3.5 h-3.5 text-primary" />
-              <span className="font-semibold text-primary text-xs">{user?.full_name}</span>
-            </div>
-            <button
-              onClick={() => setShowChangePassword(true)}
-              className="p-2 text-text-muted hover:text-primary rounded-lg hover:bg-primary-muted border border-transparent hover:border-primary/20 transition-all"
-              title="Change Password"
-            >
-              <KeyRound className="w-4 h-4" />
-            </button>
-            <button
-              onClick={logout}
-              id="student-logout"
-              className="p-2 text-text-muted hover:text-rose-500 rounded-lg hover:bg-rose-50 border border-transparent hover:border-rose-200 transition-all"
-              title="Logout"
-            >
-              <LogOut className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-      </header>
-
+    <AppShell
+      roleLabel="Student Hub"
+      logoIcon={GraduationCap}
+      navItems={navItems}
+      headerActions={
+        <button
+          onClick={() => setShowJoinModal(true)}
+          id="join-class-btn"
+          className="btn-primary"
+        >
+          <Plus className="w-4 h-4" />
+          Join a class
+        </button>
+      }
+    >
       {/* Join a Class Modal */}
       {showJoinModal && (
         <div
@@ -145,39 +138,6 @@ const StudentDashboard: React.FC = () => {
         </div>
       )}
 
-      {showChangePassword && <ChangePasswordModal onClose={() => setShowChangePassword(false)} />}
-
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-8 relative z-10 flex flex-col lg:flex-row gap-6 items-start">
-
-        {/* Sidebar — enrolled classes only */}
-        <aside className="w-full lg:w-64 shrink-0 bg-surface rounded-2xl border border-border shadow-card overflow-hidden animate-fade-up lg:sticky lg:top-24">
-          <div className="px-4 py-3 border-b border-border">
-            <h3 className="text-xs font-bold text-text-muted uppercase tracking-wider">Enrolled Classes</h3>
-          </div>
-          {enrollments.length === 0 ? (
-            <p className="text-xs text-text-muted px-4 py-4">No classes joined yet.</p>
-          ) : (
-            <nav className="py-2 max-h-[70vh] overflow-y-auto">
-              {enrollments.map((enr) => (
-                <button
-                  key={enr.id}
-                  id={`sidebar-course-${enr.course.id}`}
-                  onClick={() => navigate(`/course/${enr.course.id}`)}
-                  className="w-full flex items-center gap-2.5 px-4 py-2.5 text-left hover:bg-background transition-all"
-                >
-                  <span className={`w-2.5 h-2.5 rounded-full shrink-0 bg-gradient-to-br ${getBannerGradient(enr.course.id)}`} />
-                  <span className="min-w-0">
-                    <span className="block text-sm font-semibold text-text-primary truncate">{enr.course.name}</span>
-                    <span className="block text-[11px] text-text-muted truncate">{enr.course.code || 'NO-CODE'}</span>
-                  </span>
-                </button>
-              ))}
-            </nav>
-          )}
-        </aside>
-
-        <main className="flex-1 min-w-0">
-
         {/* Welcome Banner + Stats Row */}
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 mb-8">
           {/* Welcome Card */}
@@ -186,7 +146,7 @@ const StudentDashboard: React.FC = () => {
               <div>
                 <p className="text-sm text-text-muted font-medium">Welcome back,</p>
                 <h2 className="text-2xl font-extrabold text-text-primary flex items-center gap-2 mt-0.5">
-                  {user?.full_name} <Sparkles className="w-5 h-5 text-amber-400" />
+                  {user?.full_name} <Star className="w-5 h-5 text-amber-400" />
                 </h2>
                 <p className="text-text-secondary text-sm mt-2 leading-relaxed">
                   Track conceptual milestones, explore knowledge graphs, and build your learning path.
@@ -232,20 +192,22 @@ const StudentDashboard: React.FC = () => {
 
         {/* Alert Banners */}
         {error && (
-          <div className="bg-red-50 border border-red-200 text-red-600 rounded-xl p-4 flex items-center gap-3 mb-6 text-sm animate-fade-in">
+          <div className="bg-red-50 border border-red-200 text-red-600 dark:bg-red-500/10 dark:border-red-500/30 dark:text-red-400 rounded-xl p-4 flex items-center gap-3 mb-6 text-sm animate-fade-in">
             <AlertCircle className="w-5 h-5 shrink-0" />
             <span>{error}</span>
           </div>
         )}
         {success && (
-          <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-xl p-4 flex items-center gap-3 mb-6 text-sm animate-fade-in">
+          <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 dark:bg-emerald-500/10 dark:border-emerald-500/30 dark:text-emerald-400 rounded-xl p-4 flex items-center gap-3 mb-6 text-sm animate-fade-in">
             <CheckCircle className="w-5 h-5 shrink-0" />
             <span>{success}</span>
           </div>
         )}
 
+        {activeTab === 'todo' && <ToDoList />}
+
         {/* Courses Grid */}
-        {loading ? (
+        {activeTab === 'classes' && (loading ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {[1, 2, 3, 4].map((i) => (
               <div key={i} className="glass-panel rounded-2xl p-6 h-52 border border-border">
@@ -258,7 +220,7 @@ const StudentDashboard: React.FC = () => {
           </div>
         ) : enrollments.length === 0 ? (
           <div className="text-center max-w-md mx-auto mt-16 animate-fade-up">
-            <BookOpen className="w-16 h-16 text-primary/30 mx-auto mb-4" strokeWidth={1.25} />
+            <EmptyStateIllustration className="w-32 h-32 mx-auto mb-4" />
             <h3 className="text-lg font-bold text-text-primary mb-1.5">No classes yet</h3>
             <p className="text-text-secondary mb-4 text-sm">
               You haven't joined any classrooms. Tap the <strong>+</strong> button above to enter an enrollment code from your teacher.
@@ -284,7 +246,7 @@ const StudentDashboard: React.FC = () => {
               {enrollments.map((enr, i) => (
                 <div
                   key={enr.id}
-                  className="group rounded-2xl overflow-hidden border border-border shadow-card bg-surface animate-fade-up hover:shadow-hover hover:-translate-y-0.5 transition-all cursor-pointer"
+                  className="group glass-panel-interactive rounded-2xl overflow-hidden border border-border/40 animate-fade-up transition-all cursor-pointer"
                   style={{ animationDelay: `${i * 0.05}s` }}
                   onClick={() => navigate(`/course/${enr.course.id}`)}
                 >
@@ -343,10 +305,8 @@ const StudentDashboard: React.FC = () => {
               ))}
             </div>
           </div>
-        )}
-        </main>
-      </div>
-    </div>
+        ))}
+    </AppShell>
   );
 };
 

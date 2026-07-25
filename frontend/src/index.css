@@ -1,8 +1,76 @@
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* ─────────────────────────────────────────────
+   THEME VARIABLES — clean, professional education-app palette
+   (flat surfaces, neutral grays, one calm blue accent - no gradients/glow).
+   Values are "R G B" channel triples (no rgb()/commas) so Tailwind's
+   `rgb(var(--x) / <alpha-value>)` colors in tailwind.config.js can apply
+   opacity modifiers. `.dark` is toggled on <html> by ThemeContext.
+───────────────────────────────────────────── */
+:root {
+  /* Light theme - subtly teal-tinted elevation scale (ties the dashboard's
+     page background to the brand color instead of a stark neutral gray) -
+     the tint is faint enough that cards/surfaces still read as clean white. */
+  --bg:      244 249 248; /* faint teal-tinted off-white page background */
+  --surface: 255 255 255; /* white cards / panels / header */
+  --card:    241 248 247; /* faint teal-tinted nested card bg */
+  --border:  221 232 230; /* teal-tinted neutral border */
+
+  --text-primary:   32 33 36;   /* near-black, neutral (not blue-black) */
+  --text-secondary: 95 99 104;  /* neutral gray */
+  --text-muted:     154 160 166; /* lighter neutral gray */
+
+  /* Brand accent - muted teal (final). This is the platform's identity color,
+     used consistently everywhere - dashboards, illustrations, landing page -
+     desaturated enough to stay calm/professional rather than vivid/playful. */
+  --primary:        15 118 110;   /* muted teal (teal-700) */
+  --primary-hover:  17 94 89;     /* darker teal, hover state (teal-800) */
+  --primary-light:  45 175 165;   /* brighter teal - text/border legibility only */
+  --primary-muted:  230 246 244;  /* pale teal tint bg */
+
+  /* Secondary accent - muted warm gray (stone), used sparingly for a second
+     data series/status - a neutral partner to the teal, not a second hue. */
+  --secondary:        87 83 78;   /* stone-600 */
+  --secondary-hover:  68 64 60;   /* stone-700 */
+  --secondary-light:  120 113 108; /* stone-500 */
+  --secondary-muted:  245 245 244; /* stone-100 */
+
+  --shadow-color: 32 33 36;
+}
+
+:root.dark {
+  /* Dark theme - subtly teal-tinted charcoal elevation scale, matching the
+     light theme's tie-in to the brand color rather than a stark neutral. */
+  --bg:      15 20 19;    /* near-black, faintly teal-tinted page background */
+  --surface: 27 33 32;    /* raised panels / header */
+  --card:    34 41 40;    /* nested card, one step lighter than surface */
+  --border:  49 58 57;    /* teal-tinted neutral border, visible on dark surfaces */
+
+  --text-primary:   232 234 237; /* near-white */
+  --text-secondary: 154 160 166; /* neutral gray */
+  --text-muted:     116 122 128; /* muted gray */
+
+  /* Same values as light mode (NOT brightened) - --primary/--secondary back the
+     solid badge/button/banner fills that carry white text/icons, and a dark teal
+     fill reads fine under white in either theme. --primary-light/--secondary-light
+     are the ones that get brightened below, since those back plain text/border
+     color directly against the page background, where dark-on-dark would vanish. */
+  --primary:        15 118 110;  /* muted teal, same as light */
+  --primary-hover:  17 94 89;    /* darker teal, same as light */
+  --primary-light:  94 199 188;  /* brighter teal - text/border legibility only */
+  --primary-muted:  15 42 40;    /* dark teal tint, not a pale tint */
+
+  --secondary:        87 83 78;   /* stone-600, same as light */
+  --secondary-hover:  68 64 60;   /* stone-700, same as light */
+  --secondary-light:  168 162 158; /* stone-400 - brightened for text/border legibility */
+  --secondary-muted:  41 37 36;    /* stone-800 */
+
+  --shadow-color: 0 0 0;
+}
 
 @layer base {
   html {
@@ -10,8 +78,9 @@
   }
   body {
     @apply bg-background text-text-primary antialiased;
-    font-family: 'Outfit', 'Inter', sans-serif;
+    font-family: 'Inter', system-ui, sans-serif;
     overflow-x: hidden;
+    transition: background-color 0.2s ease, color 0.2s ease;
   }
   * {
     box-sizing: border-box;
@@ -19,71 +88,44 @@
 }
 
 /* ─────────────────────────────────────────────
-   LIGHT CARD / PANEL COMPONENTS
+   CARD / PANEL COMPONENTS (theme-aware)
+   Flat, opaque surfaces - no blur/glassmorphism or colored glow, to read as a
+   calm, professional education app rather than a marketing/SaaS landing page.
 ───────────────────────────────────────────── */
 .glass-panel {
-  background: rgba(255, 255, 255, 0.92);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(221, 227, 240, 0.8);
-  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.06), 0 4px 16px -4px rgba(79, 70, 229, 0.06);
+  background: rgb(var(--surface));
+  border: 1px solid rgb(var(--border));
+  box-shadow: 0 1px 2px rgb(var(--shadow-color) / 0.04), 0 1px 3px -1px rgb(var(--shadow-color) / 0.06);
 }
 
 .glass-panel-interactive {
-  background: rgba(255, 255, 255, 0.9);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(221, 227, 240, 0.7);
-  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.05);
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  background: rgb(var(--surface));
+  border: 1px solid rgb(var(--border));
+  box-shadow: 0 1px 2px rgb(var(--shadow-color) / 0.04);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
   cursor: pointer;
 }
 
 .glass-panel-interactive:hover {
-  background: rgba(255, 255, 255, 1);
-  border-color: rgba(99, 102, 241, 0.35);
-  box-shadow: 0 12px 36px -8px rgba(79, 70, 229, 0.18), 0 4px 12px -4px rgba(15, 23, 42, 0.08);
-  transform: translateY(-3px);
+  border-color: rgb(var(--primary-light) / 0.5);
+  box-shadow: 0 2px 8px rgb(var(--shadow-color) / 0.08);
 }
 
-/* Subtle gradient card variant */
+/* Flat card variant (kept as a plain surface, no gradient) */
 .card-gradient {
-  background: linear-gradient(135deg, #ffffff 0%, #f0f4ff 100%);
-  border: 1px solid rgba(221, 227, 240, 0.9);
-  box-shadow: 0 4px 16px -4px rgba(79, 70, 229, 0.08);
+  background: rgb(var(--surface));
+  border: 1px solid rgb(var(--border));
+  box-shadow: 0 1px 3px rgb(var(--shadow-color) / 0.06);
 }
 
 /* ─────────────────────────────────────────────
    HERO / PAGE BACKGROUND DECORATIONS
+   Intentionally a no-op now - a plain flat background reads as more
+   professional than decorative gradient blobs; kept as an empty hook so
+   existing markup referencing this class doesn't need to change.
 ───────────────────────────────────────────── */
 .page-bg-decoration {
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  overflow: hidden;
-  z-index: 0;
-}
-
-.page-bg-decoration::before {
-  content: '';
-  position: absolute;
-  top: -20%;
-  right: -10%;
-  width: 600px;
-  height: 600px;
-  background: radial-gradient(circle, rgba(99, 102, 241, 0.08) 0%, transparent 70%);
-  border-radius: 50%;
-}
-
-.page-bg-decoration::after {
-  content: '';
-  position: absolute;
-  bottom: -20%;
-  left: -10%;
-  width: 500px;
-  height: 500px;
-  background: radial-gradient(circle, rgba(6, 182, 212, 0.07) 0%, transparent 70%);
-  border-radius: 50%;
+  display: none;
 }
 
 /* ─────────────────────────────────────────────
@@ -111,8 +153,8 @@
 }
 
 @keyframes pulse-glow {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(79, 70, 229, 0); }
-  50%       { box-shadow: 0 0 20px 4px rgba(79, 70, 229, 0.12); }
+  0%, 100% { box-shadow: 0 0 0 0 rgb(var(--primary) / 0); }
+  50%       { box-shadow: 0 0 12px 2px rgb(var(--primary) / 0.10); }
 }
 
 @keyframes shimmer {
@@ -127,13 +169,13 @@
 
 /* Shimmer loader */
 .shimmer-loader {
-  background: linear-gradient(90deg, #f0f4ff 25%, #e8edfa 50%, #f0f4ff 75%);
+  background: linear-gradient(90deg, rgb(var(--bg)) 25%, rgb(var(--border)) 50%, rgb(var(--bg)) 75%);
   background-size: 200% 100%;
   animation: shimmer 1.5s infinite;
 }
 
 /* ─────────────────────────────────────────────
-   REACT FLOW OVERRIDES — LIGHT THEME
+   REACT FLOW OVERRIDES — theme-aware
 ───────────────────────────────────────────── */
 .react-flow__node {
   border-radius: 14px !important;
@@ -147,51 +189,53 @@
 }
 
 .react-flow__edge-path {
-  stroke: rgba(79, 70, 229, 0.5) !important;
+  /* --primary-light, not --primary: this is a foreground line drawn directly on
+     --bg, so it needs the brighter dark-mode variant to stay visible (--primary
+     itself is intentionally kept dark in both themes for solid fills). */
+  stroke: rgb(var(--primary-light) / 0.6) !important;
   stroke-width: 2.5 !important;
 }
 
 .react-flow__edge-path:hover {
-  stroke: rgba(79, 70, 229, 0.9) !important;
+  stroke: rgb(var(--primary-light) / 0.95) !important;
 }
 
-/* Light flow background */
 .react-flow__background {
-  background-color: #f0f4ff !important;
+  background-color: rgb(var(--bg)) !important;
 }
 
 .react-flow__controls {
-  background: #ffffff !important;
-  border: 1px solid #dde3f0 !important;
+  background: rgb(var(--surface)) !important;
+  border: 1px solid rgb(var(--border)) !important;
   border-radius: 12px !important;
   overflow: hidden;
-  box-shadow: 0 4px 12px rgba(15,23,42,0.08) !important;
+  box-shadow: 0 4px 12px rgb(var(--shadow-color) / 0.08) !important;
 }
 
 .react-flow__controls-button {
-  background: #ffffff !important;
-  border-bottom: 1px solid #dde3f0 !important;
-  color: #475569 !important;
-  fill: #475569 !important;
+  background: rgb(var(--surface)) !important;
+  border-bottom: 1px solid rgb(var(--border)) !important;
+  color: rgb(var(--text-secondary)) !important;
+  fill: rgb(var(--text-secondary)) !important;
   width: 30px !important;
   height: 30px !important;
 }
 
 .react-flow__controls-button:hover {
-  background: #f0f4ff !important;
-  color: #4f46e5 !important;
-  fill: #4f46e5 !important;
+  background: rgb(var(--bg)) !important;
+  color: rgb(var(--primary-light)) !important;
+  fill: rgb(var(--primary-light)) !important;
 }
 
 .react-flow__minimap {
   border-radius: 12px !important;
-  border: 1px solid #dde3f0 !important;
+  border: 1px solid rgb(var(--border)) !important;
   overflow: hidden;
-  box-shadow: 0 4px 12px rgba(15,23,42,0.08) !important;
+  box-shadow: 0 4px 12px rgb(var(--shadow-color) / 0.08) !important;
 }
 
 .react-flow__minimap-mask {
-  fill: rgba(240, 244, 255, 0.6) !important;
+  fill: rgb(var(--bg) / 0.6) !important;
 }
 
 .react-flow__attribution {
@@ -199,7 +243,7 @@
 }
 
 /* ─────────────────────────────────────────────
-   CUSTOM SCROLLBAR — LIGHT
+   CUSTOM SCROLLBAR — theme-aware
 ───────────────────────────────────────────── */
 ::-webkit-scrollbar {
   width: 6px;
@@ -207,16 +251,16 @@
 }
 
 ::-webkit-scrollbar-track {
-  background: #f0f4ff;
+  background: rgb(var(--bg));
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #c7d0e8;
+  background: rgb(var(--border));
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #6366f1;
+  background: rgb(var(--primary-light));
 }
 
 /* ─────────────────────────────────────────────
@@ -231,22 +275,22 @@
      matches the look already used by EnrollmentCodeForm's "Join class" dialog. */
   .input-light {
     width: 100%;
-    background: #f8faff;
-    border: 2px solid #dde3f0;
+    background: rgb(var(--card));
+    border: 2px solid rgb(var(--border));
     border-radius: 8px;
     padding: 0.6rem 1rem;
     font-size: 0.875rem;
-    color: #0f172a;
+    color: rgb(var(--text-primary));
     transition: border-color 0.2s;
     outline: none;
   }
 
   .input-light::placeholder {
-    color: #94a3b8;
+    color: rgb(var(--text-muted));
   }
 
   .input-light:focus {
-    border-color: #0891b2;
+    border-color: rgb(var(--secondary));
   }
 
   .input-light.input-error {
@@ -260,31 +304,90 @@
 
 /* ─────────────────────────────────────────────
    BUTTON VARIANTS
+   These are the canonical "primary action" / "secondary action" button
+   styles - reused as-is by every dashboard so button radius/padding/weight
+   stays consistent across the app (10px radius, 0.6rem/1.25rem padding).
 ───────────────────────────────────────────── */
 .btn-primary {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
   padding: 0.6rem 1.25rem;
-  background: linear-gradient(135deg, #4f46e5, #6366f1);
+  background: rgb(var(--primary));
   color: white;
   font-weight: 600;
   font-size: 0.875rem;
-  border-radius: 10px;
+  border-radius: 8px;
   border: none;
   cursor: pointer;
-  transition: all 0.2s;
-  box-shadow: 0 4px 12px rgba(79,70,229,0.25);
+  transition: background-color 0.15s ease, box-shadow 0.15s ease;
+  box-shadow: 0 1px 2px rgb(var(--shadow-color) / 0.12);
 }
 
 .btn-primary:hover {
-  background: linear-gradient(135deg, #4338ca, #4f46e5);
-  box-shadow: 0 6px 20px rgba(79,70,229,0.35);
-  transform: translateY(-1px);
+  background: rgb(var(--primary-hover));
+  box-shadow: 0 2px 6px rgb(var(--shadow-color) / 0.16);
 }
 
 .btn-primary:active {
   transform: scale(0.98);
+}
+
+/* ─────────────────────────────────────────────
+   DARK-MODE TEXT/BORDER LEGIBILITY OVERRIDE
+   --primary/--secondary stay a dark, muted slate/stone in BOTH themes so solid
+   fills (badges, buttons, banners with white text/icons - all set via
+   background-color/gradient utilities) look right everywhere. But when those same
+   accent tokens are used as plain `color`/`border-color` directly against the page
+   background (not a fill), a dark slate would nearly vanish on dark-mode's
+   near-black page - so only those two properties get swapped to the brighter
+   `-light` variant in dark mode. Fills are untouched since they set a different
+   CSS property (background-color / background-image), not color/border-color.
+───────────────────────────────────────────── */
+.dark .text-primary {
+  color: rgb(var(--primary-light));
+}
+.dark .hover\:text-primary:hover {
+  color: rgb(var(--primary-light));
+}
+.dark .text-secondary {
+  color: rgb(var(--secondary-light));
+}
+.dark .hover\:text-secondary:hover {
+  color: rgb(var(--secondary-light));
+}
+.dark .border-primary {
+  border-color: rgb(var(--primary-light));
+}
+.dark .border-primary\/20 {
+  border-color: rgb(var(--primary-light) / 0.2);
+}
+.dark .border-primary\/30 {
+  border-color: rgb(var(--primary-light) / 0.3);
+}
+.dark .hover\:border-primary:hover {
+  border-color: rgb(var(--primary-light));
+}
+.dark .hover\:border-primary\/20:hover {
+  border-color: rgb(var(--primary-light) / 0.2);
+}
+.dark .hover\:border-primary\/30:hover {
+  border-color: rgb(var(--primary-light) / 0.3);
+}
+.dark .hover\:border-primary\/40:hover {
+  border-color: rgb(var(--primary-light) / 0.4);
+}
+.dark .border-secondary {
+  border-color: rgb(var(--secondary-light));
+}
+.dark .border-secondary\/20 {
+  border-color: rgb(var(--secondary-light) / 0.2);
+}
+.dark .border-secondary\/30 {
+  border-color: rgb(var(--secondary-light) / 0.3);
+}
+.dark .hover\:border-secondary:hover {
+  border-color: rgb(var(--secondary-light));
 }
 
 .btn-ghost {
@@ -293,19 +396,19 @@
   gap: 0.5rem;
   padding: 0.6rem 1.25rem;
   background: transparent;
-  color: #475569;
+  color: rgb(var(--text-secondary));
   font-weight: 500;
   font-size: 0.875rem;
   border-radius: 10px;
-  border: 1.5px solid #dde3f0;
+  border: 1.5px solid rgb(var(--border));
   cursor: pointer;
   transition: all 0.2s;
 }
 
 .btn-ghost:hover {
-  background: #f0f4ff;
-  border-color: #6366f1;
-  color: #4f46e5;
+  background: rgb(var(--bg));
+  border-color: rgb(var(--primary-light));
+  color: rgb(var(--primary-light));
 }
 
 /* ─────────────────────────────────────────────
@@ -356,6 +459,24 @@
   text-transform: uppercase;
 }
 
+/* Dark-mode badge variants: dimmer tinted background instead of the pastel
+   light-theme fill, so status chips don't glare against a near-black page. */
+.dark .badge-easy {
+  background: rgba(22, 163, 74, 0.18);
+  color: #4ade80;
+  border-color: rgba(22, 163, 74, 0.35);
+}
+.dark .badge-medium {
+  background: rgba(217, 119, 6, 0.18);
+  color: #fbbf24;
+  border-color: rgba(217, 119, 6, 0.35);
+}
+.dark .badge-hard {
+  background: rgba(220, 38, 38, 0.18);
+  color: #f87171;
+  border-color: rgba(220, 38, 38, 0.35);
+}
+
 /* ─────────────────────────────────────────────
    MISC UTILITIES
 ───────────────────────────────────────────── */
@@ -372,37 +493,39 @@
   overflow: hidden;
 }
 
-/* Gradient text utility */
+/* Accent text utility - flat solid color, not a gradient clip, to keep
+   headings reading as calm/professional rather than a marketing hero.
+   Uses --primary-light (not --primary) since this is text directly on the
+   page background, not a filled badge/button. */
 .gradient-text {
-  background: linear-gradient(135deg, #4f46e5, #06b6d4);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  color: rgb(var(--primary-light));
 }
 
 /* Section divider */
 .divider {
   border: none;
-  border-top: 1px solid #dde3f0;
+  border-top: 1px solid rgb(var(--border));
   margin: 1.5rem 0;
 }
 
 /* Focus ring override */
 *:focus-visible {
-  outline: 2px solid #6366f1;
+  outline: 2px solid rgb(var(--primary-light));
   outline-offset: 2px;
   border-radius: 6px;
 }
 
 /* Progress bar */
 .progress-bar-track {
-  background: #e2e8f0;
+  background: rgb(var(--border));
   border-radius: 999px;
   overflow: hidden;
 }
 
 .progress-bar-fill {
-  background: linear-gradient(90deg, #4f46e5, #06b6d4);
+  /* --primary-light: this fill needs to stand out against its own track
+     (--border), not carry white text on top like a badge/button does. */
+  background: rgb(var(--primary-light));
   border-radius: 999px;
   transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
 }

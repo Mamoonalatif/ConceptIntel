@@ -13,6 +13,19 @@ from app.courses.routes import router as courses_router
 from app.enrollment.routes import router as enrollment_router
 from app.upload.routes import router as upload_router
 from app.knowledge_graph.routes import router as graph_router
+from app.notifications.routes import router as notifications_router
+from app.announcements.routes import router as announcements_router
+from app.assignments.routes import router as assignments_router
+from app.programs.routes import router as programs_router
+from app.materials.routes import router as materials_router
+from app.meetings.routes import router as meetings_router
+from app.stream.routes import router as stream_router
+from app.students.routes import router as students_router
+from app.notification_preferences.routes import router as notification_preferences_router
+from app.assistant.routes import router as assistant_router
+from app.calendar.routes import router as calendar_router
+from app.contact.routes import router as contact_router
+from app.comments.routes import router as comments_router
 
 logger = logging.getLogger("conceptintel")
 
@@ -87,6 +100,19 @@ app.include_router(courses_router, prefix="/api")
 app.include_router(enrollment_router, prefix="/api")
 app.include_router(upload_router, prefix="/api")
 app.include_router(graph_router, prefix="/api")
+app.include_router(notifications_router, prefix="/api")
+app.include_router(announcements_router, prefix="/api")
+app.include_router(assignments_router, prefix="/api")
+app.include_router(programs_router, prefix="/api")
+app.include_router(materials_router, prefix="/api")
+app.include_router(meetings_router, prefix="/api")
+app.include_router(stream_router, prefix="/api")
+app.include_router(students_router, prefix="/api")
+app.include_router(notification_preferences_router, prefix="/api")
+app.include_router(assistant_router, prefix="/api")
+app.include_router(calendar_router, prefix="/api")
+app.include_router(contact_router, prefix="/api")
+app.include_router(comments_router, prefix="/api")
 
 
 @app.get("/")

@@ -2,11 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { courseService } from '../services/api';
-import { ChangePasswordModal } from '../components/ChangePasswordModal';
+import { AppShell, type NavItem } from '../components/AppShell';
+import { EmptyStateIllustration } from '../components/illustrations';
 import { useAutoRefresh } from '../hooks/useAutoRefresh';
 import {
-  Plus, LogOut, BookOpen, User, Hash, Users, ArrowRight, ShieldCheck,
-  Sparkles, RefreshCw, X, HelpCircle, BarChart3, Network, GraduationCap, FileText, KeyRound,
+  Plus, BookOpen, Hash, Users, ArrowRight, ShieldCheck,
+  Star, RefreshCw, X, HelpCircle, BarChart3, Network, GraduationCap, FileText,
   Check, Link as LinkIcon
 } from 'lucide-react';
 
@@ -52,9 +53,8 @@ const BANNER_GRADIENTS = [
 const getBannerGradient = (id: number) => BANNER_GRADIENTS[Math.abs(id) % BANNER_GRADIENTS.length];
 
 const TeacherDashboard: React.FC = () => {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const navigate = useNavigate();
-  const [showChangePassword, setShowChangePassword] = useState(false);
   const [copiedCourseId, setCopiedCourseId] = useState<number | null>(null);
 
   const [courses, setCourses] = useState<Course[]>([]);
@@ -196,57 +196,27 @@ const TeacherDashboard: React.FC = () => {
     });
   };
 
+  const navItems: NavItem[] = [
+    { key: 'courses', label: 'My Courses', icon: BookOpen, active: true },
+  ];
+
   return (
-    <div className="min-h-screen bg-background pb-16">
-      <div className="page-bg-decoration" />
-
-      {/* Header */}
-      <header className="glass-panel sticky top-0 z-30 border-b border-border shadow-soft">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 bg-gradient-to-tr from-primary to-secondary rounded-xl flex items-center justify-center shadow-glow">
-              <BookOpen className="w-5 h-5 text-white" />
-            </div>
-            <div>
-              <h1 className="text-lg font-bold gradient-text leading-tight">ConceptIntel</h1>
-              <p className="text-[10px] text-text-muted">Teacher Portal</p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2 bg-primary-muted border border-primary/20 rounded-lg px-3 py-1.5">
-              <User className="w-3.5 h-3.5 text-primary" />
-              <span className="font-semibold text-primary text-xs">{user?.full_name}</span>
-            </div>
-            <button
-              id="create-course-btn"
-              onClick={() => setShowModal(true)}
-              className="w-10 h-10 rounded-full bg-gradient-to-tr from-primary to-secondary text-white flex items-center justify-center shadow-glow hover:shadow-hover hover:scale-105 active:scale-95 transition-all"
-              title="Create a new class"
-            >
-              <Plus className="w-5 h-5" />
-            </button>
-            <button
-              onClick={() => setShowChangePassword(true)}
-              className="p-2 text-text-muted hover:text-primary rounded-lg hover:bg-primary-muted border border-transparent hover:border-primary/20 transition-all"
-              title="Change Password"
-            >
-              <KeyRound className="w-4 h-4" />
-            </button>
-            <button
-              onClick={logout}
-              id="teacher-logout"
-              className="p-2 text-text-muted hover:text-rose-500 rounded-lg hover:bg-rose-50 border border-transparent hover:border-rose-200 transition-all"
-              title="Logout"
-            >
-              <LogOut className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-      </header>
-
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-8 relative z-10">
-
+    <AppShell
+      roleLabel="Teacher Portal"
+      logoIcon={BookOpen}
+      navItems={navItems}
+      headerActions={
+        <button
+          id="create-course-btn"
+          onClick={() => setShowModal(true)}
+          className="btn-primary"
+          title="Create a new class"
+        >
+          <Plus className="w-4 h-4" />
+          Create Course
+        </button>
+      }
+    >
         {/* Welcome + Stats Row */}
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 mb-8">
           {/* Welcome */}
@@ -254,7 +224,7 @@ const TeacherDashboard: React.FC = () => {
             <div>
               <p className="text-sm text-text-muted font-medium">Welcome back,</p>
               <h2 className="text-2xl font-extrabold text-text-primary flex items-center gap-2 mt-0.5">
-                {user?.full_name} <Sparkles className="w-5 h-5 text-amber-400" />
+                {user?.full_name} <Star className="w-5 h-5 text-amber-400" />
               </h2>
               <p className="text-text-secondary text-sm mt-2">
                 Manage courses, build knowledge graphs, and track student progress.
@@ -293,7 +263,7 @@ const TeacherDashboard: React.FC = () => {
 
         {/* Error Banner */}
         {error && (
-          <div className="bg-red-50 border border-red-200 text-red-600 rounded-xl p-4 flex items-center gap-3 mb-6 text-sm animate-fade-in">
+          <div className="bg-red-50 border border-red-200 text-red-600 dark:bg-red-500/10 dark:border-red-500/30 dark:text-red-400 rounded-xl p-4 flex items-center gap-3 mb-6 text-sm animate-fade-in">
             <X className="w-5 h-5 cursor-pointer shrink-0" onClick={() => setError('')} />
             <span>{error}</span>
           </div>
@@ -316,7 +286,7 @@ const TeacherDashboard: React.FC = () => {
           </div>
         ) : courses.length === 0 ? (
           <div className="text-center max-w-md mx-auto mt-16 animate-fade-up">
-            <BookOpen className="w-16 h-16 text-primary/30 mx-auto mb-4" strokeWidth={1.25} />
+            <EmptyStateIllustration className="w-32 h-32 mx-auto mb-4" />
             <h3 className="text-lg font-bold text-text-primary mb-1.5">No classes yet</h3>
             <p className="text-text-secondary mb-6 text-sm">
               Create your first class to start uploading materials and inviting students.
@@ -346,7 +316,7 @@ const TeacherDashboard: React.FC = () => {
                   <div
                     key={course.id}
                     id={`course-card-${course.id}`}
-                    className="group rounded-2xl overflow-hidden border border-border shadow-card bg-surface animate-fade-up hover:shadow-hover hover:-translate-y-0.5 transition-all cursor-pointer"
+                    className="group glass-panel-interactive rounded-2xl overflow-hidden border border-border/40 animate-fade-up transition-all cursor-pointer"
                     style={{ animationDelay: `${i * 0.05}s` }}
                     onClick={() => navigate(`/course/${course.id}`)}
                   >
@@ -407,7 +377,7 @@ const TeacherDashboard: React.FC = () => {
                             title="Copy a shareable join link for students"
                           >
                             {copiedCourseId === course.id ? (
-                              <><Check className="w-3.5 h-3.5 text-emerald-600" /> Copied</>
+                              <><Check className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" /> Copied</>
                             ) : (
                               <><LinkIcon className="w-3.5 h-3.5" /> Copy Link</>
                             )}
@@ -429,7 +399,6 @@ const TeacherDashboard: React.FC = () => {
             </div>
           </div>
         )}
-      </main>
 
       {/* Create Course Modal */}
       {showModal && (
@@ -449,7 +418,7 @@ const TeacherDashboard: React.FC = () => {
 
             <form onSubmit={handleCreateCourse} className="p-6 space-y-4">
               {formError && (
-                <div className="bg-red-50 border border-red-200 text-red-600 rounded-xl p-3 text-sm">
+                <div className="bg-red-50 border border-red-200 text-red-600 dark:bg-red-500/10 dark:border-red-500/30 dark:text-red-400 rounded-xl p-3 text-sm">
                   {formError}
                 </div>
               )}
@@ -501,7 +470,7 @@ const TeacherDashboard: React.FC = () => {
               <div>
                 <label className="block text-sm font-semibold text-text-secondary mb-1.5 flex items-center justify-between">
                   <span className="flex items-center gap-1"><FileText className="w-3.5 h-3.5" /> Description *</span>
-                  <span className={`text-xs font-normal ${descriptionError ? 'text-rose-500' : 'text-emerald-600'}`}>
+                  <span className={`text-xs font-normal ${descriptionError ? 'text-rose-500 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
                     {descWordCount}/{DESCRIPTION_MAX_WORDS} words
                   </span>
                 </label>
@@ -513,7 +482,7 @@ const TeacherDashboard: React.FC = () => {
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                 />
-                {descriptionError && <p className="text-xs text-red-600 mt-1.5">{descriptionError}</p>}
+                {descriptionError && <p className="text-xs text-red-600 dark:text-red-400 mt-1.5">{descriptionError}</p>}
               </div>
 
               <div className="grid grid-cols-2 gap-4">
@@ -526,7 +495,7 @@ const TeacherDashboard: React.FC = () => {
                     value={enrollmentStart}
                     onChange={(e) => setEnrollmentStart(e.target.value)}
                   />
-                  {enrollmentStartError && <p className="text-xs text-red-600 mt-1.5">{enrollmentStartError}</p>}
+                  {enrollmentStartError && <p className="text-xs text-red-600 dark:text-red-400 mt-1.5">{enrollmentStartError}</p>}
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-text-secondary mb-1.5">Enrollment End *</label>
@@ -537,7 +506,7 @@ const TeacherDashboard: React.FC = () => {
                     value={enrollmentEnd}
                     onChange={(e) => setEnrollmentEnd(e.target.value)}
                   />
-                  {enrollmentEndError && <p className="text-xs text-red-600 mt-1.5">{enrollmentEndError}</p>}
+                  {enrollmentEndError && <p className="text-xs text-red-600 dark:text-red-400 mt-1.5">{enrollmentEndError}</p>}
                 </div>
               </div>
 
@@ -551,7 +520,7 @@ const TeacherDashboard: React.FC = () => {
                     value={startDate}
                     onChange={(e) => setStartDate(e.target.value)}
                   />
-                  {startDateError && <p className="text-xs text-red-600 mt-1.5">{startDateError}</p>}
+                  {startDateError && <p className="text-xs text-red-600 dark:text-red-400 mt-1.5">{startDateError}</p>}
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-text-secondary mb-1.5">Course End *</label>
@@ -562,7 +531,7 @@ const TeacherDashboard: React.FC = () => {
                     value={endDate}
                     onChange={(e) => setEndDate(e.target.value)}
                   />
-                  {endDateError && <p className="text-xs text-red-600 mt-1.5">{endDateError}</p>}
+                  {endDateError && <p className="text-xs text-red-600 dark:text-red-400 mt-1.5">{endDateError}</p>}
                 </div>
               </div>
 
@@ -598,9 +567,7 @@ const TeacherDashboard: React.FC = () => {
           </div>
         </div>
       )}
-
-      {showChangePassword && <ChangePasswordModal onClose={() => setShowChangePassword(false)} />}
-    </div>
+    </AppShell>
   );
 };
 

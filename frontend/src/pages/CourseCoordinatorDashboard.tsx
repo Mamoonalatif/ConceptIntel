@@ -1,10 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { useAuth } from '../context/AuthContext';
 import { courseCoordinatorService, courseService } from '../services/api';
-import { ChangePasswordModal } from '../components/ChangePasswordModal';
+import { AppShell, type NavItem } from '../components/AppShell';
 import { useAutoRefresh } from '../hooks/useAutoRefresh';
 import {
-  LogOut, User, Network, AlertCircle, CheckCircle2, XCircle, Pencil, X, Check, KeyRound,
+  Network, AlertCircle, CheckCircle2, XCircle, Pencil, X, Check,
 } from 'lucide-react';
 
 interface CourseInstance {
@@ -23,15 +22,12 @@ interface CourseInstance {
 }
 
 const graphBadgeClass = (status: string) => {
-  if (status === 'Approved') return 'bg-emerald-50 text-emerald-700 border-emerald-200';
-  if (status === 'Rejected') return 'bg-rose-50 text-rose-700 border-rose-200';
-  return 'bg-amber-50 text-amber-700 border-amber-200';
+  if (status === 'Approved') return 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/30';
+  if (status === 'Rejected') return 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-500/10 dark:text-rose-400 dark:border-rose-500/30';
+  return 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-500/10 dark:text-amber-400 dark:border-amber-500/30';
 };
 
 const CourseCoordinatorDashboard: React.FC = () => {
-  const { user, logout } = useAuth();
-  const [showChangePassword, setShowChangePassword] = useState(false);
-
   const [courses, setCourses] = useState<CourseInstance[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -114,48 +110,15 @@ const CourseCoordinatorDashboard: React.FC = () => {
     }
   };
 
+  const navItems: NavItem[] = [
+    { key: 'courses', label: 'Courses', icon: Network, active: true },
+  ];
+
   return (
-    <div className="min-h-screen bg-background pb-16">
-      <div className="page-bg-decoration" />
-
-      <header className="glass-panel sticky top-0 z-30 border-b border-border shadow-soft">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 bg-gradient-to-tr from-primary to-secondary rounded-xl flex items-center justify-center shadow-glow">
-              <Network className="w-5 h-5 text-white" />
-            </div>
-            <div>
-              <h1 className="text-lg font-bold gradient-text leading-tight">ConceptIntel</h1>
-              <p className="text-[10px] text-text-muted">Course Coordinator Portal</p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2 bg-primary-muted border border-primary/20 rounded-lg px-3 py-1.5">
-              <User className="w-3.5 h-3.5 text-primary" />
-              <span className="font-semibold text-primary text-xs">{user?.full_name}</span>
-            </div>
-            <button
-              onClick={() => setShowChangePassword(true)}
-              className="p-2 text-text-muted hover:text-primary rounded-lg hover:bg-primary-muted border border-transparent hover:border-primary/20 transition-all"
-              title="Change Password"
-            >
-              <KeyRound className="w-4 h-4" />
-            </button>
-            <button
-              onClick={logout}
-              className="p-2 text-text-muted hover:text-rose-500 rounded-lg hover:bg-rose-50 border border-transparent hover:border-rose-200 transition-all"
-              title="Logout"
-            >
-              <LogOut className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-      </header>
-
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-8 relative z-10 space-y-8">
+    <AppShell roleLabel="Course Coordinator Portal" logoIcon={Network} navItems={navItems}>
+      <div className="space-y-8">
         {error && (
-          <div className="bg-red-50 border border-red-200 text-red-600 rounded-xl p-4 flex items-center gap-3 text-sm animate-fade-in">
+          <div className="bg-red-50 border border-red-200 text-red-600 dark:bg-red-500/10 dark:border-red-500/30 dark:text-red-400 rounded-xl p-4 flex items-center gap-3 text-sm animate-fade-in">
             <AlertCircle className="w-5 h-5 cursor-pointer shrink-0" onClick={() => setError('')} />
             <span>{error}</span>
           </div>
@@ -185,14 +148,14 @@ const CourseCoordinatorDashboard: React.FC = () => {
                         <button
                           onClick={() => approve(course.id)}
                           disabled={processingId === course.id || course.graph_status === 'Approved'}
-                          className="flex items-center gap-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 px-3 py-1.5 rounded-lg transition-all disabled:opacity-50"
+                          className="flex items-center gap-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 dark:text-emerald-400 dark:bg-emerald-500/10 dark:border-emerald-500/30 dark:hover:bg-emerald-500/20 px-3 py-1.5 rounded-lg transition-all disabled:opacity-50"
                         >
                           <CheckCircle2 className="w-3.5 h-3.5" /> Approve
                         </button>
                         <button
                           onClick={() => reject(course.id)}
                           disabled={processingId === course.id || course.graph_status === 'Rejected'}
-                          className="flex items-center gap-1.5 text-xs font-bold text-rose-700 bg-rose-50 border border-rose-200 hover:bg-rose-100 px-3 py-1.5 rounded-lg transition-all disabled:opacity-50"
+                          className="flex items-center gap-1.5 text-xs font-bold text-rose-700 bg-rose-50 border border-rose-200 hover:bg-rose-100 dark:text-rose-400 dark:bg-rose-500/10 dark:border-rose-500/30 dark:hover:bg-rose-500/20 px-3 py-1.5 rounded-lg transition-all disabled:opacity-50"
                         >
                           <XCircle className="w-3.5 h-3.5" /> Reject
                         </button>
@@ -245,10 +208,8 @@ const CourseCoordinatorDashboard: React.FC = () => {
             </div>
           )}
         </div>
-      </main>
-
-      {showChangePassword && <ChangePasswordModal onClose={() => setShowChangePassword(false)} />}
-    </div>
+      </div>
+    </AppShell>
   );
 };
 

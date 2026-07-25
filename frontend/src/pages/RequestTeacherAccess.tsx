@@ -1,7 +1,10 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { authService } from '../services/api';
-import { Brain, Mail, User, MessageSquare, AlertCircle, Loader2, CheckCircle2 } from 'lucide-react';
+import { AuthVisualPanel } from '../components/AuthVisualPanel';
+import { TeacherAccessIllustration } from '../components/illustrations';
+import logo from '../assets/logo.png';
+import { Mail, User, MessageSquare, AlertCircle, Loader2, CheckCircle2, ArrowLeft } from 'lucide-react';
 
 const FULL_NAME_PATTERN = /^[A-Za-z]+(?: [A-Za-z]+)*$/;
 
@@ -44,18 +47,38 @@ const RequestTeacherAccess: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center p-4 relative">
-      <div className="page-bg-decoration" />
+    <div className="h-screen bg-background flex flex-col overflow-hidden">
+      <div className="flex-1 flex overflow-hidden">
+        <AuthVisualPanel
+          tagline={'Share your\nexpertise'}
+          description="Request teacher access to create courses, upload materials, and build concept maps for your students."
+          illustration={TeacherAccessIllustration}
+        />
 
-      <div className="w-full max-w-md z-10">
-        <div className="flex items-center gap-2 justify-center mb-8">
-          <div className="w-10 h-10 bg-gradient-to-tr from-primary to-secondary rounded-xl flex items-center justify-center shadow-card">
-            <Brain className="w-6 h-6 text-white" />
-          </div>
-          <span className="text-xl font-bold gradient-text">ConceptIntel</span>
-        </div>
+        {/* Right: Request Form */}
+        <div className="flex-1 flex items-center justify-center p-6 relative overflow-y-auto">
+          <div className="w-full max-w-md py-8">
+            {/* Top Navigation Bar: Back to Home */}
+            <div className="flex items-center justify-between mb-6">
+              <Link
+                to="/"
+                className="inline-flex items-center gap-2 text-sm font-semibold text-text-secondary hover:text-primary transition-colors py-1.5 px-3 rounded-lg hover:bg-primary-muted"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                <span>Back to Home</span>
+              </Link>
+            </div>
 
-        <div className="glass-panel rounded-2xl p-8 shadow-card animate-fade-up">
+            {/* Mobile Logo */}
+            <div className="flex lg:hidden items-center gap-2 justify-center mb-6">
+              <img src={logo} alt="ConceptIntel" width={36} height={36} className="w-9 h-9 object-contain" />
+              <div className="flex items-baseline gap-0.5">
+                <span className="text-xl font-bold text-text-primary">Concept</span>
+                <span className="text-xl font-bold text-primary">Intel</span>
+              </div>
+            </div>
+
+          <div className="glass-panel rounded-2xl shadow-card p-8 animate-fade-up">
           {submitted ? (
             <div className="text-center py-4">
               <div className="w-16 h-16 bg-emerald-50 rounded-2xl flex items-center justify-center mx-auto mb-4">
@@ -65,7 +88,7 @@ const RequestTeacherAccess: React.FC = () => {
               <p className="text-text-secondary text-sm mb-6">
                 An administrator will review your request and relay login credentials to your email if approved.
               </p>
-              <Link to="/login" className="text-primary font-semibold hover:text-primary-hover transition-colors text-sm">
+              <Link to="/login" className="text-primary font-semibold hover:text-primary-hover hover:underline transition-colors text-sm">
                 Back to Sign In
               </Link>
             </div>
@@ -153,7 +176,7 @@ const RequestTeacherAccess: React.FC = () => {
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-full py-3 mt-2 bg-gradient-to-r from-primary to-secondary hover:from-primary-hover hover:to-secondary-hover text-white font-bold rounded-xl transition-all shadow-glow active:scale-[0.98] disabled:opacity-60 disabled:scale-100 flex items-center justify-center gap-2 text-sm"
+                  className="btn-primary w-full justify-center mt-2 disabled:opacity-60 disabled:cursor-not-allowed"
                 >
                   {loading ? (
                     <>
@@ -168,14 +191,16 @@ const RequestTeacherAccess: React.FC = () => {
 
               <div className="mt-6 pt-5 border-t border-border text-center">
                 <p className="text-sm text-text-secondary">
-                  <Link to="/login" className="text-primary font-semibold hover:text-primary-hover transition-colors">
+                  <Link to="/login" className="text-primary font-semibold hover:text-primary-hover hover:underline transition-colors">
                     Back to Sign In
                   </Link>
                 </p>
               </div>
             </>
           )}
+          </div>
         </div>
+      </div>
       </div>
     </div>
   );

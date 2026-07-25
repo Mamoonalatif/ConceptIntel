@@ -6,6 +6,7 @@ interface User {
   email: string;
   full_name: string;
   role: 'teacher' | 'student' | 'admin' | 'program_coordinator' | 'course_coordinator';
+  avatar_url?: string | null;
 }
 
 interface AuthContextType {

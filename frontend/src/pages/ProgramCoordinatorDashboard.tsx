@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { useAuth } from '../context/AuthContext';
-import { programCoordinatorService, courseService } from '../services/api';
-import { ChangePasswordModal } from '../components/ChangePasswordModal';
+import { programCoordinatorService, courseService, adminService } from '../services/api';
+import type { CourseCoordinatorEntry } from '../services/api';
+import { AppShell, type NavItem } from '../components/AppShell';
 import { useAutoRefresh } from '../hooks/useAutoRefresh';
 import {
-  LogOut, User, Layers, Plus, RefreshCw, AlertCircle, Pencil, Trash2, X, Check, KeyRound,
+  Layers, Plus, RefreshCw, AlertCircle, Pencil, Trash2, X, Check, UserPlus, BookOpen, Network,
 } from 'lucide-react';
+
+type ProgramCoordSection = 'catalog' | 'instances' | 'coordinators';
 
 interface CatalogEntry {
   id: number;
@@ -22,11 +24,20 @@ interface CourseInstance {
   status: string;
   teacher_id: number;
   prerequisite_course_id: number | null;
+  catalog_id: number | null;
+}
+
+// Minimal shape needed for the "assign as Course Coordinator" user picker
+// (from GET /auth/admin/staff - reused from AdminDashboard's staff-list pattern).
+interface StaffOption {
+  id: number;
+  email: string;
+  full_name: string;
+  role: string;
 }
 
 const ProgramCoordinatorDashboard: React.FC = () => {
-  const { user, logout } = useAuth();
-  const [showChangePassword, setShowChangePassword] = useState(false);
+  const [activeSection, setActiveSection] = useState<ProgramCoordSection>('catalog');
 
   const [catalog, setCatalog] = useState<CatalogEntry[]>([]);
   const [courses, setCourses] = useState<CourseInstance[]>([]);
@@ -46,6 +57,15 @@ const ProgramCoordinatorDashboard: React.FC = () => {
   const [editPrereq, setEditPrereq] = useState('');
   const [savingEdit, setSavingEdit] = useState(false);
 
+  // Course Coordinator assignment section: current assignees per course, the
+  // eligible-user picker options, and per-row selection/pending state.
+  const [coordinatorsByCourse, setCoordinatorsByCourse] = useState<Record<number, CourseCoordinatorEntry[]>>({});
+  const [staffOptions, setStaffOptions] = useState<StaffOption[]>([]);
+  const [staffPickerError, setStaffPickerError] = useState('');
+  const [selectedUserByCourse, setSelectedUserByCourse] = useState<Record<number, string>>({});
+  const [assigningCourseId, setAssigningCourseId] = useState<number | null>(null);
+  const [removingKey, setRemovingKey] = useState<string | null>(null);
+
   const fetchAll = async (silent = false) => {
     if (!silent) setLoading(true);
     try {
@@ -55,6 +75,29 @@ const ProgramCoordinatorDashboard: React.FC = () => {
       ]);
       setCatalog(catalogData);
       setCourses(coursesData);
+
+      // "My courses" for coordinator-assignment purposes are derived from the
+      // already-scoped catalog list: /courses/admin/catalog filters server-side
+      // to this coordinator's own program(s) (or everything, for admin), so any
+      // Course whose catalog_id is in that scoped list belongs to my program(s).
+      // There's no dedicated "what am I scoped to" endpoint for the coordinator
+      // themselves (GET /auth/admin/staff/{id}/scope is admin-only), so this
+      // cross-reference is the source of truth for scope on this page.
+      const myCatalogIds = new Set<number>(catalogData.map((c: CatalogEntry) => c.id));
+      const myCourses = (coursesData as CourseInstance[]).filter(
+        (c) => c.catalog_id != null && myCatalogIds.has(c.catalog_id)
+      );
+      const coordResults = await Promise.all(
+        myCourses.map(async (c) => {
+          try {
+            const entries = await programCoordinatorService.listCourseCoordinators(c.id);
+            return [c.id, entries] as const;
+          } catch {
+            return [c.id, []] as const;
+          }
+        })
+      );
+      setCoordinatorsByCourse(Object.fromEntries(coordResults));
     } catch (err: any) {
       if (!silent) setError('Failed to load catalog/courses. Verify API connection.');
     } finally {
@@ -62,10 +105,25 @@ const ProgramCoordinatorDashboard: React.FC = () => {
     }
   };
 
+  // Eligible-user picker: uses GET /auth/coordinator/eligible-users, which is
+  // scoped to program coordinators (not admin-only like /auth/admin/staff), so it
+  // works for a real (non-admin) Program Coordinator without a 403.
+  const fetchStaffOptions = async () => {
+    try {
+      const data = await adminService.listCoordinatorEligibleUsers();
+      setStaffOptions(data);
+      setStaffPickerError('');
+    } catch (err: any) {
+      setStaffOptions([]);
+      setStaffPickerError('Failed to load user list for the picker. Enter a user ID manually below to assign.');
+    }
+  };
+
   useAutoRefresh(() => fetchAll(true));
 
   useEffect(() => {
     fetchAll();
+    fetchStaffOptions();
   }, []);
 
   const handleCreateCatalogEntry = async (e: React.FormEvent) => {
@@ -148,53 +206,75 @@ const ProgramCoordinatorDashboard: React.FC = () => {
     }
   };
 
+  const refreshCourseCoordinators = async (courseId: number) => {
+    try {
+      const entries = await programCoordinatorService.listCourseCoordinators(courseId);
+      setCoordinatorsByCourse((prev) => ({ ...prev, [courseId]: entries }));
+    } catch {
+      // Leave the previous list in place rather than clearing it on a transient failure.
+    }
+  };
+
+  const assignCourseCoordinator = async (courseId: number) => {
+    const raw = (selectedUserByCourse[courseId] || '').trim();
+    if (!raw) return;
+    const userId = parseInt(raw, 10);
+    if (Number.isNaN(userId)) {
+      setError('Please select or enter a valid user ID.');
+      return;
+    }
+    setError('');
+    setAssigningCourseId(courseId);
+    try {
+      await programCoordinatorService.assignCourseCoordinator(courseId, userId);
+      setSelectedUserByCourse((prev) => ({ ...prev, [courseId]: '' }));
+      await refreshCourseCoordinators(courseId);
+    } catch (err: any) {
+      // A 403 here means this course's program isn't actually in this coordinator's
+      // scope (shouldn't normally happen given server-side scoping / the client-side
+      // filter above) - surface it instead of letting the rejection go unhandled.
+      setError(err.response?.data?.detail || 'Failed to assign Course Coordinator.');
+    } finally {
+      setAssigningCourseId(null);
+    }
+  };
+
+  const removeCourseCoordinator = async (courseId: number, userId: number) => {
+    setError('');
+    setRemovingKey(`${courseId}:${userId}`);
+    try {
+      await programCoordinatorService.removeCourseCoordinator(courseId, userId);
+      await refreshCourseCoordinators(courseId);
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Failed to unassign Course Coordinator.');
+    } finally {
+      setRemovingKey(null);
+    }
+  };
+
+  // "My courses" for the Course Coordinator assignment section - see fetchAll's
+  // comment for why this is derived client-side from the already-scoped catalog list.
+  const myCatalogIds = new Set(catalog.map((c) => c.id));
+  const myCourses = courses.filter((c) => c.catalog_id != null && myCatalogIds.has(c.catalog_id));
+
+  const navItems: NavItem[] = [
+    { key: 'catalog', label: 'Course Catalog', icon: BookOpen, active: activeSection === 'catalog', onClick: () => setActiveSection('catalog') },
+    { key: 'instances', label: 'Course Instances', icon: Layers, active: activeSection === 'instances', onClick: () => setActiveSection('instances') },
+    { key: 'coordinators', label: 'Course Coordinators', icon: Network, active: activeSection === 'coordinators', onClick: () => setActiveSection('coordinators') },
+  ];
+
   return (
-    <div className="min-h-screen bg-background pb-16">
-      <div className="page-bg-decoration" />
-
-      <header className="glass-panel sticky top-0 z-30 border-b border-border shadow-soft">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 bg-gradient-to-tr from-primary to-secondary rounded-xl flex items-center justify-center shadow-glow">
-              <Layers className="w-5 h-5 text-white" />
-            </div>
-            <div>
-              <h1 className="text-lg font-bold gradient-text leading-tight">ConceptIntel</h1>
-              <p className="text-[10px] text-text-muted">Program Coordinator Portal</p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2 bg-primary-muted border border-primary/20 rounded-lg px-3 py-1.5">
-              <User className="w-3.5 h-3.5 text-primary" />
-              <span className="font-semibold text-primary text-xs">{user?.full_name}</span>
-            </div>
-            <button
-              onClick={() => setShowChangePassword(true)}
-              className="p-2 text-text-muted hover:text-primary rounded-lg hover:bg-primary-muted border border-transparent hover:border-primary/20 transition-all"
-              title="Change Password"
-            >
-              <KeyRound className="w-4 h-4" />
-            </button>
-            <button
-              onClick={logout}
-              className="p-2 text-text-muted hover:text-rose-500 rounded-lg hover:bg-rose-50 border border-transparent hover:border-rose-200 transition-all"
-              title="Logout"
-            >
-              <LogOut className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-      </header>
-
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-8 relative z-10 space-y-8">
+    <AppShell roleLabel="Program Coordinator Portal" logoIcon={Layers} navItems={navItems}>
+      <div className="space-y-8">
         {error && (
-          <div className="bg-red-50 border border-red-200 text-red-600 rounded-xl p-4 flex items-center gap-3 text-sm animate-fade-in">
+          <div className="bg-red-50 border border-red-200 text-red-600 dark:bg-red-500/10 dark:border-red-500/30 dark:text-red-400 rounded-xl p-4 flex items-center gap-3 text-sm animate-fade-in">
             <AlertCircle className="w-5 h-5 cursor-pointer shrink-0" onClick={() => setError('')} />
             <span>{error}</span>
           </div>
         )}
 
+        {activeSection === 'catalog' && (
+        <>
         {/* Add predefined course */}
         <div className="glass-panel rounded-2xl p-6 border border-border shadow-card animate-fade-up">
           <div className="flex items-center gap-2 mb-4">
@@ -278,7 +358,7 @@ const ProgramCoordinatorDashboard: React.FC = () => {
                           </button>
                           <button
                             onClick={() => deleteCatalogEntry(entry.id)}
-                            className="flex items-center gap-1.5 text-xs font-bold text-rose-700 bg-rose-50 border border-rose-200 hover:bg-rose-100 px-3 py-1.5 rounded-lg transition-all"
+                            className="flex items-center gap-1.5 text-xs font-bold text-rose-700 bg-rose-50 border border-rose-200 hover:bg-rose-100 dark:text-rose-400 dark:bg-rose-500/10 dark:border-rose-500/30 dark:hover:bg-rose-500/20 px-3 py-1.5 rounded-lg transition-all"
                           >
                             <Trash2 className="w-3.5 h-3.5" /> Delete
                           </button>
@@ -291,8 +371,11 @@ const ProgramCoordinatorDashboard: React.FC = () => {
             </div>
           )}
         </div>
+        </>
+        )}
 
         {/* Course instances - prerequisite mapping + deletion */}
+        {activeSection === 'instances' && (
         <div>
           <h3 className="text-base font-bold text-text-primary mb-4">Course Instances</h3>
           {loading ? (
@@ -320,7 +403,7 @@ const ProgramCoordinatorDashboard: React.FC = () => {
                     </select>
                     <button
                       onClick={() => deleteCourse(course.id)}
-                      className="flex items-center gap-1.5 text-xs font-bold text-rose-700 bg-rose-50 border border-rose-200 hover:bg-rose-100 px-3 py-1.5 rounded-lg transition-all"
+                      className="flex items-center gap-1.5 text-xs font-bold text-rose-700 bg-rose-50 border border-rose-200 hover:bg-rose-100 dark:text-rose-400 dark:bg-rose-500/10 dark:border-rose-500/30 dark:hover:bg-rose-500/20 px-3 py-1.5 rounded-lg transition-all"
                     >
                       <Trash2 className="w-3.5 h-3.5" /> Delete
                     </button>
@@ -330,10 +413,105 @@ const ProgramCoordinatorDashboard: React.FC = () => {
             </div>
           )}
         </div>
-      </main>
+        )}
 
-      {showChangePassword && <ChangePasswordModal onClose={() => setShowChangePassword(false)} />}
-    </div>
+        {/* Course Coordinator assignment - pick/search a user and assign/unassign them
+            as Course Coordinator for a course under this coordinator's own program(s). */}
+        {activeSection === 'coordinators' && (
+        <div>
+          <h3 className="text-base font-bold text-text-primary mb-4">Course Coordinators</h3>
+          {staffPickerError && (
+            <div className="bg-amber-50 border border-amber-200 text-amber-700 dark:bg-amber-500/10 dark:border-amber-500/30 dark:text-amber-400 rounded-xl p-3 flex items-center gap-2 text-xs mb-3">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{staffPickerError}</span>
+            </div>
+          )}
+          {loading ? (
+            <div className="glass-panel rounded-2xl p-8 border border-border text-center text-sm text-text-muted">Loading...</div>
+          ) : myCourses.length === 0 ? (
+            <div className="glass-panel rounded-2xl p-8 border border-border text-center text-sm text-text-muted">
+              No courses under your program(s) yet.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {myCourses.map((course) => {
+                const assigned = coordinatorsByCourse[course.id] || [];
+                const assignedIds = new Set(assigned.map((a) => a.id));
+                const eligible = staffOptions.filter((s) => !assignedIds.has(s.id));
+                return (
+                  <div key={course.id} className="glass-panel rounded-2xl p-5 border border-border shadow-card space-y-3">
+                    <div className="flex items-center justify-between gap-4 flex-wrap">
+                      <div>
+                        <p className="font-bold text-text-primary">{course.name} <span className="text-text-muted font-normal">({course.code})</span></p>
+                        <p className="text-xs text-text-muted mt-0.5">{course.semester} &middot; {course.status}</p>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2">
+                      {assigned.length === 0 ? (
+                        <span className="text-xs text-text-muted italic">No Course Coordinator assigned yet.</span>
+                      ) : (
+                        assigned.map((entry) => (
+                          <span
+                            key={entry.id}
+                            className="flex items-center gap-1.5 text-xs font-semibold text-primary bg-primary-muted border border-primary/20 rounded-lg px-2.5 py-1.5"
+                          >
+                            {entry.full_name} <span className="text-text-muted font-normal">({entry.email})</span>
+                            <button
+                              onClick={() => removeCourseCoordinator(course.id, entry.id)}
+                              disabled={removingKey === `${course.id}:${entry.id}`}
+                              title="Unassign"
+                              className="text-primary hover:text-rose-600 disabled:opacity-50"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </span>
+                        ))
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {staffOptions.length > 0 ? (
+                        <select
+                          className="input-light text-xs py-1.5 min-w-[220px]"
+                          value={selectedUserByCourse[course.id] || ''}
+                          onChange={(e) => setSelectedUserByCourse((prev) => ({ ...prev, [course.id]: e.target.value }))}
+                        >
+                          <option value="">Select a user to assign...</option>
+                          {eligible.map((s) => (
+                            <option key={s.id} value={s.id}>{s.full_name} ({s.email}) - {s.role}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          type="number"
+                          className="input-light text-xs py-1.5 w-40"
+                          placeholder="User ID"
+                          value={selectedUserByCourse[course.id] || ''}
+                          onChange={(e) => setSelectedUserByCourse((prev) => ({ ...prev, [course.id]: e.target.value }))}
+                        />
+                      )}
+                      <button
+                        onClick={() => assignCourseCoordinator(course.id)}
+                        disabled={assigningCourseId === course.id || !(selectedUserByCourse[course.id] || '').trim()}
+                        className="btn-primary text-xs px-3 py-1.5 disabled:opacity-60"
+                      >
+                        {assigningCourseId === course.id ? (
+                          <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Assigning...</>
+                        ) : (
+                          <><UserPlus className="w-3.5 h-3.5" /> Assign</>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+        )}
+      </div>
+    </AppShell>
   );
 };
 

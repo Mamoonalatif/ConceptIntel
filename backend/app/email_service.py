@@ -55,3 +55,25 @@ def send_staff_credentials_email(to_email: str, full_name: str, role_label: str,
     </div>
     """
     return send_email(to_email, subject, html_body)
+
+
+def send_notification_email(to_email: str, full_name: str, title: str, message: str, link: str = None) -> bool:
+    """Email counterpart for a small set of high-value in-app notifications (upload
+    failures, graph rejections, new teacher requests) - see the call sites in
+    upload/routes.py, knowledge_graph/routes.py and auth/routes.py. Deliberately NOT
+    called for every notification type, since most (enrollment, new content, etc.)
+    are low-urgency and would just be email spam."""
+    frontend_url = getattr(settings, "FRONTEND_URL", None) or "http://localhost:5173"
+    cta = f'<p><a href="{frontend_url}{link}" style="color: #4f46e5;">View in ConceptIntel &rarr;</a></p>' if link else ""
+    html_body = f"""
+    <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+      <h2 style="color: #4f46e5;">{title}</h2>
+      <p>Hi {full_name},</p>
+      <p style="background: #f8faff; border: 1px solid #dde3f0; border-radius: 8px; padding: 12px 16px;">
+        {message}
+      </p>
+      {cta}
+      <p style="color: #94a3b8; font-size: 12px;">You're receiving this because it needs your attention on ConceptIntel.</p>
+    </div>
+    """
+    return send_email(to_email, title, html_body)

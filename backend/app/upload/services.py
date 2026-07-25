@@ -91,6 +91,14 @@ def get_content_type(extension: str) -> str:
         return "application/vnd.ms-powerpoint"
     elif ext == ".txt":
         return "text/plain"
+    elif ext in (".jpg", ".jpeg"):
+        return "image/jpeg"
+    elif ext == ".png":
+        return "image/png"
+    elif ext == ".gif":
+        return "image/gif"
+    elif ext == ".webp":
+        return "image/webp"
     return "application/octet-stream"
 
 
@@ -111,16 +119,18 @@ def _parse_s3_ref(s3_ref: str) -> tuple[str, str]:
     return bucket, key
 
 
-def upload_file_to_s3(file_content: bytes, filename: str, content_type: str, course_id: int) -> str:
+def upload_file_to_s3(file_content: bytes, filename: str, content_type: str, folder: str) -> str:
     """Uploads to a PRIVATE S3 bucket and returns an internal 's3://bucket/key'
     reference (never a public URL - the bucket has no public access, files are only
     ever read back through authenticated boto3 calls in this backend). Raises
-    ValueError if AWS credentials/bucket aren't configured."""
+    ValueError if AWS credentials/bucket aren't configured. `folder` is the key
+    prefix under which the file is stored (e.g. "course_12" or
+    "assignment_submissions/7/deadline")."""
     if not (settings.AWS_ACCESS_KEY_ID and settings.AWS_SECRET_ACCESS_KEY and settings.AWS_S3_BUCKET):
         raise ValueError("AWS S3 credentials and bucket are not configured.")
 
     safe_filename = Path(filename).name
-    key = f"course_{course_id}/{safe_filename}"
+    key = f"{folder}/{safe_filename}"
     client = _s3_client()
     client.put_object(Bucket=settings.AWS_S3_BUCKET, Key=key, Body=file_content, ContentType=content_type)
     return f"s3://{settings.AWS_S3_BUCKET}/{key}"
@@ -159,19 +169,21 @@ def _parse_supabase_ref(ref: str) -> tuple[str, str]:
     return bucket, key
 
 
-def upload_file_to_supabase(file_content: bytes, filename: str, content_type: str, course_id: int) -> str:
+def upload_file_to_supabase(file_content: bytes, filename: str, content_type: str, folder: str) -> str:
     """
     Uploads to Supabase Storage and returns an internal 'supabase://bucket/key'
     reference (NOT a public URL) - the bucket is private, so files are only ever
     read back through authenticated calls (see download_file_from_supabase), same
     approach as the S3 backend. If Supabase settings are missing, raises ValueError.
+    `folder` is the key prefix under which the file is stored (e.g. "course_12" or
+    "assignment_submissions/7/deadline").
     """
     if not settings.SUPABASE_URL or not settings.SUPABASE_KEY:
         raise ValueError("Supabase URL and Key are not configured.")
 
     bucket = settings.SUPABASE_BUCKET
     safe_filename = Path(filename).name
-    file_path = f"course_{course_id}/{safe_filename}"
+    file_path = f"{folder}/{safe_filename}"
 
     url = f"{settings.SUPABASE_URL}/storage/v1/object/{bucket}/{file_path}"
     headers = _supabase_headers(content_type)
@@ -212,4 +224,55 @@ def delete_file_from_supabase(ref: str) -> None:
 
     if response.status_code not in (200, 204):
         print(f"Warning: Failed to delete file from Supabase Storage: {response.status_code} - {response.text}")
+
+
+def store_file(content: bytes, filename: str, extension: str, folder: str) -> str:
+    """Shared storage-backend dispatcher used by both course material uploads and
+    assignment attachments/submissions. Priority: AWS S3 (if configured) > Supabase
+    (if configured) > local disk. Returns a reference string whose scheme identifies
+    where it lives ("s3://...", "supabase://..." - private bucket, never a public
+    URL - or a plain local filesystem path). `folder` is the storage sub-path, e.g.
+    "course_12" or "assignment_submissions/7/3"."""
+    content_type = get_content_type(extension)
+
+    if settings.AWS_ACCESS_KEY_ID and settings.AWS_SECRET_ACCESS_KEY and settings.AWS_S3_BUCKET:
+        return upload_file_to_s3(content, filename, content_type, folder)
+
+    if settings.SUPABASE_URL and settings.SUPABASE_KEY:
+        return upload_file_to_supabase(content, filename, content_type, folder)
+
+    upload_dir = settings.upload_path / folder
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    destination = upload_dir / Path(filename).name
+    with open(destination, "wb") as buffer:
+        buffer.write(content)
+    return str(destination.resolve())
+
+
+def download_stored_file(file_ref: str) -> bytes:
+    """Mirror of store_file's backend dispatch, for reading a file back."""
+    if file_ref.startswith("s3://"):
+        return download_file_from_s3(file_ref)
+    if file_ref.startswith("supabase://"):
+        return download_file_from_supabase(file_ref)
+    with open(file_ref, "rb") as f:
+        return f.read()
+
+
+def delete_stored_file(file_ref: str) -> None:
+    """Mirror of store_file's backend dispatch, for deletion."""
+    if file_ref.startswith("s3://"):
+        delete_file_from_s3(file_ref)
+    elif file_ref.startswith("supabase://"):
+        try:
+            delete_file_from_supabase(file_ref)
+        except Exception as e:
+            print(f"Warning: Failed to delete file from Supabase storage: {str(e)}")
+    else:
+        filepath = Path(file_ref)
+        if filepath.exists():
+            try:
+                filepath.unlink()
+            except Exception as e:
+                print(f"Warning: Failed to delete physical file {filepath}: {str(e)}")
 

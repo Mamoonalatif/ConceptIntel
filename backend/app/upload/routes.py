@@ -13,17 +13,19 @@ from app.database.models import UploadedFile, Course, User
 from app.upload.schemas import UploadedFileResponse
 from app.upload.services import (
     extract_text_from_file,
-    upload_file_to_supabase,
     download_file_from_supabase,
-    delete_file_from_supabase,
-    upload_file_to_s3,
     download_file_from_s3,
-    delete_file_from_s3,
+    store_file,
+    download_stored_file,
+    delete_stored_file,
     get_content_type
 )
 from app.rag.validation import validate_file_content
 from app.courses.access import assert_course_access
 from app.auth.routes import get_current_teacher, get_current_user
+from app.notifications.service import create_notification, notify_course_students
+from app.notifications.types import NotificationType
+from app.email_service import send_notification_email
 
 
 router = APIRouter(prefix="/files", tags=["Content Upload"])
@@ -33,52 +35,12 @@ MAX_FILE_SIZE = 25 * 1024 * 1024  # 25 MB
 
 
 def _store_file(content: bytes, filename: str, extension: str, course_id: int) -> str:
-    """Storage backend priority: AWS S3 (if configured) > Supabase (if configured)
-    > local disk. Returns a reference string whose scheme identifies where it lives
-    ("s3://...", "supabase://..." - private bucket, never a public URL - or a plain
-    local filesystem path)."""
-    content_type = get_content_type(extension)
-
-    if settings.AWS_ACCESS_KEY_ID and settings.AWS_SECRET_ACCESS_KEY and settings.AWS_S3_BUCKET:
-        try:
-            return upload_file_to_s3(content, filename, content_type, course_id)
-        except Exception as e:
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"S3 upload failed: {str(e)}")
-
-    if settings.SUPABASE_URL and settings.SUPABASE_KEY:
-        try:
-            return upload_file_to_supabase(content, filename, content_type, course_id)
-        except Exception as e:
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Supabase upload failed: {str(e)}")
-
-    # Local storage fallback
-    upload_dir = settings.upload_path / str(course_id)
-    upload_dir.mkdir(parents=True, exist_ok=True)
-    destination = upload_dir / Path(filename).name
+    """Thin HTTPException-wrapping shim over the shared store_file dispatcher (S3 >
+    Supabase > local disk) - see app/upload/services.py."""
     try:
-        with open(destination, "wb") as buffer:
-            buffer.write(content)
-        return str(destination.resolve())
+        return store_file(content, filename, extension, f"course_{course_id}")
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to write file contents locally: {str(e)}")
-
-
-def _delete_stored_file(file_url: str) -> None:
-    """Mirror of _store_file's backend dispatch, for deletion."""
-    if file_url.startswith("s3://"):
-        delete_file_from_s3(file_url)
-    elif file_url.startswith("supabase://"):
-        try:
-            delete_file_from_supabase(file_url)
-        except Exception as e:
-            print(f"Warning: Failed to delete file from Supabase storage: {str(e)}")
-    else:
-        filepath = Path(file_url)
-        if filepath.exists():
-            try:
-                filepath.unlink()
-            except Exception as e:
-                print(f"Warning: Failed to delete physical file {filepath}: {str(e)}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"File upload failed: {str(e)}")
 
 
 def process_uploaded_file_task(file_id: int):
@@ -123,6 +85,24 @@ def process_uploaded_file_task(file_id: int):
         file_record.status = "Completed"
         db.commit()
 
+        try:
+            course = db.query(Course).filter(Course.id == file_record.course_id).first()
+            if course:
+                create_notification(
+                    db, course.teacher_id, NotificationType.FILE_PROCESSING_COMPLETED,
+                    title="File processed successfully",
+                    message=f"'{file_record.filename}' finished processing in {course.name}.",
+                    link=f"/course/{course.id}",
+                )
+                notify_course_students(
+                    db, course.id, NotificationType.NEW_COURSE_CONTENT,
+                    title="New course content available",
+                    message=f"New material '{file_record.filename}' was added to {course.name}.",
+                    link=f"/course/{course.id}",
+                )
+        except Exception as e:
+            print(f"Warning: failed to create file-processed notifications: {str(e)}")
+
         # RAG ingestion: clean -> OCR fallback -> chunk -> caption images -> dedup
         # -> embed -> store. Best-effort - a failure here doesn't roll back the
         # successful text extraction above (the file stays usable, just without
@@ -155,6 +135,25 @@ def process_uploaded_file_task(file_id: int):
         if file_record:
             file_record.status = "Failed"
             db.commit()
+            try:
+                course = db.query(Course).filter(Course.id == file_record.course_id).first()
+                if course:
+                    create_notification(
+                        db, course.teacher_id, NotificationType.FILE_PROCESSING_FAILED,
+                        title="File processing failed",
+                        message=f"'{file_record.filename}' could not be processed in {course.name}. Please try re-uploading.",
+                        link=f"/course/{course.id}",
+                    )
+                    teacher = db.query(User).filter(User.id == course.teacher_id).first()
+                    if teacher:
+                        send_notification_email(
+                            teacher.email, teacher.full_name,
+                            title="File processing failed",
+                            message=f"'{file_record.filename}' could not be processed in {course.name}. Please try re-uploading.",
+                            link=f"/course/{course.id}",
+                        )
+            except Exception as notif_err:
+                print(f"Warning: failed to create file-failed notification: {str(notif_err)}")
         print(f"Background parsing error for file ID {file_id}: {str(e)}")
     finally:
         if temp_filepath is not None and temp_filepath.exists():
@@ -355,7 +354,7 @@ def delete_file(
             detail="You do not have permission to delete this file."
         )
 
-    _delete_stored_file(file_record.file_url)
+    delete_stored_file(file_record.file_url)
 
     db.delete(file_record)
     db.commit()
@@ -421,7 +420,7 @@ def replace_file(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
     # 3. Delete old file from storage
-    _delete_stored_file(file_record.file_url)
+    delete_stored_file(file_record.file_url)
 
     # 4. Save new file to storage (S3 > Supabase > local, whichever is configured)
     safe_filename = file_path_obj.name

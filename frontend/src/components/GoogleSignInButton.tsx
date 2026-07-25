@@ -1,6 +1,7 @@
 import React from 'react';
 import { GoogleLogin, type CredentialResponse } from '@react-oauth/google';
 import { useAuth } from '../context/AuthContext';
+import { useTheme } from '../contexts/ThemeContext';
 
 interface GoogleSignInButtonProps {
   rememberMe?: boolean;
@@ -16,6 +17,7 @@ export const GoogleSignInButton: React.FC<GoogleSignInButtonProps> = ({
   onError,
 }) => {
   const { loginWithGoogle } = useAuth();
+  const { theme } = useTheme();
 
   if (!isConfigured) {
     return (
@@ -23,7 +25,7 @@ export const GoogleSignInButton: React.FC<GoogleSignInButtonProps> = ({
         type="button"
         disabled
         title="Set VITE_GOOGLE_CLIENT_ID to enable Google sign-in"
-        className="w-full py-2.5 rounded-xl border border-border bg-card text-text-muted text-sm font-medium cursor-not-allowed"
+        className="w-full py-2.5 rounded-xl border border-border bg-card dark:bg-black dark:text-gray-400 text-text-muted text-sm font-medium cursor-not-allowed"
       >
         Google sign-in not configured
       </button>
@@ -45,14 +47,12 @@ export const GoogleSignInButton: React.FC<GoogleSignInButtonProps> = ({
 
   return (
     <div className="flex justify-center">
-      {/* GSI's width prop only accepts a pixel number (max 400), not a percentage -
-          336 matches the card's inner content width (max-w-md minus p-8 padding). */}
       <GoogleLogin
         onSuccess={handleSuccess}
         onError={() => onError('Google sign-in failed.')}
         width={336}
         shape="pill"
-        theme="outline"
+        theme={theme === 'dark' ? 'filled_black' : 'outline'}
       />
     </div>
   );

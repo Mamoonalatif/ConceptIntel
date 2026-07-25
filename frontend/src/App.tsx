@@ -4,6 +4,8 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 // Pages
+import { LandingPage } from './pages/LandingPage';
+import { AboutPage } from './pages/AboutPage';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import RequestTeacherAccess from './pages/RequestTeacherAccess';
@@ -15,6 +17,10 @@ import CourseCoordinatorDashboard from './pages/CourseCoordinatorDashboard';
 import CourseDetail from './pages/CourseDetail';
 import KnowledgeGraph from './pages/KnowledgeGraph';
 import JoinCourse from './pages/JoinCourse';
+import ProfilePage from './pages/ProfilePage';
+import CalendarPage from './pages/CalendarPage';
+import AssistantPage from './pages/AssistantPage';
+import SettingsPage from './pages/SettingsPage';
 
 const queryClient = new QueryClient();
 
@@ -76,10 +82,48 @@ const AppContent: React.FC = () => {
     <Router>
       <Routes>
         {/* Public Guest Routes */}
+        <Route path="/" element={<LandingPage />} />
+        <Route path="/about" element={<AboutPage />} />
         <Route path="/login" element={<GuestRoute><Login /></GuestRoute>} />
         <Route path="/register" element={<GuestRoute><Register /></GuestRoute>} />
         <Route path="/request-teacher-access" element={<RequestTeacherAccess />} />
         <Route path="/join/:code" element={<JoinCourse />} />
+
+        {/* Shared Profile Page (all authenticated roles) */}
+        <Route
+          path="/profile"
+          element={
+            <PrivateRoute>
+              <ProfilePage />
+            </PrivateRoute>
+          }
+        />
+
+        {/* Shared global destinations (all authenticated roles) */}
+        <Route
+          path="/calendar"
+          element={
+            <PrivateRoute>
+              <CalendarPage />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/assistant"
+          element={
+            <PrivateRoute>
+              <AssistantPage />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/settings"
+          element={
+            <PrivateRoute>
+              <SettingsPage />
+            </PrivateRoute>
+          }
+        />
 
         {/* Teacher Protected Dashboard */}
         <Route
@@ -152,7 +196,7 @@ const AppContent: React.FC = () => {
         />
 
         {/* Catch-all redirect */}
-        <Route path="*" element={<Navigate to="/login" replace />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Router>
   );

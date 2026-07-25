@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 
 import ReactFlow, {
@@ -7,7 +7,6 @@ import ReactFlow, {
   MiniMap,
   useNodesState,
   useEdgesState,
-  type Connection,
   type Edge,
   type Node,
   MarkerType,
@@ -21,7 +20,7 @@ import { graphService, courseService } from '../services/api';
 import {
   ArrowLeft, RefreshCw, Plus, Link as LinkIcon, Save, Info,
   Trash2, AlertCircle, CheckCircle2, Search, BarChart3,
-  X, BookOpen, Zap, ChevronDown, ChevronUp
+  X, BookOpen, Zap
 } from 'lucide-react';
 
 interface Concept {
@@ -46,7 +45,7 @@ const KnowledgeGraphInner: React.FC = () => {
   const { courseId } = useParams<{ courseId: string }>();
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { fitView, setCenter } = useReactFlow();
+  const { setCenter } = useReactFlow();
 
   const idNum = parseInt(courseId || '0');
   const isTeacher = user?.role === 'teacher';
@@ -355,8 +354,8 @@ const KnowledgeGraphInner: React.FC = () => {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
-          {/* Search Dropdown */}
-          {filteredConcepts.length > 0 && (
+          {/* Search Dropdown — teacher only; students see full result cards below instead. */}
+          {isTeacher && filteredConcepts.length > 0 && (
             <div className="absolute top-full left-0 right-0 mt-1 bg-surface border border-border rounded-xl shadow-hover z-50 overflow-hidden">
               {filteredConcepts.slice(0, 6).map(c => {
                 const styles = getDifficultyStyles(c.difficulty);
@@ -487,7 +486,9 @@ const KnowledgeGraphInner: React.FC = () => {
           )}
         </div>
 
-        {/* React Flow */}
+        {/* Main area: teachers get the full pannable graph explorer; students
+            get a search-only concept list instead of free exploration of the
+            raw graph (they can only look up concepts by name). */}
         <div className="flex-1 h-full">
           {loading ? (
             <div className="h-full flex flex-col items-center justify-center gap-4">
@@ -496,7 +497,7 @@ const KnowledgeGraphInner: React.FC = () => {
               </div>
               <p className="text-text-secondary text-sm">Loading knowledge structures...</p>
             </div>
-          ) : (
+          ) : isTeacher ? (
             <ReactFlow
               nodes={nodes.map(n => ({
                 ...n,
@@ -517,6 +518,42 @@ const KnowledgeGraphInner: React.FC = () => {
                 style={{ background: '#f8faff', border: '1px solid #dde3f0', borderRadius: '12px' }}
               />
             </ReactFlow>
+          ) : (
+            <div className="h-full overflow-y-auto p-6">
+              {!searchQuery.trim() ? (
+                <div className="h-full flex flex-col items-center justify-center gap-3 text-center max-w-sm mx-auto">
+                  <div className="w-14 h-14 bg-primary-muted rounded-2xl flex items-center justify-center">
+                    <Search className="w-6 h-6 text-primary" />
+                  </div>
+                  <p className="text-sm font-bold text-text-primary">Search for a concept</p>
+                  <p className="text-xs text-text-secondary leading-relaxed">
+                    Use the search bar above to look up a concept from this course and see its description and prerequisites.
+                  </p>
+                </div>
+              ) : filteredConcepts.length === 0 ? (
+                <p className="text-sm text-text-secondary text-center mt-12">No concepts match "{searchQuery}".</p>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 max-w-5xl mx-auto">
+                  {filteredConcepts.map(c => {
+                    const styles = getDifficultyStyles(c.difficulty);
+                    return (
+                      <button
+                        key={c.id}
+                        onClick={() => handleSearchSelect(c)}
+                        className={`text-left bg-surface border-2 ${styles.border} rounded-xl p-4 shadow-soft hover:shadow-md transition-all`}
+                      >
+                        <span className={`inline-block text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full mb-1.5 ${
+                          c.difficulty.toLowerCase() === 'easy' ? 'bg-emerald-100 text-emerald-700' :
+                          c.difficulty.toLowerCase() === 'hard' ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'
+                        }`}>{c.difficulty}</span>
+                        <h4 className="font-bold text-sm text-text-primary leading-tight">{c.name}</h4>
+                        <p className="text-xs text-text-secondary line-clamp-2 mt-1 leading-normal">{c.description}</p>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           )}
         </div>
 

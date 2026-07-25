@@ -1,6 +1,6 @@
 import re
 from pydantic import BaseModel, EmailStr, field_validator
-from typing import Optional
+from typing import List, Optional
 
 FULL_NAME_PATTERN = re.compile(r"^[A-Za-z]+(?: [A-Za-z]+)*$")
 SPECIAL_CHARS = "!@#$%^&*"
@@ -75,9 +75,23 @@ class UserResponse(BaseModel):
     full_name: str
     role: str
     is_active: bool = True
+    # Storage reference, not a directly-loadable URL - fetch the actual image via
+    # GET /auth/users/{id}/avatar. Non-null just tells the frontend an avatar exists.
+    avatar_url: Optional[str] = None
 
     class Config:
         from_attributes = True
+
+
+class StaffMemberResponse(UserResponse):
+    """Extends UserResponse for GET /auth/admin/staff with the coordinator's currently
+    assigned scope, so the admin staff list can show it inline without a separate
+    GET .../scope fetch per row. Only meaningful for program_coordinator/
+    course_coordinator rows - None for teachers and for coordinators with no
+    assignment yet. Since a coordinator is now scoped to exactly one program/course,
+    each is a single name rather than a list."""
+    program_name: Optional[str] = None
+    course_name: Optional[str] = None
 
 
 class UserStatusUpdate(BaseModel):
@@ -85,10 +99,24 @@ class UserStatusUpdate(BaseModel):
     is_active: bool
 
 
+class UserAdminUpdate(BaseModel):
+    """Admin-only payload to update any user's profile details."""
+    full_name: Optional[str] = None
+    email: Optional[EmailStr] = None
+    role: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+
 class StaffRoleUpdate(BaseModel):
     """Admin-only payload to move an existing teacher/program-coordinator/
-    course-coordinator account between those three roles."""
+    course-coordinator account between those three roles. program_ids/course_ids are
+    only meaningful when role is program_coordinator/course_coordinator respectively -
+    they replace that user's entire scope in one transaction along with the role
+    change (see auth/routes.py change_staff_role)."""
     role: str  # "teacher" | "program_coordinator" | "course_coordinator"
+    program_ids: Optional[List[int]] = None
+    course_ids: Optional[List[int]] = None
 
     @field_validator("role")
     @classmethod

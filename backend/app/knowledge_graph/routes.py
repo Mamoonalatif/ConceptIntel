@@ -4,8 +4,11 @@ from app.database.connection import get_db
 from app.database.models import Course, UploadedFile, User
 from app.knowledge_graph.schemas import ConceptNodeUpdate, RelationshipCreate, GraphResponse, CourseGraphStatusResponse
 from app.knowledge_graph.services import neo4j_service, trigger_concept_extraction
-from app.auth.routes import get_current_teacher, get_current_user, get_current_course_coordinator
+from app.auth.routes import get_current_teacher, get_current_user, get_current_course_coordinator, CourseScope
 from app.courses.access import assert_course_access
+from app.notifications.service import create_notification
+from app.notifications.types import NotificationType
+from app.email_service import send_notification_email
 
 router = APIRouter(prefix="/graph", tags=["Knowledge Graph"])
 
@@ -42,16 +45,30 @@ def get_graph_by_course(
 def approve_course_graph(
     course_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_course_coordinator)
+    scope: CourseScope = Depends(get_current_course_coordinator)
 ):
     """Course Coordinator (or admin) approves a course's knowledge graph, making it
     visible to enrolled students."""
     course = db.query(Course).filter(Course.id == course_id).first()
     if not course:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
+    if scope.course_ids is not None and course.id not in scope.course_ids:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You are not assigned as this course's Course Coordinator."
+        )
     course.graph_status = "Approved"
     db.commit()
     db.refresh(course)
+    try:
+        create_notification(
+            db, course.teacher_id, NotificationType.GRAPH_APPROVED,
+            title="Knowledge graph approved",
+            message=f"The knowledge graph for {course.name} was approved and is now visible to students.",
+            link=f"/course/{course.id}/graph",
+        )
+    except Exception as e:
+        print(f"Warning: failed to create graph-approved notification: {str(e)}")
     return course
 
 
@@ -59,16 +76,38 @@ def approve_course_graph(
 def reject_course_graph(
     course_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_course_coordinator)
+    scope: CourseScope = Depends(get_current_course_coordinator)
 ):
     """Course Coordinator (or admin) rejects a course's knowledge graph - it remains
     hidden from students until re-approved."""
     course = db.query(Course).filter(Course.id == course_id).first()
     if not course:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
+    if scope.course_ids is not None and course.id not in scope.course_ids:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You are not assigned as this course's Course Coordinator."
+        )
     course.graph_status = "Rejected"
     db.commit()
     db.refresh(course)
+    try:
+        create_notification(
+            db, course.teacher_id, NotificationType.GRAPH_REJECTED,
+            title="Knowledge graph rejected",
+            message=f"The knowledge graph for {course.name} was rejected. Please review and rebuild it.",
+            link=f"/course/{course.id}/graph",
+        )
+        teacher = db.query(User).filter(User.id == course.teacher_id).first()
+        if teacher:
+            send_notification_email(
+                teacher.email, teacher.full_name,
+                title="Knowledge graph rejected",
+                message=f"The knowledge graph for {course.name} was rejected by a course coordinator. Please review and rebuild it.",
+                link=f"/course/{course.id}/graph",
+            )
+    except Exception as e:
+        print(f"Warning: failed to create graph-rejected notification: {str(e)}")
     return course
 
 

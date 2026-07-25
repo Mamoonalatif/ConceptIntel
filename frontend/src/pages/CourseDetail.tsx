@@ -3,11 +3,24 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { courseService, uploadService, enrollmentService, graphService, type ContentSearchResult } from '../services/api';
 import { useAutoRefresh } from '../hooks/useAutoRefresh';
+import { ClassStream } from '../components/ClassStream';
+import { Assignments } from '../components/Assignments';
+import { AppShell, type NavItem } from '../components/AppShell';
 import {
   ArrowLeft, BookOpen, Upload, FileText, Trash2, RefreshCw,
   Users, CheckCircle2, AlertTriangle, Play, Network, Copy, Download,
   Zap, TrendingUp, Clock, Search
 } from 'lucide-react';
+
+// Mirrors App.tsx's defaultDashboardFor - each role lands back on its own
+// dashboard route when leaving a course rather than always going to /student.
+const defaultDashboardFor = (role: string) => {
+  if (role === 'admin') return '/admin';
+  if (role === 'teacher') return '/teacher';
+  if (role === 'program_coordinator') return '/program-coordinator';
+  if (role === 'course_coordinator') return '/course-coordinator';
+  return '/student';
+};
 
 interface Course {
   id: number;
@@ -59,6 +72,7 @@ const CourseDetail: React.FC = () => {
   const [course, setCourse] = useState<Course | null>(null);
   const [files, setFiles] = useState<UploadedFile[]>([]);
   const [students, setStudents] = useState<EnrolledStudent[]>([]);
+  const [myProgress, setMyProgress] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [rebuilding, setRebuilding] = useState(false);
@@ -95,6 +109,10 @@ const CourseDetail: React.FC = () => {
       if (isTeacher) {
         const studentsData = await enrollmentService.getEnrolledStudents(idNum);
         setStudents(studentsData);
+      } else {
+        const myCourses = await enrollmentService.getMyCourses();
+        const mine = myCourses.find((e: any) => e.course_id === idNum);
+        setMyProgress(mine ? Math.round(mine.progress) : null);
       }
     } catch (err: any) {
       if (!silent) setError('Failed to load course details. Ensure backend connection is active.');
@@ -193,48 +211,49 @@ const CourseDetail: React.FC = () => {
     ? Math.round(students.reduce((sum, s) => sum + s.progress, 0) / students.length)
     : 0;
 
+  const backNavItems: NavItem[] = [
+    {
+      key: 'back',
+      label: 'Back to Dashboard',
+      icon: ArrowLeft,
+      onClick: () => navigate(defaultDashboardFor(user?.role || 'student')),
+    },
+  ];
+
   if (loading) {
     return (
-      <div className="min-h-screen bg-background flex flex-col items-center justify-center gap-4">
-        <RefreshCw className="w-10 h-10 text-primary animate-spin" />
-        <p className="text-text-secondary text-sm">Loading course details...</p>
-      </div>
+      <AppShell roleLabel="Course" logoIcon={BookOpen} navItems={backNavItems}>
+        <div className="flex flex-col items-center justify-center gap-4 py-24">
+          <RefreshCw className="w-10 h-10 text-primary animate-spin" />
+          <p className="text-text-secondary text-sm">Loading course details...</p>
+        </div>
+      </AppShell>
     );
   }
 
   if (!course) {
     return (
-      <div className="min-h-screen bg-background flex flex-col items-center justify-center p-6">
-        <AlertTriangle className="w-16 h-16 text-amber-400 mb-4" />
-        <h3 className="text-xl font-bold text-text-primary mb-2">Course Not Found</h3>
-        <button onClick={() => navigate(-1)} className="btn-primary mt-2">Go Back</button>
-      </div>
+      <AppShell roleLabel="Course" logoIcon={BookOpen} navItems={backNavItems}>
+        <div className="flex flex-col items-center justify-center p-6">
+          <AlertTriangle className="w-16 h-16 text-amber-400 mb-4" />
+          <h3 className="text-xl font-bold text-text-primary mb-2">Course Not Found</h3>
+          <button onClick={() => navigate(-1)} className="btn-primary mt-2">Go Back</button>
+        </div>
+      </AppShell>
     );
   }
 
   return (
-    <div className="min-h-screen bg-background pb-16">
-      <div className="page-bg-decoration" />
-
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 relative z-10">
-        {/* Back nav */}
-        <button
-          onClick={() => navigate(isTeacher ? '/teacher' : '/student')}
-          className="flex items-center gap-1.5 text-sm text-text-secondary hover:text-primary font-medium transition-all mb-6"
-        >
-          <ArrowLeft className="w-4 h-4" />
-          Back to Dashboard
-        </button>
-
+    <AppShell roleLabel={course.name} logoIcon={BookOpen} navItems={backNavItems}>
         {/* Banners */}
         {error && (
-          <div className="bg-red-50 border border-red-200 text-red-600 rounded-xl p-4 mb-5 text-sm flex items-center gap-2 animate-fade-in">
+          <div className="bg-red-50 border border-red-200 text-red-600 dark:bg-red-500/10 dark:border-red-500/30 dark:text-red-400 rounded-xl p-4 mb-5 text-sm flex items-center gap-2 animate-fade-in">
             <AlertTriangle className="w-4 h-4 shrink-0" />
             <span>{error}</span>
           </div>
         )}
         {success && (
-          <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-xl p-4 mb-5 text-sm flex items-center gap-2 animate-fade-in">
+          <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 dark:bg-emerald-500/10 dark:border-emerald-500/30 dark:text-emerald-400 rounded-xl p-4 mb-5 text-sm flex items-center gap-2 animate-fade-in">
             <CheckCircle2 className="w-4 h-4 shrink-0" />
             <span>{success}</span>
           </div>
@@ -283,12 +302,14 @@ const CourseDetail: React.FC = () => {
 
             {/* Quick Stats Row */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 pt-4 border-t border-border">
-              {[
+              {(isTeacher ? [
                 { label: 'Files Uploaded', value: files.length, icon: FileText, color: 'text-primary', bg: 'bg-primary-muted' },
-                { label: 'Processed', value: completedFiles, icon: CheckCircle2, color: 'text-emerald-600', bg: 'bg-emerald-50' },
-                { label: 'Students', value: isTeacher ? students.length : '—', icon: Users, color: 'text-secondary', bg: 'bg-secondary-muted' },
-                { label: 'Avg Progress', value: isTeacher ? `${avgProgress}%` : '—', icon: TrendingUp, color: 'text-amber-600', bg: 'bg-amber-50' },
-              ].map(({ label, value, icon: Icon, color, bg }) => (
+                { label: 'Processed', value: completedFiles, icon: CheckCircle2, color: 'text-emerald-600 dark:text-emerald-400', bg: 'bg-emerald-50 dark:bg-emerald-500/10' },
+                { label: 'Students', value: students.length, icon: Users, color: 'text-secondary', bg: 'bg-secondary-muted' },
+                { label: 'Avg Progress', value: `${avgProgress}%`, icon: TrendingUp, color: 'text-amber-600 dark:text-amber-400', bg: 'bg-amber-50 dark:bg-amber-500/10' },
+              ] : [
+                { label: 'My Progress', value: myProgress !== null ? `${myProgress}%` : '—', icon: TrendingUp, color: 'text-amber-600 dark:text-amber-400', bg: 'bg-amber-50 dark:bg-amber-500/10' },
+              ]).map(({ label, value, icon: Icon, color, bg }) => (
                 <div key={label} className="flex items-center gap-3">
                   <div className={`w-9 h-9 ${bg} rounded-xl flex items-center justify-center`}>
                     <Icon className={`w-4.5 h-4.5 ${color}`} />
@@ -305,8 +326,14 @@ const CourseDetail: React.FC = () => {
 
         {/* Content Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Left: Upload + Files */}
+          {/* Left: Stream + Upload + Files */}
           <div className="lg:col-span-2 space-y-6">
+
+            {/* Class Stream - Google Classroom-style announcements feed */}
+            <ClassStream courseId={idNum} isTeacher={isTeacher} />
+
+            {/* Assignments (Classwork) - due dates, attachments, submissions */}
+            <Assignments courseId={idNum} isTeacher={isTeacher} />
 
             {/* Upload (Teacher only) */}
             {isTeacher && (
@@ -320,7 +347,7 @@ const CourseDetail: React.FC = () => {
                     id="rebuild-graph-btn"
                     onClick={handleRebuildGraph}
                     disabled={rebuilding || completedFiles === 0}
-                    className="flex items-center gap-1.5 px-3.5 py-1.5 bg-amber-50 border border-amber-200 text-amber-700 hover:bg-amber-100 font-semibold rounded-lg text-xs transition-all disabled:opacity-50"
+                    className="flex items-center gap-1.5 px-3.5 py-1.5 bg-amber-50 border border-amber-200 text-amber-700 hover:bg-amber-100 dark:bg-amber-500/10 dark:border-amber-500/30 dark:text-amber-400 dark:hover:bg-amber-500/20 font-semibold rounded-lg text-xs transition-all disabled:opacity-50"
                     title="Extract concepts from all completed files"
                   >
                     {rebuilding ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
@@ -357,7 +384,10 @@ const CourseDetail: React.FC = () => {
               </div>
             )}
 
-            {/* Files Table */}
+            {/* Files Table — teacher only. Students never see the raw
+                upload/processing pipeline used to build the knowledge graph;
+                they only get the Content Search panel below. */}
+            {isTeacher && (
             <div className="bg-surface rounded-2xl p-6 border border-border animate-fade-up">
               <h3 className="text-base font-bold text-text-primary mb-4 flex items-center gap-2">
                 <FileText className="w-4.5 h-4.5 text-secondary" />
@@ -392,10 +422,10 @@ const CourseDetail: React.FC = () => {
                           </td>
                           <td className="py-3.5 px-3">
                             <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold ${
-                              file.status === 'Completed' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' :
-                              file.status === 'Processing' ? 'bg-blue-50 text-blue-700 border border-blue-200' :
-                              file.status === 'Failed'    ? 'bg-red-50 text-red-600 border border-red-200' :
-                              'bg-gray-50 text-gray-600 border border-gray-200'
+                              file.status === 'Completed' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/30' :
+                              file.status === 'Processing' ? 'bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-500/10 dark:text-blue-400 dark:border-blue-500/30' :
+                              file.status === 'Failed'    ? 'bg-red-50 text-red-600 border border-red-200 dark:bg-red-500/10 dark:text-red-400 dark:border-red-500/30' :
+                              'bg-card text-text-secondary border border-border'
                             }`}>
                               {file.status === 'Processing' && <RefreshCw className="w-3 h-3 animate-spin" />}
                               {file.status}
@@ -415,7 +445,7 @@ const CourseDetail: React.FC = () => {
                               <>
                                 <button
                                   onClick={() => handleReprocessFile(file.id)}
-                                  className="inline-flex p-1.5 bg-background hover:bg-amber-50 border border-border hover:border-amber-300 text-text-muted hover:text-amber-600 rounded-lg transition-all"
+                                  className="inline-flex p-1.5 bg-background hover:bg-amber-50 border border-border hover:border-amber-300 text-text-muted hover:text-amber-600 dark:hover:bg-amber-500/10 dark:hover:border-amber-500/30 dark:hover:text-amber-400 rounded-lg transition-all"
                                   title="Re-extract concepts"
                                 >
                                   <Play className="w-3.5 h-3.5" />
@@ -437,7 +467,7 @@ const CourseDetail: React.FC = () => {
                                 />
                                 <button
                                   onClick={() => handleDeleteFile(file.id)}
-                                  className="inline-flex p-1.5 bg-background hover:bg-red-50 border border-border hover:border-red-300 text-text-muted hover:text-red-500 rounded-lg transition-all"
+                                  className="inline-flex p-1.5 bg-background hover:bg-red-50 border border-border hover:border-red-300 text-text-muted hover:text-red-500 dark:hover:bg-red-500/10 dark:hover:border-red-500/30 dark:hover:text-red-400 rounded-lg transition-all"
                                   title="Delete"
                                 >
                                   <Trash2 className="w-3.5 h-3.5" />
@@ -452,6 +482,7 @@ const CourseDetail: React.FC = () => {
                 </div>
               )}
             </div>
+            )}
 
             {/* Content Search - tests the RAG retrieval pipeline directly from the UI */}
             <div className="bg-surface rounded-2xl p-6 border border-border animate-fade-up">
@@ -553,8 +584,7 @@ const CourseDetail: React.FC = () => {
             )}
           </div>
         </div>
-      </div>
-    </div>
+    </AppShell>
   );
 };
 
