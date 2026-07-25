@@ -213,6 +213,26 @@ const TeacherDashboard: React.FC = () => {
               <User className="w-3.5 h-3.5 text-primary" />
               <span className="font-semibold text-primary text-xs">{user?.full_name}</span>
             </div>
+            {/* Coordinator authority is additive on top of the teacher role - if this
+                teacher has been given one, surface a link to that panel too. */}
+            {user?.is_program_coordinator && (
+              <button
+                onClick={() => navigate('/program-coordinator')}
+                className="flex items-center gap-1.5 text-xs font-semibold text-primary bg-primary-muted border border-primary/20 hover:bg-primary hover:text-white px-3 py-1.5 rounded-lg transition-all"
+                title="You also have Program Coordinator authority"
+              >
+                <ShieldCheck className="w-3.5 h-3.5" /> Program Coordinator Panel
+              </button>
+            )}
+            {user?.is_course_coordinator && (
+              <button
+                onClick={() => navigate('/course-coordinator')}
+                className="flex items-center gap-1.5 text-xs font-semibold text-primary bg-primary-muted border border-primary/20 hover:bg-primary hover:text-white px-3 py-1.5 rounded-lg transition-all"
+                title="You also have Course Coordinator authority"
+              >
+                <ShieldCheck className="w-3.5 h-3.5" /> Course Coordinator Panel
+              </button>
+            )}
             <button
               id="create-course-btn"
               onClick={() => setShowModal(true)}

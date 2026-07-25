@@ -11,10 +11,12 @@ import ReactFlow, {
   type Edge,
   type Node,
   MarkerType,
+  Position,
   useReactFlow,
   ReactFlowProvider,
 } from 'reactflow';
-import 'reactflow/dist/style.css';
+// CSS is imported once in main.tsx (before index.css, so Tailwind wins the cascade) -
+// not here, to avoid a second copy racing the import order that fix depends on.
 
 import { useAuth } from '../context/AuthContext';
 import { graphService, courseService } from '../services/api';
@@ -35,9 +37,9 @@ interface Concept {
 // ── Node Difficulty → Light Theme Badge Classes ──
 const getDifficultyStyles = (difficulty: string) => {
   switch (difficulty.toLowerCase()) {
-    case 'easy':   return { border: 'border-emerald-400', badge: 'badge-easy',   glow: 'shadow-emerald-100' };
-    case 'hard':   return { border: 'border-rose-400',    badge: 'badge-hard',    glow: 'shadow-rose-100' };
-    default:       return { border: 'border-amber-400',   badge: 'badge-medium',  glow: 'shadow-amber-100' };
+    case 'easy':   return { border: 'border-emerald-400', badge: 'badge-easy',   glow: 'shadow-emerald-100', fill: 'bg-emerald-300 border-emerald-500 text-emerald-950' };
+    case 'hard':   return { border: 'border-rose-400',    badge: 'badge-hard',    glow: 'shadow-rose-100',   fill: 'bg-rose-300 border-rose-500 text-rose-950' };
+    default:       return { border: 'border-amber-400',   badge: 'badge-medium',  glow: 'shadow-amber-100',  fill: 'bg-amber-300 border-amber-500 text-amber-950' };
   }
 };
 
@@ -66,12 +68,17 @@ const KnowledgeGraphInner: React.FC = () => {
   // Analytics panel
   const [showAnalytics, setShowAnalytics] = useState(false);
 
-  // Selected Node Side Panel
+  // Selected Node Side Panel (opened from the popup's "Edit" button, teacher only)
   const [selectedNode, setSelectedNode] = useState<Concept | null>(null);
   const [editName, setEditName] = useState('');
   const [editDesc, setEditDesc] = useState('');
   const [editDiff, setEditDiff] = useState('Medium');
   const [updatingNode, setUpdatingNode] = useState(false);
+
+  // Click popup: a lightweight floating card showing name/difficulty/description
+  // right where the node was clicked, rather than jumping straight to a persistent
+  // sidebar. Position is clamped to the viewport so it never renders off-screen.
+  const [popupNode, setPopupNode] = useState<{ concept: Concept; x: number; y: number } | null>(null);
 
   // Add Node Modal
   const [showNodeModal, setShowNodeModal] = useState(false);
@@ -116,19 +123,23 @@ const KnowledgeGraphInner: React.FC = () => {
       levelGroups[lvl].push(n.id);
     });
 
-    const hSpacing = 300;
-    const vSpacing = 140;
+    // Top-to-bottom prerequisite pyramid: foundational concepts (no prerequisites
+    // of their own) sit at the top row, with straight edges running down toward
+    // whatever depends on them - a concept's prerequisite is always above it, and
+    // the arrowhead (markerStart, below) points back up at that prerequisite.
+    const hSpacing = 160;
+    const vSpacing = 160;
 
     return nodesList.map(node => {
       const lvl = levels[node.id] || 0;
       const group = levelGroups[lvl];
       const idx = group.indexOf(node.id);
-      const groupH = (group.length - 1) * vSpacing;
+      const groupW = (group.length - 1) * hSpacing;
       return {
         ...node,
         position: {
-          x: lvl * hSpacing + 60,
-          y: idx * vSpacing - groupH / 2 + 300,
+          x: idx * hSpacing - groupW / 2 + 500,
+          y: lvl * vSpacing + 60,
         }
       };
     });
@@ -149,22 +160,24 @@ const KnowledgeGraphInner: React.FC = () => {
         return {
           id: concept.id,
           data: {
+            // Concept name only - difficulty is carried by the circle's own color,
+            // everything else (description, difficulty label) lives in the click
+            // popup below, not on the node itself.
             label: (
-              <div className="text-left p-1">
-                <span className={`inline-block text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full mb-1 ${
-                  concept.difficulty.toLowerCase() === 'easy'   ? 'bg-emerald-100 text-emerald-700' :
-                  concept.difficulty.toLowerCase() === 'hard'   ? 'bg-rose-100 text-rose-700' :
-                                                                   'bg-amber-100 text-amber-700'
-                }`}>{concept.difficulty}</span>
-                <h4 className="font-bold text-xs text-slate-800 leading-tight line-clamp-1">{concept.name}</h4>
-                <p className="text-[10px] text-slate-500 line-clamp-2 mt-0.5 leading-normal">{concept.description}</p>
-              </div>
+              <span className="text-[11px] font-bold leading-tight line-clamp-2 text-center px-1">
+                {concept.name}
+              </span>
             ),
             concept,
           },
           type: 'default',
           position: { x: 0, y: 0 },
-          className: `bg-white border-2 ${styles.border} rounded-xl w-52 shadow-md ${styles.glow} hover:shadow-lg hover:scale-[1.02] transition-all cursor-pointer`,
+          // A concept's prerequisite always sits above it in this layout, so its
+          // own outgoing connection exits from the bottom (heading down to whatever
+          // depends on it) and incoming prerequisite links arrive at the top.
+          sourcePosition: Position.Bottom,
+          targetPosition: Position.Top,
+          className: `flex items-center justify-center w-28 h-28 rounded-full border-4 ${styles.fill} shadow-md ${styles.glow} hover:shadow-lg hover:scale-[1.05] transition-all cursor-pointer`,
         };
       });
 
@@ -172,9 +185,14 @@ const KnowledgeGraphInner: React.FC = () => {
         id: edge.id,
         source: edge.source,
         target: edge.target,
-        animated: true,
-        markerEnd: { type: MarkerType.ArrowClosed, color: '#4f46e5' },
-        style: { strokeWidth: 2, stroke: '#4f46e5' },
+        type: 'straight',
+        animated: false,
+        // markerStart (not markerEnd): the arrowhead sits at the SOURCE end of the
+        // line - the prerequisite concept - pointing back up at it, since that's
+        // what "X is a prerequisite of Y" means: the arrow points at the thing you
+        // need first, not at the thing it unlocks.
+        markerStart: { type: MarkerType.ArrowClosed, color: '#64748b', width: 18, height: 18 },
+        style: { strokeWidth: 1.5, stroke: '#64748b' },
       }));
 
       const structured = applyLevelLayout(flowNodes, flowEdges);
@@ -197,15 +215,27 @@ const KnowledgeGraphInner: React.FC = () => {
     if (error)   { const t = setTimeout(() => setError(''), 6000);   return () => clearTimeout(t); }
   }, [error]);
 
-  // ── Node Click ──
-  const onNodeClick = (_: React.MouseEvent, node: Node) => {
+  // ── Node Click: open a popup right at the click point, not the sidebar ──
+  const onNodeClick = (event: React.MouseEvent, node: Node) => {
     const concept = concepts.find(c => c.id === node.id);
-    if (concept) {
-      setSelectedNode(concept);
-      setEditName(concept.name);
-      setEditDesc(concept.description);
-      setEditDiff(concept.difficulty);
-    }
+    if (!concept) return;
+
+    // Clamp so the ~280px-wide popup never renders partly off-screen.
+    const popupWidth = 288;
+    const popupHeight = 220;
+    const x = Math.min(event.clientX, window.innerWidth - popupWidth - 16);
+    const y = Math.min(event.clientY, window.innerHeight - popupHeight - 16);
+    setPopupNode({ concept, x, y });
+  };
+
+  const openEditFromPopup = () => {
+    if (!popupNode) return;
+    const concept = popupNode.concept;
+    setSelectedNode(concept);
+    setEditName(concept.name);
+    setEditDesc(concept.description);
+    setEditDiff(concept.difficulty);
+    setPopupNode(null);
   };
 
   // ── Search ──
@@ -236,7 +266,7 @@ const KnowledgeGraphInner: React.FC = () => {
     setUpdatingNode(true);
     try {
       await graphService.updateNode(idNum, selectedNode.id, { name: editName, description: editDesc, difficulty: editDiff });
-      setSuccess(`"${editName}" updated successfully.`);
+      setSuccess(`Update to "${editName}" submitted for course coordinator approval.`);
       setSelectedNode(null);
       loadGraphData();
     } catch {
@@ -252,7 +282,7 @@ const KnowledgeGraphInner: React.FC = () => {
     if (!window.confirm(`Delete concept "${selectedNode.name}"? All prerequisite links will also be removed.`)) return;
     try {
       await graphService.deleteNode(idNum, selectedNode.id);
-      setSuccess(`"${selectedNode.name}" deleted.`);
+      setSuccess(`Deletion of "${selectedNode.name}" submitted for course coordinator approval.`);
       setSelectedNode(null);
       loadGraphData();
     } catch {
@@ -264,10 +294,8 @@ const KnowledgeGraphInner: React.FC = () => {
   const handleCreateNode = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await graphService.createPrerequisite(newName, newName, idNum);
-      const nodeId = `${idNum}_${newName.toLowerCase().trim().replace(/ /g, '_')}`;
-      await graphService.updateNode(idNum, nodeId, { description: newDesc, difficulty: newDiff });
-      setSuccess(`Concept "${newName}" added.`);
+      await graphService.createNode(idNum, { name: newName, description: newDesc, difficulty: newDiff });
+      setSuccess(`Concept "${newName}" submitted for course coordinator approval.`);
       setNewName(''); setNewDesc(''); setNewDiff('Medium');
       setShowNodeModal(false);
       loadGraphData();
@@ -282,7 +310,7 @@ const KnowledgeGraphInner: React.FC = () => {
     if (sourceName === targetName) { setError('A concept cannot be its own prerequisite.'); return; }
     try {
       await graphService.createPrerequisite(sourceName, targetName, idNum);
-      setSuccess(`Linked: "${sourceName}" → "${targetName}"`);
+      setSuccess(`Link "${sourceName}" → "${targetName}" submitted for course coordinator approval.`);
       setSourceName(''); setTargetName('');
       setShowEdgeModal(false);
       loadGraphData();
@@ -296,7 +324,7 @@ const KnowledgeGraphInner: React.FC = () => {
     if (!window.confirm('Remove this prerequisite connection?')) return;
     try {
       await graphService.deleteRelationship(idNum, sourceId, targetId);
-      setSuccess('Prerequisite link removed.');
+      setSuccess('Removal of prerequisite link submitted for course coordinator approval.');
       loadGraphData();
     } catch {
       setError('Failed to delete connection.');
@@ -506,6 +534,8 @@ const KnowledgeGraphInner: React.FC = () => {
               onNodesChange={onNodesChange}
               onEdgesChange={onEdgesChange}
               onNodeClick={onNodeClick}
+              onPaneClick={() => setPopupNode(null)}
+              onMove={() => setPopupNode(null)}
               fitView
             >
               <Background color="#dde3f0" gap={20} size={1} />
@@ -519,6 +549,37 @@ const KnowledgeGraphInner: React.FC = () => {
             </ReactFlow>
           )}
         </div>
+
+        {/* ── Click Popup: quick description card at the clicked node's position ── */}
+        {popupNode && (
+          <div
+            className="fixed z-40 w-72 bg-surface border border-border rounded-2xl shadow-hover p-4 animate-fade-in"
+            style={{ left: popupNode.x, top: popupNode.y }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-2 mb-2">
+              <div>
+                <span className={
+                  popupNode.concept.difficulty.toLowerCase() === 'easy' ? 'badge-easy' :
+                  popupNode.concept.difficulty.toLowerCase() === 'hard' ? 'badge-hard' : 'badge-medium'
+                }>{popupNode.concept.difficulty}</span>
+                <h4 className="text-sm font-bold text-text-primary mt-1.5">{popupNode.concept.name}</h4>
+              </div>
+              <button onClick={() => setPopupNode(null)} className="p-1 text-text-muted hover:text-text-primary rounded-lg shrink-0">
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+            <p className="text-xs text-text-secondary leading-relaxed max-h-32 overflow-y-auto">{popupNode.concept.description}</p>
+            {isTeacher && (
+              <button
+                onClick={openEditFromPopup}
+                className="mt-3 w-full flex items-center justify-center gap-1.5 py-1.5 text-xs font-semibold text-primary bg-primary-muted hover:bg-primary hover:text-white rounded-lg transition-all"
+              >
+                Edit Concept
+              </button>
+            )}
+          </div>
+        )}
 
         {/* ── Sidebar: Concept Detail Panel ── */}
         {selectedNode && (

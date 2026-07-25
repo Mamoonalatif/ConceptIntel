@@ -15,20 +15,16 @@ interface TeacherRequest {
   status: string;
 }
 
-type StaffRole = 'teacher' | 'program_coordinator' | 'course_coordinator';
-
 interface StaffMember {
   id: number;
   email: string;
   full_name: string;
-  role: StaffRole;
+  role: 'teacher';
+  // Additive authorities on top of the teacher role - a teacher can hold either,
+  // both, or neither. These never replace the base role, unlike the old design.
+  is_program_coordinator: boolean;
+  is_course_coordinator: boolean;
 }
-
-const ROLE_LABELS: Record<StaffRole, string> = {
-  teacher: 'Teacher',
-  program_coordinator: 'Program Coordinator',
-  course_coordinator: 'Course Coordinator',
-};
 
 const FULL_NAME_PATTERN = /^[A-Za-z]+(?: [A-Za-z]+)*$/;
 
@@ -142,14 +138,14 @@ const AdminDashboard: React.FC = () => {
     }
   };
 
-  const handleChangeRole = async (staffId: number, role: StaffRole) => {
+  const handleToggleAuthority = async (staffId: number, authority: 'is_program_coordinator' | 'is_course_coordinator', value: boolean) => {
     setChangingRoleId(staffId);
     setError('');
     try {
-      await adminService.changeStaffRole(staffId, role);
+      await adminService.updateStaffAuthorities(staffId, { [authority]: value });
       fetchStaff();
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to change role');
+      setError(err.response?.data?.detail || 'Failed to update coordinator authority');
     } finally {
       setChangingRoleId(null);
     }
@@ -287,15 +283,18 @@ const AdminDashboard: React.FC = () => {
           </form>
         </div>
 
-        {/* Manage Staff Roles: promote/demote an existing teacher/coordinator */}
+        {/* Manage Coordinator Authorities: grant/revoke additional authority on an
+            existing teacher account - the account keeps every teacher capability
+            (uploading, running their own courses) plus whichever authority is toggled. */}
         <div>
           <div className="flex items-center gap-2 mb-4">
             <Users className="w-4 h-4 text-primary" />
-            <h3 className="text-base font-bold text-text-primary">Manage Staff Roles</h3>
+            <h3 className="text-base font-bold text-text-primary">Manage Coordinator Authorities</h3>
           </div>
           <p className="text-xs text-text-muted mb-4 max-w-2xl">
-            Program Coordinator and Course Coordinator are role changes on an existing account -
-            no new account or password is created. Pick a teacher/coordinator below and assign them a role.
+            Program Coordinator and Course Coordinator are ADDITIONAL authorities on top of the
+            teacher role, not a replacement for it - a teacher given one (or both) keeps every
+            teacher capability, plus the coordinator ones. No new account or password is created.
           </p>
 
           {staffLoading ? (
@@ -304,7 +303,7 @@ const AdminDashboard: React.FC = () => {
             </div>
           ) : staff.length === 0 ? (
             <div className="glass-panel rounded-2xl p-8 border border-border text-center text-sm text-text-muted">
-              No teacher/coordinator accounts yet. Create a teacher above, then promote them here.
+              No teacher accounts yet. Create one above, then grant coordinator authority here.
             </div>
           ) : (
             <div className="space-y-3">
@@ -316,20 +315,34 @@ const AdminDashboard: React.FC = () => {
                       <Mail className="w-3 h-3" /> {member.email}
                     </p>
                   </div>
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2">
                     <span className="text-xs font-bold px-2.5 py-1 rounded-full border bg-primary-muted text-primary border-primary/20">
-                      {ROLE_LABELS[member.role]}
+                      Teacher
                     </span>
-                    <select
-                      className="input-light text-xs py-1.5"
-                      value={member.role}
-                      disabled={changingRoleId === member.id}
-                      onChange={(e) => handleChangeRole(member.id, e.target.value as StaffRole)}
-                    >
-                      <option value="teacher">Teacher</option>
-                      <option value="program_coordinator">Program Coordinator</option>
-                      <option value="course_coordinator">Course Coordinator</option>
-                    </select>
+                    <label className={`flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 rounded-lg border cursor-pointer transition-all ${
+                      member.is_program_coordinator ? 'bg-primary text-white border-primary' : 'bg-background text-text-muted border-border hover:border-primary/40'
+                    }`}>
+                      <input
+                        type="checkbox"
+                        className="hidden"
+                        checked={member.is_program_coordinator}
+                        disabled={changingRoleId === member.id}
+                        onChange={(e) => handleToggleAuthority(member.id, 'is_program_coordinator', e.target.checked)}
+                      />
+                      Program Coordinator
+                    </label>
+                    <label className={`flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 rounded-lg border cursor-pointer transition-all ${
+                      member.is_course_coordinator ? 'bg-primary text-white border-primary' : 'bg-background text-text-muted border-border hover:border-primary/40'
+                    }`}>
+                      <input
+                        type="checkbox"
+                        className="hidden"
+                        checked={member.is_course_coordinator}
+                        disabled={changingRoleId === member.id}
+                        onChange={(e) => handleToggleAuthority(member.id, 'is_course_coordinator', e.target.checked)}
+                      />
+                      Course Coordinator
+                    </label>
                   </div>
                 </div>
               ))}

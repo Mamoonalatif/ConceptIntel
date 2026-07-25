@@ -1,0 +1,92 @@
+# Minimal single-node Airflow setup (LocalExecutor - no Celery/Redis needed for
+# Airflow itself; Redis in this project is a separate, app-level cache - see
+# backend/app/core/cache.py). Only automates the OCR -> Kimi -> structure -> diff
+# stages; teacher review and coordinator approval happen via ordinary FastAPI
+# endpoints, not inside Airflow.
+#
+# Usage (from this directory, infra/airflow/):
+#   docker compose up airflow-init   # one-time: creates DB tables + admin user
+#   docker compose up                # starts webserver (http://localhost:8080) + scheduler
+#
+# Default login: airflow / airflow  (change AIRFLOW_USERNAME/PASSWORD in both this
+# file and backend/.env if you change it)
+
+x-airflow-common: &airflow-common
+  image: apache/airflow:2.9.3-python3.11
+  environment:
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-postgres/airflow
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__API__AUTH_BACKENDS: "airflow.api.auth.backend.basic_auth"
+    # Everything below is so the DAG's `import app.*` calls can reach the same
+    # Postgres / Neo4j / Redis / OpenRouter config the FastAPI app uses.
+    PYTHONPATH: /opt/airflow/backend
+  env_file:
+    - ../../backend/.env
+  volumes:
+    - ./dags:/opt/airflow/dags
+    - airflow-logs:/opt/airflow/logs
+    - ../../backend:/opt/airflow/backend
+  # Heavy but simplest path for a prototype: installs the backend's own
+  # dependencies into the Airflow image so DAG tasks can import app.* directly.
+  # (Airflow's docs call this out as not recommended for production - fine here.)
+  # Kept in sync with backend/requirements.txt - the DAG tasks import app.* modules
+  # transitively (pipeline_service -> kimi_service -> rag.chunking, revision_service
+  # -> knowledge_graph.services, etc.), so every backend dependency needs to be
+  # importable inside the Airflow container too, not just the ones the 3 DAG tasks
+  # call directly.
+  _PIP_ADDITIONAL_REQUIREMENTS: >-
+    fastapi==0.110.0 sqlalchemy==2.0.28 psycopg2-binary==2.9.9
+    python-jose[cryptography]==3.3.0 passlib[bcrypt]==1.7.4 pydantic[email]==2.6.4
+    neo4j==5.18.0 openai==1.14.1 pypdf==4.1.0 python-docx==1.1.0 python-pptx==0.6.23
+    python-dotenv==1.0.1 bcrypt==4.1.2 google-auth==2.29.0 httpx==0.27.0
+    easyocr==1.7.1 pymupdf==1.24.5 redis==5.0.3 certifi
+    fastembed==0.3.6 tiktoken==0.7.0 pgvector==0.2.5 boto3==1.34.106
+    langfuse==2.60.5 sentry-sdk[fastapi]==2.7.1
+    # Not included: python-magic (needs the libmagic system library, which isn't in
+    # this image, and isn't actually reachable from the DAG's import chain anyway -
+    # only upload/routes.py uses it, which runs in the FastAPI process, not here).
+  depends_on:
+    airflow-postgres:
+      condition: service_healthy
+
+services:
+  airflow-postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - airflow-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 5s
+      retries: 5
+    restart: unless-stopped
+
+  airflow-init:
+    <<: *airflow-common
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        airflow db migrate
+        airflow users create --username airflow --password airflow \
+          --firstname Air --lastname Flow --role Admin --email admin@example.com
+
+  airflow-webserver:
+    <<: *airflow-common
+    command: webserver
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+    restart: unless-stopped
+
+volumes:
+  airflow-postgres-data:
+  airflow-logs:

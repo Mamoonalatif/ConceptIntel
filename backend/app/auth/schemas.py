@@ -74,6 +74,8 @@ class UserResponse(BaseModel):
     email: str
     full_name: str
     role: str
+    is_program_coordinator: bool = False
+    is_course_coordinator: bool = False
     is_active: bool = True
 
     class Config:
@@ -85,18 +87,15 @@ class UserStatusUpdate(BaseModel):
     is_active: bool
 
 
-class StaffRoleUpdate(BaseModel):
-    """Admin-only payload to move an existing teacher/program-coordinator/
-    course-coordinator account between those three roles."""
-    role: str  # "teacher" | "program_coordinator" | "course_coordinator"
-
-    @field_validator("role")
-    @classmethod
-    def check_role(cls, v: str) -> str:
-        allowed = ("teacher", "program_coordinator", "course_coordinator")
-        if v not in allowed:
-            raise ValueError(f"role must be one of {allowed}")
-        return v
+class StaffAuthoritiesUpdate(BaseModel):
+    """Admin-only payload to grant/revoke Program Coordinator and/or Course
+    Coordinator authority on an existing teacher account. These are ADDITIONAL
+    authorities layered on top of the teacher role, not a replacement for it - a
+    teacher given course_coordinator authority keeps every teacher capability
+    (uploading, running their own courses) plus the coordinator ones. Omit a field
+    to leave that authority unchanged; both can be true at once."""
+    is_program_coordinator: Optional[bool] = None
+    is_course_coordinator: Optional[bool] = None
 
 
 class Token(BaseModel):

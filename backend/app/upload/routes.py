@@ -1,7 +1,6 @@
-import os
-import shutil
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks, status
 from fastapi.responses import FileResponse
+from fastapi import Response
 from sqlalchemy.orm import Session
 from typing import List
 from pathlib import Path
@@ -13,72 +12,150 @@ from app.upload.schemas import UploadedFileResponse
 from app.upload.services import (
     extract_text_from_file,
     upload_file_to_supabase,
+    download_file_from_supabase,
     delete_file_from_supabase,
+    upload_file_to_s3,
+    download_file_from_s3,
+    delete_file_from_s3,
     get_content_type
 )
+from app.rag.validation import validate_file_content
+from app.courses.access import assert_course_access
 from app.auth.routes import get_current_teacher, get_current_user
 
 
 router = APIRouter(prefix="/files", tags=["Content Upload"])
 
-SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".pptx", ".ppt", ".txt"}
+SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".pptx", ".ppt", ".txt", ".jpg", ".jpeg", ".png"}
 MAX_FILE_SIZE = 25 * 1024 * 1024  # 25 MB
 
 
-def process_uploaded_file_task(file_id: int):
-    """Background task to extract text and trigger AI pipeline."""
-    db: Session = SessionLocal()
+def _store_file(content: bytes, filename: str, extension: str, course_id: int) -> str:
+    """Storage backend priority: AWS S3 (if configured) > Supabase (if configured)
+    > local disk. Returns a reference string whose scheme identifies where it lives
+    ("s3://...", "supabase://..." - private bucket, never a public URL - or a plain
+    local filesystem path)."""
+    content_type = get_content_type(extension)
+
+    if settings.AWS_ACCESS_KEY_ID and settings.AWS_SECRET_ACCESS_KEY and settings.AWS_S3_BUCKET:
+        try:
+            return upload_file_to_s3(content, filename, content_type, course_id)
+        except Exception as e:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"S3 upload failed: {str(e)}")
+
+    if settings.SUPABASE_URL and settings.SUPABASE_KEY:
+        try:
+            return upload_file_to_supabase(content, filename, content_type, course_id)
+        except Exception as e:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Supabase upload failed: {str(e)}")
+
+    # Local storage fallback
+    upload_dir = settings.upload_path / str(course_id)
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    destination = upload_dir / Path(filename).name
     try:
-        # Fetch file record
+        with open(destination, "wb") as buffer:
+            buffer.write(content)
+        return str(destination.resolve())
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to write file contents locally: {str(e)}")
+
+
+def _delete_stored_file(file_url: str) -> None:
+    """Mirror of _store_file's backend dispatch, for deletion."""
+    if file_url.startswith("s3://"):
+        delete_file_from_s3(file_url)
+    elif file_url.startswith("supabase://"):
+        try:
+            delete_file_from_supabase(file_url)
+        except Exception as e:
+            print(f"Warning: Failed to delete file from Supabase storage: {str(e)}")
+    else:
+        filepath = Path(file_url)
+        if filepath.exists():
+            try:
+                filepath.unlink()
+            except Exception as e:
+                print(f"Warning: Failed to delete physical file {filepath}: {str(e)}")
+
+
+def process_uploaded_file_task(file_id: int):
+    """Background task: extract text (OCR'd automatically if scanned/an image - see
+    upload/services.py), run the RAG ingestion pipeline (clean, chunk, caption
+    images, dedup, embed, store as pgvector rows for semantic search), and stop
+    there. It does NOT auto-trigger knowledge-graph concept extraction - that's the
+    reviewed pipeline, started explicitly by a teacher via
+    POST /api/content-processing/trigger/{course_id}, which goes through diff ->
+    teacher review -> coordinator approval before anything reaches Neo4j. Auto-firing
+    the old direct-write extraction here would let every upload silently bypass that
+    review gate."""
+    db: Session = SessionLocal()
+    temp_filepath = None
+    try:
         file_record = db.query(UploadedFile).filter(UploadedFile.id == file_id).first()
         if not file_record:
             return
 
-        # Update status to Processing
         file_record.status = "Processing"
         db.commit()
 
         file_url = file_record.file_url
-        is_url = file_url.startswith("http://") or file_url.startswith("https://")
+        is_s3 = file_url.startswith("s3://")
+        is_supabase = file_url.startswith("supabase://")
 
-        if is_url:
-            # Download file from Supabase Storage to a temporary file
+        if is_s3 or is_supabase:
+            # Download to a temporary file. Kept around (not deleted immediately)
+            # since the RAG pipeline's image extraction also needs to read the
+            # original file.
             import tempfile
-            import httpx
             with tempfile.NamedTemporaryFile(delete=False, suffix=f".{file_record.file_type}") as tmp:
                 temp_filepath = Path(tmp.name)
-                with httpx.Client() as client:
-                    resp = client.get(file_url, timeout=60.0)
-                    resp.raise_for_status()
-                    tmp.write(resp.content)
-            
-            try:
-                extracted_text = extract_text_from_file(temp_filepath, file_record.file_type)
-            finally:
-                if temp_filepath.exists():
-                    temp_filepath.unlink()
+                if is_s3:
+                    tmp.write(download_file_from_s3(file_url))
+                else:
+                    tmp.write(download_file_from_supabase(file_url))
+            filepath = temp_filepath
         else:
             filepath = Path(file_url)
-            extracted_text = extract_text_from_file(filepath, file_record.file_type)
-        
-        # Save text back to DB
+
+        extracted_text, used_ocr = extract_text_from_file(filepath, file_record.file_type)
+
         file_record.extracted_text = extracted_text
+        file_record.used_ocr = used_ocr
         file_record.status = "Completed"
         db.commit()
-        
-        # Trigger Concept Extraction AI pipeline (implemented in knowledge_graph)
-        from app.knowledge_graph.services import trigger_concept_extraction
-        trigger_concept_extraction(file_record.course_id, extracted_text)
+
+        # RAG ingestion: clean -> chunk -> caption images -> dedup -> embed -> store.
+        # Best-effort - a failure here doesn't roll back the successful text
+        # extraction above (the file stays usable, just without semantic search
+        # over it), so it's wrapped separately.
+        try:
+            from app.rag.pipeline import process_file_for_rag
+            course = db.query(Course).filter(Course.id == file_record.course_id).first()
+            chunk_count = process_file_for_rag(
+                db=db,
+                course_id=file_record.course_id,
+                file_id=file_record.id,
+                course_name=course.name if course else "this course",
+                file_name=file_record.filename,
+                raw_text=extracted_text,
+                file_type=file_record.file_type,
+                filepath=filepath,
+            )
+            print(f"RAG pipeline stored {chunk_count} chunks for file ID {file_id}.")
+        except Exception as e:
+            print(f"RAG pipeline error for file ID {file_id} (text extraction still succeeded): {str(e)}")
 
     except Exception as e:
         db.rollback()
-        # Find record again to update status to Failed
         file_record = db.query(UploadedFile).filter(UploadedFile.id == file_id).first()
         if file_record:
             file_record.status = "Failed"
             db.commit()
         print(f"Background parsing error for file ID {file_id}: {str(e)}")
     finally:
+        if temp_filepath is not None and temp_filepath.exists():
+            temp_filepath.unlink()
         db.close()
 
 
@@ -124,34 +201,19 @@ def upload_file(
             detail=f"Failed to read file contents: {str(e)}"
         )
 
+    # Verify the file's actual content matches its claimed extension (magic-byte
+    # sniffing) - a renamed/spoofed file is rejected here even though the extension
+    # check above passed.
+    try:
+        validate_file_content(content, extension)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
     safe_filename = file_path_obj.name
     file_type = extension.replace(".", "")
-    file_url = ""
 
-    # 3. Store file (Supabase if credentials exist, else local)
-    if settings.SUPABASE_URL and settings.SUPABASE_KEY:
-        try:
-            content_type = get_content_type(extension)
-            file_url = upload_file_to_supabase(content, safe_filename, content_type, course_id)
-        except Exception as e:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Supabase upload failed: {str(e)}"
-            )
-    else:
-        # Local storage fallback
-        upload_dir = settings.upload_path / str(course_id)
-        upload_dir.mkdir(parents=True, exist_ok=True)
-        destination = upload_dir / safe_filename
-        try:
-            with open(destination, "wb") as buffer:
-                buffer.write(content)
-            file_url = str(destination.resolve())
-        except Exception as e:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to write file contents locally: {str(e)}"
-            )
+    # 3. Store file (S3 > Supabase > local, whichever is configured)
+    file_url = _store_file(content, safe_filename, extension, course_id)
 
     # 4. Create metadata record
     new_file = UploadedFile(
@@ -173,6 +235,26 @@ def upload_file(
     return new_file
 
 
+@router.get("/course/{course_id}/search")
+def search_course_content(
+    course_id: int,
+    q: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Semantic search over a course's uploaded material (text chunks + image
+    captions). Returns only matches above the similarity threshold - an empty list
+    means nothing relevant was found, which callers should surface as-is rather than
+    forcing a low-confidence result into an AI prompt (see app/rag/retrieval.py)."""
+    course = db.query(Course).filter(Course.id == course_id).first()
+    if not course:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
+    assert_course_access(db, course, current_user)
+
+    from app.rag.retrieval import retrieve
+    return retrieve(db, course_id, q)
+
+
 @router.get("/course/{course_id}", response_model=List[UploadedFileResponse])
 def list_course_files(
     course_id: int,
@@ -180,13 +262,13 @@ def list_course_files(
     current_user: User = Depends(get_current_user)
 ):
     """Retrieve metadata of all uploaded files for a course."""
-    # Ensure course exists
     course = db.query(Course).filter(Course.id == course_id).first()
     if not course:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Course not found"
         )
+    assert_course_access(db, course, current_user)
     return db.query(UploadedFile).filter(UploadedFile.course_id == course_id).all()
 
 
@@ -196,23 +278,53 @@ def download_file(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Download/view the physical file by ID."""
+    """Download/view the file by ID, regardless of which storage backend it lives in."""
     file_record = db.query(UploadedFile).filter(UploadedFile.id == id).first()
     if not file_record:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="File not found"
         )
-    
-    filepath = Path(file_record.file_url)
+    course = db.query(Course).filter(Course.id == file_record.course_id).first()
+    if course:
+        assert_course_access(db, course, current_user)
+
+    file_url = file_record.file_url
+
+    if file_url.startswith("s3://"):
+        # Bucket is private - stream the bytes through our own API rather than a
+        # public URL, so access stays gated behind our auth.
+        try:
+            content = download_file_from_s3(file_url)
+        except Exception as e:
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Failed to fetch file from S3: {str(e)}")
+        return Response(
+            content=content,
+            media_type=get_content_type(f".{file_record.file_type}"),
+            headers={"Content-Disposition": f'attachment; filename="{file_record.filename}"'},
+        )
+
+    if file_url.startswith("supabase://"):
+        # Bucket is private - same authenticated-streaming approach as S3.
+        try:
+            content = download_file_from_supabase(file_url)
+        except Exception as e:
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Failed to fetch file from Supabase: {str(e)}")
+        return Response(
+            content=content,
+            media_type=get_content_type(f".{file_record.file_type}"),
+            headers={"Content-Disposition": f'attachment; filename="{file_record.filename}"'},
+        )
+
+    filepath = Path(file_url)
     if not filepath.exists():
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Physical file does not exist on disk."
         )
-    
+
     return FileResponse(
-        path=filepath, 
+        path=filepath,
         filename=file_record.filename,
         media_type="application/octet-stream"
     )
@@ -231,29 +343,14 @@ def delete_file(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="File metadata not found"
         )
-        
-    # Check permissions
+
     if file_record.teacher_id != current_teacher.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You do not have permission to delete this file."
         )
 
-    # Delete physical file from disk or Supabase
-    file_url = file_record.file_url
-    is_url = file_url.startswith("http://") or file_url.startswith("https://")
-    if is_url:
-        try:
-            delete_file_from_supabase(file_url)
-        except Exception as e:
-            print(f"Warning: Failed to delete file from Supabase storage: {str(e)}")
-    else:
-        filepath = Path(file_url)
-        if filepath.exists():
-            try:
-                filepath.unlink()
-            except Exception as e:
-                print(f"Warning: Failed to delete physical file {filepath}: {str(e)}")
+    _delete_stored_file(file_record.file_url)
 
     db.delete(file_record)
     db.commit()
@@ -269,22 +366,19 @@ def replace_file(
     current_teacher: User = Depends(get_current_teacher)
 ):
     """Replace an existing file with a new file."""
-    # 1. Fetch existing file record
     file_record = db.query(UploadedFile).filter(UploadedFile.id == id).first()
     if not file_record:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="File not found"
         )
-        
-    # Check permissions
+
     if file_record.teacher_id != current_teacher.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You do not have permission to modify this file."
         )
 
-    # 2. Validate new file extension
     file_path_obj = Path(file.filename)
     extension = file_path_obj.suffix.lower()
     if extension not in SUPPORTED_EXTENSIONS:
@@ -293,7 +387,6 @@ def replace_file(
             detail=f"Unsupported file type. Supported formats: {', '.join(SUPPORTED_EXTENSIONS)}"
         )
 
-    # Read content to check size and upload
     try:
         content = file.file.read()
         file_size = len(content)
@@ -310,62 +403,29 @@ def replace_file(
             detail=f"Failed to read file contents: {str(e)}"
         )
 
-    # 3. Delete old file from storage
-    old_file_url = file_record.file_url
-    if old_file_url.startswith("http://") or old_file_url.startswith("https://"):
-        try:
-            delete_file_from_supabase(old_file_url)
-        except Exception as e:
-            print(f"Warning: Failed to delete old file from Supabase: {str(e)}")
-    else:
-        filepath = Path(old_file_url)
-        if filepath.exists():
-            try:
-                filepath.unlink()
-            except Exception as e:
-                print(f"Warning: Failed to delete old physical file {filepath}: {str(e)}")
+    try:
+        validate_file_content(content, extension)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
-    # 4. Save new file to storage (Supabase if configured, else local fallback)
+    # Delete old file from storage, then save the new one (S3 > Supabase > local)
+    _delete_stored_file(file_record.file_url)
+
     safe_filename = file_path_obj.name
     file_type = extension.replace(".", "")
-    new_url = ""
+    new_url = _store_file(content, safe_filename, extension, file_record.course_id)
 
-    if settings.SUPABASE_URL and settings.SUPABASE_KEY:
-        try:
-            content_type = get_content_type(extension)
-            new_url = upload_file_to_supabase(content, safe_filename, content_type, file_record.course_id)
-        except Exception as e:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to upload to Supabase: {str(e)}"
-            )
-    else:
-        # Local storage fallback
-        upload_dir = settings.upload_path / str(file_record.course_id)
-        upload_dir.mkdir(parents=True, exist_ok=True)
-        destination = upload_dir / safe_filename
-        try:
-            with open(destination, "wb") as buffer:
-                buffer.write(content)
-            new_url = str(destination.resolve())
-        except Exception as e:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to write file contents locally: {str(e)}"
-            )
-
-    # 5. Update metadata record
     file_record.filename = safe_filename
     file_record.file_url = new_url
     file_record.file_type = file_type
     file_record.file_size = file_size
     file_record.status = "Uploaded"
-    file_record.extracted_text = None  # Reset extracted text
-    
+    file_record.extracted_text = None
+    file_record.used_ocr = False
+
     db.commit()
     db.refresh(file_record)
 
-    # 6. Queue text parsing in background task
     background_tasks.add_task(process_uploaded_file_task, file_record.id)
 
     return file_record
@@ -378,16 +438,16 @@ def reprocess_file(
     db: Session = Depends(get_db),
     current_teacher: User = Depends(get_current_teacher)
 ):
-    """Manually re-trigger file parsing and concept extraction."""
+    """Manually re-trigger file parsing (text extraction + RAG ingestion)."""
     file_record = db.query(UploadedFile).filter(UploadedFile.id == id, UploadedFile.teacher_id == current_teacher.id).first()
     if not file_record:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="File not found or you are not the owner."
         )
-    
+
     file_record.status = "Uploaded"
     db.commit()
-    
+
     background_tasks.add_task(process_uploaded_file_task, file_record.id)
     return file_record

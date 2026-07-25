@@ -18,19 +18,28 @@ import JoinCourse from './pages/JoinCourse';
 
 const queryClient = new QueryClient();
 
+// A user's default landing dashboard is always their base role's - teacher stays on
+// /teacher even if they also hold coordinator authority (they navigate to the
+// coordinator panel via a link from there, see TeacherDashboard/CourseCoordinatorDashboard).
 const defaultDashboardFor = (role: string) => {
   if (role === 'admin') return '/admin';
   if (role === 'teacher') return '/teacher';
-  if (role === 'program_coordinator') return '/program-coordinator';
-  if (role === 'course_coordinator') return '/course-coordinator';
   return '/student';
 };
 
+type Authority = 'program_coordinator' | 'course_coordinator';
+
+const hasAuthority = (user: { role: string; is_program_coordinator: boolean; is_course_coordinator: boolean }, authority: Authority) => {
+  if (user.role === 'admin') return true; // admin always has every coordinator authority too
+  return authority === 'program_coordinator' ? user.is_program_coordinator : user.is_course_coordinator;
+};
+
 // Route wrapper to check if user is authenticated
-const PrivateRoute: React.FC<{ children: React.ReactElement; requiredRole?: 'teacher' | 'student' | 'admin' | 'program_coordinator' | 'course_coordinator' }> = ({
-  children,
-  requiredRole
-}) => {
+const PrivateRoute: React.FC<{
+  children: React.ReactElement;
+  requiredRole?: 'teacher' | 'student' | 'admin';
+  requiredAuthority?: Authority; // additive coordinator authority, independent of requiredRole
+}> = ({ children, requiredRole, requiredAuthority }) => {
   const { user, token, isLoading } = useAuth();
 
   if (isLoading) {
@@ -49,7 +58,10 @@ const PrivateRoute: React.FC<{ children: React.ReactElement; requiredRole?: 'tea
   }
 
   if (requiredRole && user && user.role !== requiredRole) {
-    // Redirect unauthorized roles back to their default dashboard
+    return <Navigate to={defaultDashboardFor(user.role)} replace />;
+  }
+
+  if (requiredAuthority && user && !hasAuthority(user, requiredAuthority)) {
     return <Navigate to={defaultDashboardFor(user.role)} replace />;
   }
 
@@ -111,21 +123,22 @@ const AppContent: React.FC = () => {
           }
         />
 
-        {/* Program Coordinator Protected Dashboard */}
+        {/* Program Coordinator Protected Dashboard - an additive authority on a
+            teacher account (or admin), not a separate base role */}
         <Route
           path="/program-coordinator"
           element={
-            <PrivateRoute requiredRole="program_coordinator">
+            <PrivateRoute requiredAuthority="program_coordinator">
               <ProgramCoordinatorDashboard />
             </PrivateRoute>
           }
         />
 
-        {/* Course Coordinator Protected Dashboard */}
+        {/* Course Coordinator Protected Dashboard - same additive-authority pattern */}
         <Route
           path="/course-coordinator"
           element={
-            <PrivateRoute requiredRole="course_coordinator">
+            <PrivateRoute requiredAuthority="course_coordinator">
               <CourseCoordinatorDashboard />
             </PrivateRoute>
           }
