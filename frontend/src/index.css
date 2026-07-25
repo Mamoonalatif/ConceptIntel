@@ -135,24 +135,17 @@
 /* ─────────────────────────────────────────────
    REACT FLOW OVERRIDES — LIGHT THEME
 ───────────────────────────────────────────── */
-.react-flow__node {
-  border-radius: 14px !important;
-}
-
 .react-flow__node-default {
-  padding: 0 !important;
-  border: none !important;
-  background: transparent !important;
-  box-shadow: none !important;
-}
-
-.react-flow__edge-path {
-  stroke: rgba(79, 70, 229, 0.5) !important;
-  stroke-width: 2.5 !important;
+  /* Reactflow's own default padding is dropped (not border-radius/background/
+     box-shadow - no need to fight those here, since reactflow's whole stylesheet
+     already loads before index.css per main.tsx's import order, so Tailwind's own
+     utilities - the difficulty-colored circle classes built in KnowledgeGraph.tsx -
+     already win those on their own). */
+  padding: 0;
 }
 
 .react-flow__edge-path:hover {
-  stroke: rgba(79, 70, 229, 0.9) !important;
+  stroke-opacity: 0.8;
 }
 
 /* Light flow background */

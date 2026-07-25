@@ -292,8 +292,7 @@ def admin_update_course(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
 
     update_data = course_in.model_dump(exclude_unset=True)
-    role = current_user.role.lower()
-    is_catalog_manager = role in ("admin", "program_coordinator")
+    is_catalog_manager = current_user.role.lower() == "admin" or current_user.is_program_coordinator
 
     if not is_catalog_manager and ("catalog_id" in update_data or "prerequisite_course_id" in update_data):
         raise HTTPException(

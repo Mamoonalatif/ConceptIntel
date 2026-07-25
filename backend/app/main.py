@@ -13,12 +13,29 @@ from app.courses.routes import router as courses_router
 from app.enrollment.routes import router as enrollment_router
 from app.upload.routes import router as upload_router
 from app.knowledge_graph.routes import router as graph_router
+from app.content_processing.routes import router as content_processing_router
 
 logger = logging.getLogger("conceptintel")
+
+# Sentry - error/crash monitoring. No-op if SENTRY_DSN isn't set (same pattern as
+# every other optional integration in this codebase).
+if settings.SENTRY_DSN:
+    import sentry_sdk
+    sentry_sdk.init(dsn=settings.SENTRY_DSN, traces_sample_rate=0.2, send_default_pii=False)
+    logger.info("Sentry error monitoring enabled.")
+else:
+    logger.info("SENTRY_DSN not set - Sentry error monitoring disabled.")
 
 # Automatically create PostgreSQL tables on startup
 # Wrapped in try-except so app can still boot even if DB is temporarily unavailable
 try:
+    # ContentChunk.embedding is a pgvector column - the `vector` type must exist in
+    # this Postgres database before create_all() can create that table. Supabase
+    # ships the extension but it must be enabled per-project; this makes that
+    # explicit/automatic rather than requiring a separate manual dashboard step.
+    with engine.connect() as conn:
+        conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        conn.commit()
     models.Base.metadata.create_all(bind=engine)
     logger.info("Database tables created/verified successfully.")
 except Exception as e:
@@ -87,6 +104,7 @@ app.include_router(courses_router, prefix="/api")
 app.include_router(enrollment_router, prefix="/api")
 app.include_router(upload_router, prefix="/api")
 app.include_router(graph_router, prefix="/api")
+app.include_router(content_processing_router, prefix="/api")
 
 
 @app.get("/")

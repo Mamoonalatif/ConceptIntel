@@ -12,9 +12,13 @@ from app.auth.schemas import (
     UserCreate, UserLogin, UserResponse, Token, TokenData,
     AdminCreateTeacher, TeacherCredentialsResponse,
     TeacherRequestCreate, TeacherRequestResponse,
-    UserStatusUpdate, GoogleAuthRequest, StaffRoleUpdate, ChangePasswordRequest,
+    UserStatusUpdate, GoogleAuthRequest, StaffAuthoritiesUpdate, ChangePasswordRequest,
 )
 from app.auth.utils import hash_password, verify_password, create_access_token, decode_access_token, generate_temporary_password
+from app.supabase_auth import (
+    is_supabase_auth_configured, create_supabase_user, verify_supabase_password,
+    get_or_create_supabase_user_by_email, update_supabase_user_password,
+)
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -79,32 +83,38 @@ def get_current_admin(current_user: User = Depends(get_current_user)) -> User:
 
 def get_current_program_coordinator(current_user: User = Depends(get_current_user)) -> User:
     """Program Coordinator duties: catalog CRUD, prerequisite mapping, course deletion.
-    Admin retains every course-management power too, so it's accepted alongside the
-    dedicated role rather than replacing it."""
-    if current_user.role.lower() not in ("admin", "program_coordinator"):
+    This is an ADDITIONAL authority flag on top of the base role (almost always
+    "teacher") - not a separate role that replaces it, so a promoted teacher keeps
+    every teacher capability plus this one. Admin always has this power too."""
+    if current_user.role.lower() != "admin" and not current_user.is_program_coordinator:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Operation forbidden: Program Coordinator role required."
+            detail="Operation forbidden: Program Coordinator authority required."
         )
     return current_user
 
 
 def get_current_course_coordinator(current_user: User = Depends(get_current_user)) -> User:
     """Course Coordinator duties: approve/reject a course's knowledge graph, update
-    course info. Admin retains this power too."""
-    if current_user.role.lower() not in ("admin", "course_coordinator"):
+    course info. Same additive-authority pattern as get_current_program_coordinator -
+    this does not replace the user's base role."""
+    if current_user.role.lower() != "admin" and not current_user.is_course_coordinator:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Operation forbidden: Course Coordinator role required."
+            detail="Operation forbidden: Course Coordinator authority required."
         )
     return current_user
 
 
 def get_current_course_manager(current_user: User = Depends(get_current_user)) -> User:
     """Any role that may update course info (admin / program coordinator / course
-    coordinator). The route handler itself restricts catalog/prerequisite changes to
-    admin/program_coordinator only."""
-    if current_user.role.lower() not in ("admin", "program_coordinator", "course_coordinator"):
+    coordinator authority). The route handler itself restricts catalog/prerequisite
+    changes to admin/program_coordinator only."""
+    if (
+        current_user.role.lower() != "admin"
+        and not current_user.is_program_coordinator
+        and not current_user.is_course_coordinator
+    ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Operation forbidden."
@@ -132,12 +142,27 @@ def register(user_in: UserCreate, db: Session = Depends(get_db)):
             detail="Self-registration is only available for the 'student' role."
         )
 
-    # Create new user
+    # Password is now owned by Supabase Auth, not stored/verified locally - create
+    # the Supabase auth user first so we never end up with a local account that has
+    # no way to authenticate (if this fails, nothing local has been created yet).
+    supabase_uid = None
+    if is_supabase_auth_configured():
+        try:
+            supabase_uid = create_supabase_user(user_in.email, user_in.password)
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Could not create account (auth service error): {str(e)}"
+            )
+
     new_user = User(
         email=user_in.email,
-        hashed_password=hash_password(user_in.password),
+        # Legacy fallback only - if Supabase Auth isn't configured, keep the old
+        # local bcrypt behavior so the app still works without it.
+        hashed_password=None if supabase_uid else hash_password(user_in.password),
         full_name=user_in.full_name,
-        role=role_lower
+        role=role_lower,
+        supabase_uid=supabase_uid,
     )
     db.add(new_user)
     db.commit()
@@ -148,7 +173,22 @@ def register(user_in: UserCreate, db: Session = Depends(get_db)):
 @router.post("/login", response_model=Token)
 def login(credentials: UserLogin, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == credentials.email).first()
-    if not user or not user.hashed_password or not verify_password(credentials.password, user.hashed_password):
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    # Accounts linked to Supabase Auth (the norm going forward) are verified there;
+    # legacy accounts created before this migration (no supabase_uid yet) still fall
+    # back to the local bcrypt hash they were created with.
+    if user.supabase_uid:
+        password_ok = verify_supabase_password(credentials.email, credentials.password)
+    else:
+        password_ok = bool(user.hashed_password) and verify_password(credentials.password, user.hashed_password)
+
+    if not password_ok:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
@@ -232,6 +272,17 @@ def google_login(payload: GoogleAuthRequest, db: Session = Depends(get_db)):
             detail="This email is linked to a different Google account.",
         )
 
+    # Link (or create) a matching Supabase auth user for identity consistency - no
+    # password is set here, Google's own ID token is the credential. Best-effort:
+    # a failure here shouldn't block sign-in, since our own JWT is still what
+    # authorizes every subsequent request.
+    if is_supabase_auth_configured() and not user.supabase_uid:
+        try:
+            user.supabase_uid = get_or_create_supabase_user_by_email(email, full_name)
+            db.commit()
+        except Exception as e:
+            print(f"Warning: failed to link Supabase auth user for {email}: {e}")
+
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -263,15 +314,24 @@ def change_password(
     """Self-service password change for any authenticated user. If the account already
     has a password, current_password must match it. A Google-only account (no password
     yet) may set its first password without proving one it never had."""
-    if current_user.hashed_password:
-        if not payload.current_password or not verify_password(payload.current_password, current_user.hashed_password):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Current password is incorrect."
-            )
+    if current_user.supabase_uid:
+        # Verify the current password via Supabase first (unless the account has none
+        # yet, e.g. a Google-only sign-in setting its first password).
+        current_password_matches = verify_supabase_password(current_user.email, payload.current_password or "")
+        if not current_password_matches and payload.current_password:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect.")
+        try:
+            update_supabase_user_password(current_user.supabase_uid, payload.new_password)
+        except Exception as e:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"Could not update password: {str(e)}")
+    else:
+        # Legacy local-bcrypt account (pre-migration).
+        if current_user.hashed_password:
+            if not payload.current_password or not verify_password(payload.current_password, current_user.hashed_password):
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect.")
+        current_user.hashed_password = hash_password(payload.new_password)
+        db.commit()
 
-    current_user.hashed_password = hash_password(payload.new_password)
-    db.commit()
     return {"message": "Password updated successfully."}
 
 
@@ -313,11 +373,23 @@ def _create_staff_account(db: Session, email: str, full_name: str, role: str) ->
         )
 
     temp_password = generate_temporary_password()
+
+    supabase_uid = None
+    if is_supabase_auth_configured():
+        try:
+            supabase_uid = create_supabase_user(email, temp_password)
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Could not create account (auth service error): {str(e)}"
+            )
+
     new_user = User(
         email=email,
-        hashed_password=hash_password(temp_password),
+        hashed_password=None if supabase_uid else hash_password(temp_password),
         full_name=full_name,
-        role=role
+        role=role,
+        supabase_uid=supabase_uid,
     )
     db.add(new_user)
     db.commit()
@@ -349,46 +421,50 @@ def admin_create_teacher(
     return _create_staff_account(db, teacher_in.email, teacher_in.full_name, "teacher")
 
 
-PROMOTABLE_ROLES = ("teacher", "program_coordinator", "course_coordinator")
-
-
 @router.get("/admin/staff", response_model=List[UserResponse])
 def list_staff(
-    role: Optional[str] = None,
+    authority: Optional[str] = None,
     db: Session = Depends(get_db),
     current_admin: User = Depends(get_current_admin)
 ):
-    """List teacher/program_coordinator/course_coordinator accounts, for the admin's
-    'promote existing teacher' picker. Program/Course Coordinator accounts are never
-    created fresh - they're always an existing teacher whose role was changed here,
-    so they keep their existing login credentials (no new password to relay)."""
-    query = db.query(User).filter(User.role.in_(PROMOTABLE_ROLES))
-    if role:
-        if role not in PROMOTABLE_ROLES:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"role must be one of {PROMOTABLE_ROLES}")
-        query = query.filter(User.role == role)
+    """List teacher accounts, for the admin's coordinator-authority picker. Program/
+    Course Coordinator are authority FLAGS on a teacher account (see
+    StaffAuthoritiesUpdate), never a separate role - so this always lists teachers,
+    optionally filtered to those already holding a given authority."""
+    query = db.query(User).filter(User.role == "teacher")
+    if authority == "program_coordinator":
+        query = query.filter(User.is_program_coordinator.is_(True))
+    elif authority == "course_coordinator":
+        query = query.filter(User.is_course_coordinator.is_(True))
+    elif authority is not None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="authority must be 'program_coordinator' or 'course_coordinator'")
     return query.order_by(User.full_name).all()
 
 
-@router.patch("/admin/staff/{user_id}/role", response_model=UserResponse)
-def change_staff_role(
+@router.patch("/admin/staff/{user_id}/authorities", response_model=UserResponse)
+def update_staff_authorities(
     user_id: int,
-    role_in: StaffRoleUpdate,
+    authorities_in: StaffAuthoritiesUpdate,
     db: Session = Depends(get_db),
     current_admin: User = Depends(get_current_admin)
 ):
-    """Promote/demote an existing teacher/program-coordinator/course-coordinator account
-    between those three roles. No password is generated or changed - the account keeps
-    its existing credentials. Students and admin accounts cannot be retargeted this way."""
+    """Grant/revoke Program Coordinator and/or Course Coordinator authority on an
+    existing teacher account. These stack on top of the teacher role - they never
+    replace it, so the account keeps every teacher capability (uploading content,
+    running their own courses) in addition to whatever coordinator authority they're
+    given. Only teacher accounts can hold these authorities."""
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-    if user.role not in PROMOTABLE_ROLES:
+    if user.role != "teacher":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only teacher / program coordinator / course coordinator accounts can be retargeted this way."
+            detail="Only teacher accounts can be given coordinator authority."
         )
-    user.role = role_in.role
+    if authorities_in.is_program_coordinator is not None:
+        user.is_program_coordinator = authorities_in.is_program_coordinator
+    if authorities_in.is_course_coordinator is not None:
+        user.is_course_coordinator = authorities_in.is_course_coordinator
     db.commit()
     db.refresh(user)
     return user

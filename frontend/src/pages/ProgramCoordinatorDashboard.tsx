@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { programCoordinatorService, courseService } from '../services/api';
 import { ChangePasswordModal } from '../components/ChangePasswordModal';
 import {
-  LogOut, User, Layers, Plus, RefreshCw, AlertCircle, Pencil, Trash2, X, Check, KeyRound,
+  LogOut, User, Layers, Plus, RefreshCw, AlertCircle, Pencil, Trash2, X, Check, KeyRound, BookOpen,
 } from 'lucide-react';
 
 interface CatalogEntry {
@@ -25,6 +26,7 @@ interface CourseInstance {
 
 const ProgramCoordinatorDashboard: React.FC = () => {
   const { user, logout } = useAuth();
+  const navigate = useNavigate();
   const [showChangePassword, setShowChangePassword] = useState(false);
 
   const [catalog, setCatalog] = useState<CatalogEntry[]>([]);
@@ -166,6 +168,17 @@ const ProgramCoordinatorDashboard: React.FC = () => {
               <User className="w-3.5 h-3.5 text-primary" />
               <span className="font-semibold text-primary text-xs">{user?.full_name}</span>
             </div>
+            {/* Coordinator authority is layered on top of the teacher role, not a
+                replacement for it - this account still teaches its own courses too. */}
+            {user?.role === 'teacher' && (
+              <button
+                onClick={() => navigate('/teacher')}
+                className="flex items-center gap-1.5 text-xs font-semibold text-primary bg-primary-muted border border-primary/20 hover:bg-primary hover:text-white px-3 py-1.5 rounded-lg transition-all"
+                title="Back to your own courses"
+              >
+                <BookOpen className="w-3.5 h-3.5" /> My Teacher Dashboard
+              </button>
+            )}
             <button
               onClick={() => setShowChangePassword(true)}
               className="p-2 text-text-muted hover:text-primary rounded-lg hover:bg-primary-muted border border-transparent hover:border-primary/20 transition-all"

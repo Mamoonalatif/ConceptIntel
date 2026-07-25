@@ -6,20 +6,33 @@ import httpx
 from pathlib import Path
 from app.config import settings
 
+IMAGE_TYPES = {"jpg", "jpeg", "png"}
 
-def extract_text_from_file(filepath: Path, file_type: str) -> str:
-    """Extracts raw text content from PDF, DOCX, PPTX, or TXT file."""
+
+def extract_text_from_file(filepath: Path, file_type: str) -> tuple[str, bool]:
+    """
+    Extracts raw text content from PDF, DOCX, PPTX, TXT, or an image file.
+    Returns (text, used_ocr). For PDFs, any page with no usable text layer (i.e. a
+    scanned page) is rasterized and OCR'd automatically - see
+    app/content_processing/ocr_service.py (EasyOCR + PyMuPDF, pure pip install, no
+    external binary needed). Plain image uploads (jpg/png) are always OCR'd in full.
+    """
     file_type = file_type.lower()
     text = ""
-    
+    used_ocr = False
+
     if not filepath.exists():
         raise FileNotFoundError(f"File not found at path: {filepath}")
 
     if file_type == "pdf":
-        reader = pypdf.PdfReader(filepath)
-        for page in reader.pages:
-            text += page.extract_text() or ""
-        
+        from app.content_processing.ocr_service import extract_pdf_text_with_ocr_fallback
+        text, used_ocr = extract_pdf_text_with_ocr_fallback(filepath)
+
+    elif file_type in IMAGE_TYPES:
+        from app.content_processing.ocr_service import ocr_image_file
+        text = ocr_image_file(filepath)
+        used_ocr = True
+
     elif file_type == "docx":
         doc = docx.Document(filepath)
         text_list = []
@@ -27,7 +40,7 @@ def extract_text_from_file(filepath: Path, file_type: str) -> str:
             if paragraph.text:
                 text_list.append(paragraph.text)
         text = "\n".join(text_list)
-        
+
     elif file_type in ("pptx", "ppt"):
         try:
             prs = pptx.Presentation(filepath)
@@ -45,19 +58,21 @@ def extract_text_from_file(filepath: Path, file_type: str) -> str:
                 )
             raise ValueError(f"Failed to parse PowerPoint slides: {str(e)}")
 
-        
     elif file_type == "txt":
         with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
             text = f.read()
-            
+
     else:
         raise ValueError(f"Unsupported file type: {file_type}")
-        
-    return clean_extracted_text(text)
+
+    return clean_extracted_text(text), used_ocr
 
 
 def clean_extracted_text(text: str) -> str:
-    """Cleans extracted text by removing redundant spacing and formatting."""
+    """Cleans extracted text by removing redundant spacing and formatting. This is
+    the lightweight cleanup applied at extraction time; app/rag/cleaning.py's
+    clean_for_rag() does a more thorough pass (Unicode normalization, de-hyphenation,
+    boilerplate stripping) downstream, for both RAG chunking and Kimi structuring."""
     # Replace multiple spaces with a single space
     text = re.sub(r"[ \t]+", " ", text)
     # Replace three or more newlines with double newline
@@ -68,7 +83,10 @@ def clean_extracted_text(text: str) -> str:
 
 
 def chunk_text(text: str, chunk_size: int = 3000, overlap: int = 300) -> list[str]:
-    """Splits a long string of text into smaller overlapping chunks."""
+    """Naive char-count chunker - kept only for the legacy direct-write extraction
+    path (knowledge_graph/services.py's trigger_concept_extraction). The reviewed
+    pipeline (content_processing) uses app/rag/chunking.py's token-aware chunker
+    instead, for better chunk boundaries."""
     chunks = []
     start = 0
     while start < len(text):
@@ -91,67 +109,142 @@ def get_content_type(extension: str) -> str:
         return "application/vnd.ms-powerpoint"
     elif ext == ".txt":
         return "text/plain"
+    elif ext in (".jpg", ".jpeg"):
+        return "image/jpeg"
+    elif ext == ".png":
+        return "image/png"
     return "application/octet-stream"
+
+
+# ─────────────────────────────────────────────
+#  STORAGE BACKENDS - AWS S3 (optional)
+# ─────────────────────────────────────────────
+
+def _s3_client():
+    import boto3
+    return boto3.client(
+        "s3",
+        region_name=settings.AWS_REGION,
+        aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+        aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+    )
+
+
+def _parse_s3_ref(s3_ref: str) -> tuple[str, str]:
+    """s3://bucket/key/... -> (bucket, key)."""
+    without_scheme = s3_ref[len("s3://"):]
+    bucket, _, key = without_scheme.partition("/")
+    return bucket, key
+
+
+def upload_file_to_s3(file_content: bytes, filename: str, content_type: str, course_id: int) -> str:
+    """Uploads to a PRIVATE S3 bucket and returns an internal 's3://bucket/key'
+    reference (never a public URL - the bucket has no public access, files are only
+    ever read back through authenticated boto3 calls in this backend). Raises
+    ValueError if AWS credentials/bucket aren't configured."""
+    if not (settings.AWS_ACCESS_KEY_ID and settings.AWS_SECRET_ACCESS_KEY and settings.AWS_S3_BUCKET):
+        raise ValueError("AWS S3 credentials and bucket are not configured.")
+
+    safe_filename = Path(filename).name
+    key = f"course_{course_id}/{safe_filename}"
+    client = _s3_client()
+    client.put_object(Bucket=settings.AWS_S3_BUCKET, Key=key, Body=file_content, ContentType=content_type)
+    return f"s3://{settings.AWS_S3_BUCKET}/{key}"
+
+
+def download_file_from_s3(s3_ref: str) -> bytes:
+    bucket, key = _parse_s3_ref(s3_ref)
+    client = _s3_client()
+    obj = client.get_object(Bucket=bucket, Key=key)
+    return obj["Body"].read()
+
+
+def delete_file_from_s3(s3_ref: str) -> None:
+    bucket, key = _parse_s3_ref(s3_ref)
+    client = _s3_client()
+    try:
+        client.delete_object(Bucket=bucket, Key=key)
+    except Exception as e:
+        print(f"Warning: Failed to delete S3 object {s3_ref}: {e}")
+
+
+# ─────────────────────────────────────────────
+#  STORAGE BACKENDS - Supabase Storage (optional)
+# ─────────────────────────────────────────────
+
+def _supabase_headers(content_type: str = None) -> dict:
+    headers = {
+        "Authorization": f"Bearer {settings.SUPABASE_KEY}",
+        "apikey": settings.SUPABASE_KEY,
+    }
+    if content_type:
+        headers["Content-Type"] = content_type
+    return headers
+
+
+def _parse_supabase_ref(ref: str) -> tuple[str, str]:
+    """supabase://bucket/key/... -> (bucket, key)."""
+    without_scheme = ref[len("supabase://"):]
+    bucket, _, key = without_scheme.partition("/")
+    return bucket, key
 
 
 def upload_file_to_supabase(file_content: bytes, filename: str, content_type: str, course_id: int) -> str:
     """
-    Uploads a file to Supabase Storage and returns the public URL.
-    If Supabase settings are missing, raises a ValueError.
+    Uploads to Supabase Storage and returns an internal 'supabase://bucket/key'
+    reference (NOT a public URL) - the bucket is private, so files are only ever
+    read back through authenticated calls (see download_file_from_supabase), same
+    approach as the S3 backend. If Supabase settings are missing, raises ValueError.
     """
     if not settings.SUPABASE_URL or not settings.SUPABASE_KEY:
         raise ValueError("Supabase URL and Key are not configured.")
 
     bucket = settings.SUPABASE_BUCKET
-    # Clean the filename
     safe_filename = Path(filename).name
     file_path = f"course_{course_id}/{safe_filename}"
 
-    # Supabase storage REST API upload endpoint
     url = f"{settings.SUPABASE_URL}/storage/v1/object/{bucket}/{file_path}"
+    headers = _supabase_headers(content_type)
+    headers["x-upsert"] = "true"  # Overwrite if it already exists
 
-    headers = {
-        "Authorization": f"Bearer {settings.SUPABASE_KEY}",
-        "apikey": settings.SUPABASE_KEY,
-        "Content-Type": content_type,
-        "x-upsert": "true"  # Overwrite if it already exists
-    }
-
+    # 30s was too short for real-world files near MAX_FILE_SIZE (25MB) - a 10MB PDF
+    # over a normal connection can genuinely take longer than that to upload. 180s
+    # comfortably covers the full allowed size; connect timeout stays short (10s)
+    # so a genuinely unreachable Supabase project still fails fast.
+    upload_timeout = httpx.Timeout(180.0, connect=10.0)
     with httpx.Client() as client:
-        response = client.post(url, content=file_content, headers=headers, timeout=30.0)
+        response = client.post(url, content=file_content, headers=headers, timeout=upload_timeout)
 
     if response.status_code not in (200, 201):
         raise Exception(f"Supabase storage upload failed with status {response.status_code}: {response.text}")
 
-    # Return standard public URL for the file
-    return f"{settings.SUPABASE_URL}/storage/v1/object/public/{bucket}/{file_path}"
+    return f"supabase://{bucket}/{file_path}"
 
 
-def delete_file_from_supabase(file_url: str) -> None:
-    """
-    Deletes a file from Supabase Storage given its public URL.
-    """
+def download_file_from_supabase(ref: str) -> bytes:
+    """Authenticated download from a private Supabase bucket."""
+    bucket, key = _parse_supabase_ref(ref)
+    url = f"{settings.SUPABASE_URL}/storage/v1/object/{bucket}/{key}"
+    download_timeout = httpx.Timeout(180.0, connect=10.0)
+    with httpx.Client() as client:
+        response = client.get(url, headers=_supabase_headers(), timeout=download_timeout)
+    if response.status_code != 200:
+        raise Exception(f"Supabase storage download failed with status {response.status_code}: {response.text}")
+    return response.content
+
+
+def delete_file_from_supabase(ref: str) -> None:
+    """Deletes a file from Supabase Storage given its 'supabase://bucket/key' reference."""
     if not settings.SUPABASE_URL or not settings.SUPABASE_KEY:
         return
-
-    bucket = settings.SUPABASE_BUCKET
-    prefix = f"{settings.SUPABASE_URL}/storage/v1/object/public/{bucket}/"
-    if not file_url.startswith(prefix):
+    if not ref.startswith("supabase://"):
         return
 
-    # Extract the file path relative to the bucket
-    file_path = file_url[len(prefix):]
-    url = f"{settings.SUPABASE_URL}/storage/v1/object/{bucket}/{file_path}"
-
-    headers = {
-        "Authorization": f"Bearer {settings.SUPABASE_KEY}",
-        "apikey": settings.SUPABASE_KEY
-    }
+    bucket, key = _parse_supabase_ref(ref)
+    url = f"{settings.SUPABASE_URL}/storage/v1/object/{bucket}/{key}"
 
     with httpx.Client() as client:
-        response = client.delete(url, headers=headers, timeout=15.0)
+        response = client.delete(url, headers=_supabase_headers(), timeout=15.0)
 
     if response.status_code not in (200, 204):
-        # Log a warning to stdout/stderr
         print(f"Warning: Failed to delete file from Supabase Storage: {response.status_code} - {response.text}")
-
