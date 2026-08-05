@@ -1,12 +1,15 @@
-"""Orchestrates the full RAG ingestion pipeline for one uploaded file:
+"""Orchestrates the RAG ingestion pipeline for one uploaded file:
 
-  clean -> (OCR fallback if needed) -> chunk -> caption images -> dedup (exact,
-  then semantic) -> embed -> store as ContentChunk rows.
+  clean -> chunk -> caption images -> dedup (exact, then semantic) -> embed -> store
+  as ContentChunk rows (pgvector, in Supabase).
 
 Called from upload/routes.py's background task, right after text extraction
-succeeds. Every step is best-effort where it reasonably can be (OCR, image
-captioning) so a missing optional dependency degrades gracefully instead of
-failing the whole upload.
+succeeds. OCR is NOT done here - upload/services.py's extract_text_from_file already
+ran EasyOCR on any scanned PDF page / plain image before this pipeline ever sees the
+text (see app/content_processing/ocr_service.py), so there's no separate OCR fallback
+step in this file. Every other step is best-effort (image captioning in particular)
+so a missing optional dependency degrades gracefully instead of failing the whole
+upload.
 """
 import logging
 from pathlib import Path
@@ -20,7 +23,6 @@ from app.rag.chunking import Chunk, chunk_document
 from app.rag.metadata import build_embedding_input
 from app.rag.dedup import dedup_exact, dedup_semantic
 from app.rag.embeddings import embed_texts
-from app.rag.ocr import needs_ocr_fallback, ocr_pdf
 from app.rag.images import extract_images, caption_image, is_captioning_configured
 
 logger = logging.getLogger("conceptintel")
@@ -37,19 +39,11 @@ def process_file_for_rag(
     filepath: Optional[Path] = None,
 ) -> int:
     """Runs the full pipeline and persists ContentChunk rows. Returns the number of
-    chunks stored. filepath is only needed for OCR fallback and image extraction
-    (both read the original file directly) - pass None to skip those steps (e.g.
-    when the source file lives in Supabase and wasn't downloaded to a temp path)."""
+    chunks stored. filepath is only needed for image extraction (reads the original
+    file directly) - pass None to skip that step (e.g. when the source file lives in
+    remote storage and wasn't downloaded to a temp path)."""
 
     text = clean_for_rag(raw_text)
-
-    # OCR fallback: a scanned PDF yields almost no text from normal extraction.
-    if filepath is not None and needs_ocr_fallback(text, file_type):
-        logger.info("File %s looks scanned (little/no extractable text) - trying OCR fallback.", file_name)
-        ocr_text = ocr_pdf(filepath)
-        if ocr_text.strip():
-            text = clean_for_rag(ocr_text)
-
     chunks: list[Chunk] = chunk_document(text) if text.strip() else []
 
     # Multi-modal: extract embedded images, caption each, and treat the caption as

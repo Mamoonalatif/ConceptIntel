@@ -11,11 +11,13 @@ Google sign-in, image captioning).
 import os
 import logging
 
+from app.config import settings
+
 logger = logging.getLogger("conceptintel")
 
-LANGFUSE_PUBLIC_KEY = os.getenv("LANGFUSE_PUBLIC_KEY", "")
-LANGFUSE_SECRET_KEY = os.getenv("LANGFUSE_SECRET_KEY", "")
-LANGFUSE_HOST = os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com")
+LANGFUSE_PUBLIC_KEY = settings.LANGFUSE_PUBLIC_KEY
+LANGFUSE_SECRET_KEY = settings.LANGFUSE_SECRET_KEY
+LANGFUSE_HOST = settings.LANGFUSE_HOST
 
 is_configured = bool(LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY)
 
@@ -31,5 +33,8 @@ def trace_ai_call(name: str, as_type: str = "generation"):
             return fn
         return noop_decorator
 
-    from langfuse import observe
+    # Correct import path for this SDK version (2.x) - `from langfuse import observe`
+    # doesn't exist here despite appearing in some docs/examples; that's what was
+    # crashing the whole backend on startup.
+    from langfuse.decorators import observe
     return observe(name=name, as_type=as_type)

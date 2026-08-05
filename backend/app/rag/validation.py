@@ -15,6 +15,9 @@ _ALLOWED_MIME_SUBSTRINGS: dict[str, tuple[str, ...]] = {
     ".pptx": ("officedocument.presentationml", "application/zip", "application/x-zip"),
     ".ppt": ("application/vnd.ms-powerpoint", "application/x-ole-storage", "composite document"),
     ".txt": ("text/plain", "text/"),
+    ".jpg": ("image/jpeg",),
+    ".jpeg": ("image/jpeg",),
+    ".png": ("image/png",),
 }
 
 

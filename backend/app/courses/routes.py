@@ -317,9 +317,13 @@ def admin_update_course(
     role = current_user.role.lower()
 
     # Scope check applies regardless of which fields are being changed - a
-    # course/program coordinator may only touch courses/programs they're assigned to.
-    # get_current_course_manager returns a raw User (shared across all 3 roles), so
-    # scope is resolved here rather than in the dependency itself.
+    # course/program coordinator (the role-based, scoped variant - see
+    # auth/routes.py resolve_course_ids/resolve_program_ids) may only touch
+    # courses/programs they're assigned to. A coordinator promoted via the
+    # additive is_program_coordinator/is_course_coordinator flags instead (role
+    # stays "teacher") has no scope restriction here, same as admin.
+    # get_current_course_manager returns a raw User (shared across all roles/
+    # authorities), so scope is resolved here rather than in the dependency itself.
     if role == "course_coordinator":
         course_ids = resolve_course_ids(db, current_user)
         if course_ids is not None and course.id not in course_ids:
@@ -337,7 +341,7 @@ def admin_update_course(
             )
 
     update_data = course_in.model_dump(exclude_unset=True)
-    is_catalog_manager = role in ("admin", "program_coordinator")
+    is_catalog_manager = role in ("admin", "program_coordinator") or current_user.is_program_coordinator
 
     if not is_catalog_manager and ("catalog_id" in update_data or "prerequisite_course_id" in update_data):
         raise HTTPException(

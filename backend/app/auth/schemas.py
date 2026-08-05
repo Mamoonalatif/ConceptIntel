@@ -74,6 +74,8 @@ class UserResponse(BaseModel):
     email: str
     full_name: str
     role: str
+    is_program_coordinator: bool = False
+    is_course_coordinator: bool = False
     is_active: bool = True
     # Storage reference, not a directly-loadable URL - fetch the actual image via
     # GET /auth/users/{id}/avatar. Non-null just tells the frontend an avatar exists.
@@ -107,7 +109,6 @@ class UserAdminUpdate(BaseModel):
     is_active: Optional[bool] = None
 
 
-
 class StaffRoleUpdate(BaseModel):
     """Admin-only payload to move an existing teacher/program-coordinator/
     course-coordinator account between those three roles. program_ids/course_ids are
@@ -125,6 +126,18 @@ class StaffRoleUpdate(BaseModel):
         if v not in allowed:
             raise ValueError(f"role must be one of {allowed}")
         return v
+
+
+class StaffAuthoritiesUpdate(BaseModel):
+    """Admin-only payload to grant/revoke Program Coordinator and/or Course
+    Coordinator authority FLAGS on an existing teacher account (see
+    User.is_program_coordinator/is_course_coordinator). These stack on top of the
+    teacher role and the role/scope-based system above (StaffRoleUpdate) rather than
+    replacing it - a teacher given course_coordinator authority keeps every teacher
+    capability (uploading, running their own courses) plus the coordinator ones. Omit
+    a field to leave that authority unchanged; both can be true at once."""
+    is_program_coordinator: Optional[bool] = None
+    is_course_coordinator: Optional[bool] = None
 
 
 class Token(BaseModel):

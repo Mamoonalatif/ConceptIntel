@@ -198,6 +198,14 @@ const TeacherDashboard: React.FC = () => {
 
   const navItems: NavItem[] = [
     { key: 'courses', label: 'My Courses', icon: BookOpen, active: true },
+    // Coordinator authority is additive on top of the teacher role - if this
+    // teacher has been given one, surface a link to that panel too.
+    ...(user?.is_program_coordinator
+      ? [{ key: 'program-coordinator', label: 'Program Coordinator Panel', icon: ShieldCheck, onClick: () => navigate('/program-coordinator') }]
+      : []),
+    ...(user?.is_course_coordinator
+      ? [{ key: 'course-coordinator', label: 'Course Coordinator Panel', icon: ShieldCheck, onClick: () => navigate('/course-coordinator') }]
+      : []),
   ];
 
   return (

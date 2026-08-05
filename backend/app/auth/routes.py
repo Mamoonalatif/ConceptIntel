@@ -25,7 +25,7 @@ from app.auth.schemas import (
     AdminCreateTeacher, TeacherCredentialsResponse,
     TeacherRequestCreate, TeacherRequestResponse,
     UserStatusUpdate, UserAdminUpdate, GoogleAuthRequest, StaffRoleUpdate, ChangePasswordRequest,
-    StaffMemberResponse,
+    StaffMemberResponse, StaffAuthoritiesUpdate,
 )
 from app.auth.utils import hash_password, verify_password, create_access_token, decode_access_token, generate_temporary_password
 from app.supabase_auth import (
@@ -142,6 +142,22 @@ def resolve_course_ids(db: Session, user: User) -> Optional[Set[int]]:
     return {row[0] for row in rows}
 
 
+def _is_program_coordinator(user: User) -> bool:
+    """A user counts as Program Coordinator either via the role-based/scoped system
+    (role == "program_coordinator", see StaffRoleUpdate/change_staff_role) or via the
+    simpler additive authority flag (is_program_coordinator, see
+    StaffAuthoritiesUpdate/update_staff_authorities) - the codebase grew both
+    mechanisms and neither should silently stop working for accounts promoted through
+    the other one."""
+    return user.role.lower() == "program_coordinator" or bool(user.is_program_coordinator)
+
+
+def _is_course_coordinator(user: User) -> bool:
+    """See _is_program_coordinator - same dual role-flag compatibility for Course
+    Coordinator."""
+    return user.role.lower() == "course_coordinator" or bool(user.is_course_coordinator)
+
+
 def get_current_program_coordinator(
     current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
 ) -> ProgramScope:
@@ -149,10 +165,10 @@ def get_current_program_coordinator(
     assigning Course Coordinators. Admin retains every course-management power too, so
     it's accepted alongside the dedicated role rather than replacing it - admin gets
     program_ids=None (unrestricted)."""
-    if current_user.role.lower() not in ("admin", "program_coordinator"):
+    if current_user.role.lower() != "admin" and not _is_program_coordinator(current_user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Operation forbidden: Program Coordinator role required."
+            detail="Operation forbidden: Program Coordinator authority required."
         )
     return ProgramScope(user=current_user, program_ids=resolve_program_ids(db, current_user))
 
@@ -163,19 +179,24 @@ def get_current_course_coordinator(
     """Course Coordinator duties: approve/reject a course's knowledge graph, update
     course info. Admin retains this power too - admin gets course_ids=None
     (unrestricted)."""
-    if current_user.role.lower() not in ("admin", "course_coordinator"):
+    if current_user.role.lower() != "admin" and not _is_course_coordinator(current_user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Operation forbidden: Course Coordinator role required."
+            detail="Operation forbidden: Course Coordinator authority required."
         )
     return CourseScope(user=current_user, course_ids=resolve_course_ids(db, current_user))
 
 
 def get_current_course_manager(current_user: User = Depends(get_current_user)) -> User:
-    """Any role that may update course info (admin / program coordinator / course
-    coordinator). The route handler itself restricts catalog/prerequisite changes to
-    admin/program_coordinator only."""
-    if current_user.role.lower() not in ("admin", "program_coordinator", "course_coordinator"):
+    """Any role/authority that may update course info (admin / program coordinator /
+    course coordinator, by role or by flag - see _is_program_coordinator /
+    _is_course_coordinator). The route handler itself restricts catalog/prerequisite
+    changes to admin/program_coordinator only."""
+    if (
+        current_user.role.lower() != "admin"
+        and not _is_program_coordinator(current_user)
+        and not _is_course_coordinator(current_user)
+    ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Operation forbidden."
@@ -211,7 +232,10 @@ def register(user_in: UserCreate, db: Session = Depends(get_db)):
         try:
             supabase_uid = create_supabase_user(user_in.email, user_in.password)
         except Exception as e:
-            print(f"Warning: Supabase user creation failed: {e}. Falling back to local password hashing.")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Could not create account (auth service error): {str(e)}"
+            )
 
     new_user = User(
         email=user_in.email,
@@ -557,7 +581,10 @@ def _create_staff_account(db: Session, email: str, full_name: str, role: str) ->
         try:
             supabase_uid = create_supabase_user(email, temp_password)
         except Exception as e:
-            print(f"Warning: Supabase staff account creation failed: {e}. Falling back to local password hashing.")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Could not create account (auth service error): {str(e)}"
+            )
 
     new_user = User(
         email=email,
@@ -763,6 +790,40 @@ def get_staff_scope(
         CourseCoordinatorAssignment.user_id == user.id
     ).all()]
     return {"program_ids": program_ids, "course_ids": course_ids}
+
+
+@router.patch("/admin/staff/{user_id}/authorities", response_model=UserResponse)
+def update_staff_authorities(
+    user_id: int,
+    authorities_in: StaffAuthoritiesUpdate,
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(get_current_admin)
+):
+    """Grant/revoke Program Coordinator and/or Course Coordinator authority FLAGS on an
+    existing teacher account (see User.is_program_coordinator/is_course_coordinator).
+    These stack on top of the teacher role and the role/scope-based coordinator system
+    above (change_staff_role) - they never replace the base role, so the account keeps
+    every teacher capability (uploading content, running their own courses) in addition
+    to whatever coordinator authority they're given. Only teacher accounts can hold
+    these authorities. Kept alongside the role-based /role endpoint above rather than
+    replacing it, since knowledge-graph approval gating (see auth/routes.py
+    get_current_course_coordinator) and the catalog/course "manager" check (see
+    get_current_course_manager) both key off these flags too."""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    if user.role != "teacher":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only teacher accounts can be given coordinator authority."
+        )
+    if authorities_in.is_program_coordinator is not None:
+        user.is_program_coordinator = authorities_in.is_program_coordinator
+    if authorities_in.is_course_coordinator is not None:
+        user.is_course_coordinator = authorities_in.is_course_coordinator
+    db.commit()
+    db.refresh(user)
+    return user
 
 
 @router.get("/admin/teacher-requests", response_model=List[TeacherRequestResponse])

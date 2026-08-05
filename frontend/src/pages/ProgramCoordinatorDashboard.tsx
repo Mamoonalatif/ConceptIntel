@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 import { programCoordinatorService, courseService, adminService } from '../services/api';
 import type { CourseCoordinatorEntry } from '../services/api';
 import { AppShell, type NavItem } from '../components/AppShell';
@@ -37,6 +39,8 @@ interface StaffOption {
 }
 
 const ProgramCoordinatorDashboard: React.FC = () => {
+  const { user } = useAuth();
+  const navigate = useNavigate();
   const [activeSection, setActiveSection] = useState<ProgramCoordSection>('catalog');
 
   const [catalog, setCatalog] = useState<CatalogEntry[]>([]);
@@ -261,6 +265,11 @@ const ProgramCoordinatorDashboard: React.FC = () => {
     { key: 'catalog', label: 'Course Catalog', icon: BookOpen, active: activeSection === 'catalog', onClick: () => setActiveSection('catalog') },
     { key: 'instances', label: 'Course Instances', icon: Layers, active: activeSection === 'instances', onClick: () => setActiveSection('instances') },
     { key: 'coordinators', label: 'Course Coordinators', icon: Network, active: activeSection === 'coordinators', onClick: () => setActiveSection('coordinators') },
+    // Coordinator authority is layered on top of the teacher role, not a
+    // replacement for it - this account still teaches its own courses too.
+    ...(user?.role === 'teacher'
+      ? [{ key: 'teacher', label: 'My Teacher Dashboard', icon: UserPlus, onClick: () => navigate('/teacher') }]
+      : []),
   ];
 
   return (

@@ -2,7 +2,9 @@
 
 Goes beyond upload/services.py's basic whitespace cleanup: Unicode normalization,
 de-hyphenation of PDF line-wrap artifacts, and removal of repeated headers/footers/
-page numbers that would otherwise pollute every chunk with boilerplate noise.
+page numbers that would otherwise pollute every chunk with boilerplate noise. This
+cleaned text is also what feeds the Kimi K2 concept-structuring call (see
+content_processing/kimi_service.py), not just the RAG chunks.
 """
 import re
 import unicodedata

@@ -177,10 +177,6 @@
 /* ─────────────────────────────────────────────
    REACT FLOW OVERRIDES — theme-aware
 ───────────────────────────────────────────── */
-.react-flow__node {
-  border-radius: 14px !important;
-}
-
 .react-flow__node-default {
   padding: 0 !important;
   border: none !important;

@@ -143,8 +143,6 @@ const ProfilePage: React.FC = () => {
   const defaultDashboard = () => {
     if (role === 'admin') return '/admin';
     if (role === 'teacher') return '/teacher';
-    if (role === 'program_coordinator') return '/program-coordinator';
-    if (role === 'course_coordinator') return '/course-coordinator';
     return '/student';
   };
 

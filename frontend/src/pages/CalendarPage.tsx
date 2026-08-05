@@ -22,8 +22,6 @@ const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const defaultDashboardFor = (role?: string) => {
   if (role === 'admin') return '/admin';
   if (role === 'teacher') return '/teacher';
-  if (role === 'program_coordinator') return '/program-coordinator';
-  if (role === 'course_coordinator') return '/course-coordinator';
   return '/student';
 };
 

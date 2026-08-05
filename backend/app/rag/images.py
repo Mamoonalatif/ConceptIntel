@@ -11,8 +11,11 @@ Why caption-then-embed instead of true image embeddings (e.g. CLIP)? Two reasons
    embedding model plus a separate retrieval path that then needs to be merged with
    text results.
 
-This is best-effort: if OPENAI_API_KEY isn't configured or a captioning call fails,
-the image is simply skipped rather than failing the whole upload.
+This uses OpenAI's vision model (settings.OPENAI_API_KEY/OPENAI_MODEL) rather than
+Kimi K2 - Kimi K2 is text-only, so captioning stays on the existing OpenAI vision
+path, independent of the Kimi-based concept structuring pipeline. Best-effort: if
+OPENAI_API_KEY isn't configured or a captioning call fails, the image is simply
+skipped rather than failing the whole upload.
 """
 import base64
 import logging

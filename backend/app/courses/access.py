@@ -14,8 +14,16 @@ ACTIVE_ENROLLMENT_STATUSES = ("Active", "Completed")
 
 def assert_course_access(db: Session, course: Course, user: User) -> None:
     """Raises 403 unless the user may view this course's content: its teacher, an
-    actively-enrolled student, or an oversight role (admin/program/course coordinator)."""
-    if user.role.lower() in OVERSIGHT_ROLES:
+    actively-enrolled student, or an oversight role/authority - admin, a dedicated
+    program_coordinator/course_coordinator role account, or a teacher holding
+    program/course coordinator authority via the additive is_program_coordinator/
+    is_course_coordinator flags (see database/models.py; both mechanisms exist in
+    this codebase, see auth/routes.py _is_program_coordinator/_is_course_coordinator)."""
+    if (
+        user.role.lower() in OVERSIGHT_ROLES
+        or user.is_program_coordinator
+        or user.is_course_coordinator
+    ):
         return
     if course.teacher_id == user.id:
         return

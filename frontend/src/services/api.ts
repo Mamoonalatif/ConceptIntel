@@ -201,6 +201,17 @@ export const adminService = {
     const res = await api.get('/auth/admin/logs', { params: event_type ? { event_type } : undefined });
     return res.data;
   },
+  // Program/Course Coordinator as ADDITIONAL authority flags on an existing teacher
+  // account (older, alternate model to the role-based listStaff/changeStaffRole above -
+  // kept for callers still using it; see StaffAuthoritiesUpdate on the backend).
+  listStaffByAuthority: async (authority?: 'program_coordinator' | 'course_coordinator') => {
+    const res = await api.get('/auth/admin/staff', { params: authority ? { authority } : undefined });
+    return res.data;
+  },
+  updateStaffAuthorities: async (userId: number, authorities: { is_program_coordinator?: boolean; is_course_coordinator?: boolean }) => {
+    const res = await api.patch(`/auth/admin/staff/${userId}/authorities`, authorities);
+    return res.data;
+  },
 };
 
 // Program Coordinator Services: predefined-course catalog CRUD, prerequisite mapping,
@@ -254,8 +265,12 @@ export interface CourseCoordinatorEntry {
   email: string;
 }
 
-// Course Coordinator Services: knowledge-graph approve/reject, course-info updates
-// (status/dates/description/capacity - not catalog or prerequisite, see backend).
+// Course Coordinator Services: course-info updates (status/dates/description/
+// capacity - not catalog or prerequisite, see backend), plus the course-level
+// knowledge-graph approve/reject toggle. Newer content also flows through
+// graphService's revision approve/reject (content-visible, per-submission) - see
+// CourseCoordinatorDashboard.tsx - but the blind course-level toggle below is still
+// a live backend endpoint and kept here for any caller still using it.
 export const courseCoordinatorService = {
   updateCourse: async (id: number, data: any) => {
     const res = await api.put(`/courses/admin/${id}`, data);
@@ -401,6 +416,109 @@ export const uploadService = {
   },
 };
 
+// Reviewed content-processing pipeline: OCR'd text -> Kimi cleaning/structuring ->
+// diff against the shared catalog graph -> teacher review -> coordinator approval.
+export interface ConceptDiffItem {
+  name: string;
+  description: string;
+  difficulty: string;
+  importance_score: number;
+  learning_outcomes: string;
+  prerequisites: string[];
+  is_new: boolean;
+}
+
+export interface GraphDiff {
+  concepts: ConceptDiffItem[];
+  new_concept_count: number;
+  matched_existing_count: number;
+  new_relationship_count: number;
+}
+
+export interface GraphBuildJob {
+  id: number;
+  catalog_id: number;
+  course_id: number;
+  triggered_by_teacher_id: number;
+  status: string;
+  teacher_notes: string | null;
+  error_message: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GraphEditProposal {
+  id: number;
+  catalog_id: number;
+  course_id: number;
+  teacher_id: number;
+  operation: 'create_node' | 'update_node' | 'delete_node' | 'create_relationship' | 'delete_relationship';
+  payload: Record<string, any>;
+  status: string;
+  coordinator_id: number | null;
+  coordinator_decision_at: string | null;
+  coordinator_notes: string | null;
+  created_at: string;
+  // present only on the pending-queue listing (list_pending_edit_proposals)
+  course_name?: string;
+  course_code?: string | null;
+  teacher_name?: string;
+}
+
+export interface GraphRevision {
+  id: number;
+  job_id: number;
+  catalog_id: number;
+  is_initial: boolean;
+  diff: GraphDiff;
+  submitted_by_teacher_id: number;
+  status: string;
+  teacher_reviewed_by_id: number | null;
+  teacher_reviewed_at: string | null;
+  teacher_edit_notes: string | null;
+  coordinator_id: number | null;
+  coordinator_decision_at: string | null;
+  coordinator_notes: string | null;
+  created_at: string;
+  // present only on the pending-queue listing (list_pending_revisions)
+  course_name?: string;
+  course_code?: string | null;
+  course_id?: number | null;
+  submitted_by_name?: string;
+}
+
+export const contentProcessingService = {
+  triggerPipeline: async (courseId: number, teacherNotes?: string): Promise<GraphBuildJob> => {
+    const res = await api.post(`/content-processing/trigger/${courseId}`, { teacher_notes: teacherNotes ?? null });
+    return res.data;
+  },
+  getJob: async (jobId: number): Promise<GraphBuildJob> => {
+    const res = await api.get(`/content-processing/jobs/${jobId}`);
+    return res.data;
+  },
+  listJobsForCourse: async (courseId: number): Promise<GraphBuildJob[]> => {
+    const res = await api.get(`/content-processing/jobs/course/${courseId}`);
+    return res.data;
+  },
+  getJobRevision: async (jobId: number): Promise<GraphRevision> => {
+    const res = await api.get(`/content-processing/jobs/${jobId}/revision`);
+    return res.data;
+  },
+  teacherReview: async (
+    revisionId: number,
+    action: 'confirm' | 'reject',
+    editedDiff?: GraphDiff,
+    notes?: string
+  ): Promise<GraphRevision> => {
+    const res = await api.post(`/content-processing/revisions/${revisionId}/teacher-review`, {
+      action,
+      edited_diff: editedDiff ?? null,
+      notes: notes ?? null,
+    });
+    return res.data;
+  },
+};
+
 // Knowledge Graph Services
 export const graphService = {
   getGraph: async (courseId: number) => {
@@ -409,6 +527,10 @@ export const graphService = {
   },
   buildGraph: async (courseId: number) => {
     const res = await api.post(`/graph/build/${courseId}`);
+    return res.data;
+  },
+  createNode: async (courseId: number, nodeData: { name: string; description: string; difficulty: string }) => {
+    const res = await api.post(`/graph/node/${courseId}`, nodeData);
     return res.data;
   },
   updateNode: async (courseId: number, nodeId: string, nodeData: any) => {
@@ -437,6 +559,37 @@ export const graphService = {
   },
   searchConcepts: async (courseId: number, query: string) => {
     const res = await api.get(`/graph/search/${courseId}`, { params: { q: query } });
+    return res.data;
+  },
+  // Revision review workflow (produced by the reviewed content-processing pipeline)
+  getRevision: async (revisionId: number): Promise<GraphRevision> => {
+    const res = await api.get(`/graph/revisions/${revisionId}`);
+    return res.data;
+  },
+  listPendingRevisions: async (): Promise<GraphRevision[]> => {
+    const res = await api.get('/graph/revisions/pending');
+    return res.data;
+  },
+  approveRevision: async (revisionId: number, notes?: string): Promise<GraphRevision> => {
+    const res = await api.post(`/graph/revisions/${revisionId}/approve`, { action: 'approve', notes: notes ?? null });
+    return res.data;
+  },
+  rejectRevision: async (revisionId: number, notes?: string): Promise<GraphRevision> => {
+    const res = await api.post(`/graph/revisions/${revisionId}/reject`, { action: 'reject', notes: notes ?? null });
+    return res.data;
+  },
+  // Manual edit approval workflow (single node/relationship edits made directly in
+  // the Knowledge Graph UI - every one needs coordinator sign-off, same as above)
+  listPendingEditProposals: async (): Promise<GraphEditProposal[]> => {
+    const res = await api.get('/graph/edit-proposals/pending');
+    return res.data;
+  },
+  approveEditProposal: async (proposalId: number, notes?: string): Promise<GraphEditProposal> => {
+    const res = await api.post(`/graph/edit-proposals/${proposalId}/approve`, { action: 'approve', notes: notes ?? null });
+    return res.data;
+  },
+  rejectEditProposal: async (proposalId: number, notes?: string): Promise<GraphEditProposal> => {
+    const res = await api.post(`/graph/edit-proposals/${proposalId}/reject`, { action: 'reject', notes: notes ?? null });
     return res.data;
   },
 };

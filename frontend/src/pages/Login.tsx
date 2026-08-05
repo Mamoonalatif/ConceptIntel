@@ -11,8 +11,6 @@ import { Lock, Mail, AlertCircle, Loader2, Eye, EyeOff, ArrowLeft } from 'lucide
 const dashboardPathForRole = (role: string) => {
   if (role === 'admin') return '/admin';
   if (role === 'teacher') return '/teacher';
-  if (role === 'program_coordinator') return '/program-coordinator';
-  if (role === 'course_coordinator') return '/course-coordinator';
   return '/student';
 };
 

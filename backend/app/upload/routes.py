@@ -1,5 +1,3 @@
-import os
-import shutil
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks, status
 from fastapi.responses import FileResponse
 from fastapi import Response
@@ -30,7 +28,7 @@ from app.email_service import send_notification_email
 
 router = APIRouter(prefix="/files", tags=["Content Upload"])
 
-SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".pptx", ".ppt", ".txt"}
+SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".pptx", ".ppt", ".txt", ".jpg", ".jpeg", ".png"}
 MAX_FILE_SIZE = 25 * 1024 * 1024  # 25 MB
 
 
@@ -44,18 +42,22 @@ def _store_file(content: bytes, filename: str, extension: str, course_id: int) -
 
 
 def process_uploaded_file_task(file_id: int):
-    """Background task: extract text, run the RAG ingestion pipeline (clean, chunk,
-    caption images, dedup, embed, store), then trigger the existing knowledge-graph
-    concept extraction."""
+    """Background task: extract text (OCR'd automatically if scanned/an image - see
+    upload/services.py), run the RAG ingestion pipeline (clean, chunk, caption
+    images, dedup, embed, store as pgvector rows for semantic search), and stop
+    there. It does NOT auto-trigger knowledge-graph concept extraction - that's the
+    reviewed pipeline, started explicitly by a teacher via
+    POST /api/content-processing/trigger/{course_id}, which goes through diff ->
+    teacher review -> coordinator approval before anything reaches Neo4j. Auto-firing
+    the old direct-write extraction here would let every upload silently bypass that
+    review gate."""
     db: Session = SessionLocal()
     temp_filepath = None
     try:
-        # Fetch file record
         file_record = db.query(UploadedFile).filter(UploadedFile.id == file_id).first()
         if not file_record:
             return
 
-        # Update status to Processing
         file_record.status = "Processing"
         db.commit()
 
@@ -65,8 +67,8 @@ def process_uploaded_file_task(file_id: int):
 
         if is_s3 or is_supabase:
             # Download to a temporary file. Kept around (not deleted immediately)
-            # since the RAG pipeline's OCR fallback and image extraction also need
-            # to read the original file.
+            # since the RAG pipeline's image extraction also needs to read the
+            # original file.
             import tempfile
             with tempfile.NamedTemporaryFile(delete=False, suffix=f".{file_record.file_type}") as tmp:
                 temp_filepath = Path(tmp.name)
@@ -78,10 +80,10 @@ def process_uploaded_file_task(file_id: int):
         else:
             filepath = Path(file_url)
 
-        extracted_text = extract_text_from_file(filepath, file_record.file_type)
+        extracted_text, used_ocr = extract_text_from_file(filepath, file_record.file_type)
 
-        # Save text back to DB
         file_record.extracted_text = extracted_text
+        file_record.used_ocr = used_ocr
         file_record.status = "Completed"
         db.commit()
 
@@ -103,10 +105,10 @@ def process_uploaded_file_task(file_id: int):
         except Exception as e:
             print(f"Warning: failed to create file-processed notifications: {str(e)}")
 
-        # RAG ingestion: clean -> OCR fallback -> chunk -> caption images -> dedup
-        # -> embed -> store. Best-effort - a failure here doesn't roll back the
-        # successful text extraction above (the file stays usable, just without
-        # semantic search over it), so it's wrapped separately.
+        # RAG ingestion: clean -> chunk -> caption images -> dedup -> embed -> store.
+        # Best-effort - a failure here doesn't roll back the successful text
+        # extraction above (the file stays usable, just without semantic search
+        # over it), so it's wrapped separately.
         try:
             from app.rag.pipeline import process_file_for_rag
             course = db.query(Course).filter(Course.id == file_record.course_id).first()
@@ -124,13 +126,8 @@ def process_uploaded_file_task(file_id: int):
         except Exception as e:
             print(f"RAG pipeline error for file ID {file_id} (text extraction still succeeded): {str(e)}")
 
-        # Trigger Concept Extraction AI pipeline (implemented in knowledge_graph)
-        from app.knowledge_graph.services import trigger_concept_extraction
-        trigger_concept_extraction(file_record.course_id, extracted_text)
-
     except Exception as e:
         db.rollback()
-        # Find record again to update status to Failed
         file_record = db.query(UploadedFile).filter(UploadedFile.id == file_id).first()
         if file_record:
             file_record.status = "Failed"
@@ -264,7 +261,6 @@ def list_course_files(
     current_user: User = Depends(get_current_user)
 ):
     """Retrieve metadata of all uploaded files for a course."""
-    # Ensure course exists
     course = db.query(Course).filter(Course.id == course_id).first()
     if not course:
         raise HTTPException(
@@ -346,8 +342,7 @@ def delete_file(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="File metadata not found"
         )
-        
-    # Check permissions
+
     if file_record.teacher_id != current_teacher.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -370,22 +365,19 @@ def replace_file(
     current_teacher: User = Depends(get_current_teacher)
 ):
     """Replace an existing file with a new file."""
-    # 1. Fetch existing file record
     file_record = db.query(UploadedFile).filter(UploadedFile.id == id).first()
     if not file_record:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="File not found"
         )
-        
-    # Check permissions
+
     if file_record.teacher_id != current_teacher.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You do not have permission to modify this file."
         )
 
-    # 2. Validate new file extension
     file_path_obj = Path(file.filename)
     extension = file_path_obj.suffix.lower()
     if extension not in SUPPORTED_EXTENSIONS:
@@ -394,7 +386,6 @@ def replace_file(
             detail=f"Unsupported file type. Supported formats: {', '.join(SUPPORTED_EXTENSIONS)}"
         )
 
-    # Read content to check size and upload
     try:
         content = file.file.read()
         file_size = len(content)
@@ -433,12 +424,12 @@ def replace_file(
     file_record.file_type = file_type
     file_record.file_size = file_size
     file_record.status = "Uploaded"
-    file_record.extracted_text = None  # Reset extracted text
-    
+    file_record.extracted_text = None
+    file_record.used_ocr = False
+
     db.commit()
     db.refresh(file_record)
 
-    # 6. Queue text parsing in background task
     background_tasks.add_task(process_uploaded_file_task, file_record.id)
 
     return file_record
@@ -451,16 +442,16 @@ def reprocess_file(
     db: Session = Depends(get_db),
     current_teacher: User = Depends(get_current_teacher)
 ):
-    """Manually re-trigger file parsing and concept extraction."""
+    """Manually re-trigger file parsing (text extraction + RAG ingestion)."""
     file_record = db.query(UploadedFile).filter(UploadedFile.id == id, UploadedFile.teacher_id == current_teacher.id).first()
     if not file_record:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="File not found or you are not the owner."
         )
-    
+
     file_record.status = "Uploaded"
     db.commit()
-    
+
     background_tasks.add_task(process_uploaded_file_task, file_record.id)
     return file_record

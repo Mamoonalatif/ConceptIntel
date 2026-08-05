@@ -1,7 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { courseService, uploadService, enrollmentService, graphService, type ContentSearchResult } from '../services/api';
+import {
+  courseService, uploadService, enrollmentService, graphService, contentProcessingService,
+  type ContentSearchResult,
+} from '../services/api';
+import type { GraphBuildJob, GraphRevision } from '../services/api';
 import { useAutoRefresh } from '../hooks/useAutoRefresh';
 import { ClassStream } from '../components/ClassStream';
 import { Assignments } from '../components/Assignments';
@@ -9,17 +13,35 @@ import { AppShell, type NavItem } from '../components/AppShell';
 import {
   ArrowLeft, BookOpen, Upload, FileText, Trash2, RefreshCw,
   Users, CheckCircle2, AlertTriangle, Play, Network, Copy, Download,
-  Zap, TrendingUp, Clock, Search
+  Zap, TrendingUp, Clock, Search, Sparkles, X, ThumbsUp, ThumbsDown
 } from 'lucide-react';
 
-// Mirrors App.tsx's defaultDashboardFor - each role lands back on its own
-// dashboard route when leaving a course rather than always going to /student.
+// Mirrors App.tsx's defaultDashboardFor - a user's base role (teacher/student/admin)
+// determines their landing dashboard. Program/Course Coordinator are additive
+// authorities on top of a teacher account, not separate role values - see
+// App.tsx's hasAuthority/requiredAuthority for the actual gating logic.
 const defaultDashboardFor = (role: string) => {
   if (role === 'admin') return '/admin';
   if (role === 'teacher') return '/teacher';
-  if (role === 'program_coordinator') return '/program-coordinator';
-  if (role === 'course_coordinator') return '/course-coordinator';
   return '/student';
+};
+
+// Pipeline stages that mean "still running" - keep polling while in one of these.
+const NON_TERMINAL_JOB_STATUSES = [
+  'Queued', 'ExtractingText', 'CleaningAndStructuring', 'Diffing',
+  'AwaitingTeacherReview', 'AwaitingCoordinatorApproval',
+];
+
+const JOB_STATUS_LABELS: Record<string, string> = {
+  Queued: 'Queued',
+  ExtractingText: 'Extracting text',
+  CleaningAndStructuring: 'AI cleaning & structuring concepts',
+  Diffing: 'Comparing against existing graph',
+  AwaitingTeacherReview: 'Awaiting your review',
+  AwaitingCoordinatorApproval: 'Awaiting coordinator approval',
+  Merged: 'Merged into knowledge graph',
+  Rejected: 'Rejected',
+  Failed: 'Failed',
 };
 
 interface Course {
@@ -83,7 +105,17 @@ const CourseDetail: React.FC = () => {
   const [searchResults, setSearchResults] = useState<ContentSearchResult[] | null>(null);
   const [searching, setSearching] = useState(false);
 
+  // Reviewed AI pipeline (trigger -> Kimi structuring -> diff -> teacher review ->
+  // coordinator approval -> merge) - separate from the legacy instant "Rebuild Graph".
+  const [pipelineJobs, setPipelineJobs] = useState<GraphBuildJob[]>([]);
+  const [triggeringPipeline, setTriggeringPipeline] = useState(false);
+  const [reviewRevision, setReviewRevision] = useState<GraphRevision | null>(null);
+  const [loadingRevision, setLoadingRevision] = useState(false);
+  const [decidingRevision, setDecidingRevision] = useState(false);
+  const [reviewNotes, setReviewNotes] = useState('');
+
   const isTeacher = user?.role === 'teacher';
+  const latestJob = pipelineJobs[0] || null;
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -109,6 +141,8 @@ const CourseDetail: React.FC = () => {
       if (isTeacher) {
         const studentsData = await enrollmentService.getEnrolledStudents(idNum);
         setStudents(studentsData);
+        const jobsData = await contentProcessingService.listJobsForCourse(idNum);
+        setPipelineJobs(jobsData);
       } else {
         const myCourses = await enrollmentService.getMyCourses();
         const mine = myCourses.find((e: any) => e.course_id === idNum);
@@ -128,6 +162,22 @@ const CourseDetail: React.FC = () => {
   useEffect(() => {
     if (idNum) fetchData();
   }, [courseId]);
+
+  // Poll the latest pipeline job every 4s while it's still running, so status
+  // (Queued -> ExtractingText -> ... -> AwaitingTeacherReview) updates live without
+  // the teacher needing to refresh the page.
+  useEffect(() => {
+    if (!isTeacher || !latestJob || !NON_TERMINAL_JOB_STATUSES.includes(latestJob.status)) return;
+    const interval = setInterval(async () => {
+      try {
+        const updated = await contentProcessingService.getJob(latestJob.id);
+        setPipelineJobs((prev) => prev.map((j) => (j.id === updated.id ? updated : j)));
+      } catch {
+        // transient poll failure - next tick will retry
+      }
+    }, 4000);
+    return () => clearInterval(interval);
+  }, [isTeacher, latestJob?.id, latestJob?.status]);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
@@ -195,6 +245,57 @@ const CourseDetail: React.FC = () => {
       setError(err.response?.data?.detail || 'Failed to rebuild graph.');
     } finally {
       setRebuilding(false);
+    }
+  };
+
+  const handleTriggerPipeline = async () => {
+    setTriggeringPipeline(true);
+    setError('');
+    setSuccess('');
+    try {
+      const job = await contentProcessingService.triggerPipeline(idNum);
+      setPipelineJobs((prev) => [job, ...prev]);
+      setSuccess('AI review pipeline started - this runs in the background and can take a minute or more.');
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Failed to start the AI review pipeline.');
+    } finally {
+      setTriggeringPipeline(false);
+    }
+  };
+
+  const handleOpenReview = async (jobId: number) => {
+    setLoadingRevision(true);
+    setError('');
+    setReviewNotes('');
+    try {
+      const revision = await contentProcessingService.getJobRevision(jobId);
+      setReviewRevision(revision);
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Could not load the proposed changes for review.');
+    } finally {
+      setLoadingRevision(false);
+    }
+  };
+
+  const handleTeacherDecision = async (action: 'confirm' | 'reject') => {
+    if (!reviewRevision) return;
+    setDecidingRevision(true);
+    setError('');
+    try {
+      await contentProcessingService.teacherReview(reviewRevision.id, action, undefined, reviewNotes || undefined);
+      setSuccess(
+        action === 'confirm'
+          ? 'Sent to the course coordinator for final approval.'
+          : 'Revision rejected - it will not be added to the knowledge graph.'
+      );
+      setReviewRevision(null);
+      setReviewNotes('');
+      const jobsData = await contentProcessingService.listJobsForCourse(idNum);
+      setPipelineJobs(jobsData);
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Failed to submit your review decision.');
+    } finally {
+      setDecidingRevision(false);
     }
   };
 
@@ -381,6 +482,59 @@ const CourseDetail: React.FC = () => {
                     <p className="text-xs text-text-muted">PDF, PPT/PPTX, DOCX, TXT — up to 25MB</p>
                   </div>
                 </div>
+              </div>
+            )}
+
+            {/* Reviewed AI Pipeline (Teacher only) */}
+            {isTeacher && (
+              <div className="bg-surface rounded-2xl p-6 border border-border animate-fade-up">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-base font-bold text-text-primary flex items-center gap-2">
+                    <Sparkles className="w-4.5 h-4.5 text-primary" />
+                    AI-Reviewed Knowledge Graph
+                  </h3>
+                  <button
+                    onClick={handleTriggerPipeline}
+                    disabled={triggeringPipeline || completedFiles === 0 || (!!latestJob && NON_TERMINAL_JOB_STATUSES.includes(latestJob.status))}
+                    className="btn-primary text-xs px-3.5 py-1.5"
+                    title="Runs OCR'd text through Kimi AI, then requires your review and coordinator approval before anything changes the graph"
+                  >
+                    {triggeringPipeline ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                    Generate (AI + Review)
+                  </button>
+                </div>
+                <p className="text-text-secondary text-sm mb-4">
+                  Structures your uploaded material into concepts via AI, diffs it against the course's shared graph,
+                  and requires your confirmation and the course coordinator's approval before anything is merged.
+                </p>
+
+                {latestJob ? (
+                  <div className="bg-background border border-border rounded-xl p-4 flex items-center justify-between">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-text-primary flex items-center gap-2">
+                        {NON_TERMINAL_JOB_STATUSES.includes(latestJob.status) && latestJob.status !== 'AwaitingTeacherReview' && (
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin text-primary shrink-0" />
+                        )}
+                        {JOB_STATUS_LABELS[latestJob.status] || latestJob.status}
+                      </p>
+                      {latestJob.error_message && (
+                        <p className="text-xs text-red-600 mt-1 truncate" title={latestJob.error_message}>{latestJob.error_message}</p>
+                      )}
+                    </div>
+                    {latestJob.status === 'AwaitingTeacherReview' && (
+                      <button
+                        onClick={() => handleOpenReview(latestJob.id)}
+                        disabled={loadingRevision}
+                        className="shrink-0 flex items-center gap-1.5 px-3.5 py-1.5 bg-primary text-white font-semibold rounded-lg text-xs hover:bg-primary-hover transition-all disabled:opacity-50"
+                      >
+                        {loadingRevision ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : null}
+                        Review Proposed Concepts
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-text-muted text-xs text-center py-4">No AI review runs yet for this course.</p>
+                )}
               </div>
             )}
 
@@ -584,6 +738,82 @@ const CourseDetail: React.FC = () => {
             )}
           </div>
         </div>
+
+      {/* Teacher review modal: confirm or reject the AI-proposed diff before it goes
+          to the course coordinator for final approval. */}
+      {reviewRevision && (
+        <div className="fixed inset-0 z-50 bg-black/20 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-surface rounded-2xl shadow-hover border border-border max-w-2xl w-full max-h-[85vh] flex flex-col">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-border">
+              <h3 className="text-base font-bold text-text-primary flex items-center gap-2">
+                <Sparkles className="w-4.5 h-4.5 text-primary" />
+                Review Proposed Concepts
+              </h3>
+              <button onClick={() => { setReviewRevision(null); setReviewNotes(''); }} className="p-1 text-text-muted hover:text-text-primary rounded-lg">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="px-6 py-4 overflow-y-auto flex-1 space-y-3">
+              <div className="flex gap-4 text-xs text-text-secondary mb-2">
+                <span>{reviewRevision.diff.new_concept_count} new concept(s)</span>
+                <span>{reviewRevision.diff.matched_existing_count} already existed</span>
+                <span>{reviewRevision.diff.new_relationship_count} new prerequisite link(s)</span>
+              </div>
+
+              {reviewRevision.diff.concepts.map((concept, i) => (
+                <div key={i} className="bg-background border border-border rounded-xl p-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="font-semibold text-text-primary text-sm">{concept.name}</p>
+                    <span className={
+                      concept.difficulty === 'Easy' ? 'badge-easy' :
+                      concept.difficulty === 'Hard' ? 'badge-hard' : 'badge-medium'
+                    }>{concept.difficulty}</span>
+                  </div>
+                  <p className="text-text-secondary text-xs mt-1.5">{concept.description}</p>
+                  <p className="text-text-muted text-[11px] mt-1.5 italic">{concept.learning_outcomes}</p>
+                  <div className="flex items-center justify-between mt-2 text-[11px] text-text-muted">
+                    <span>Importance: {concept.importance_score}/10</span>
+                    {concept.prerequisites.length > 0 && (
+                      <span>Prerequisites: {concept.prerequisites.join(', ')}</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+
+              <div>
+                <label className="block text-xs font-semibold text-text-secondary mb-1.5">Notes (optional)</label>
+                <textarea
+                  className="input-light text-sm w-full"
+                  rows={2}
+                  placeholder="e.g. why you're rejecting this, or anything the coordinator should know"
+                  value={reviewNotes}
+                  onChange={(e) => setReviewNotes(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-border">
+              <button
+                onClick={() => handleTeacherDecision('reject')}
+                disabled={decidingRevision}
+                className="flex items-center gap-1.5 px-4 py-2 bg-red-50 border border-red-200 text-red-600 hover:bg-red-100 font-semibold rounded-xl text-sm transition-all disabled:opacity-50"
+              >
+                <ThumbsDown className="w-4 h-4" />
+                Reject
+              </button>
+              <button
+                onClick={() => handleTeacherDecision('confirm')}
+                disabled={decidingRevision}
+                className="btn-primary"
+              >
+                {decidingRevision ? <RefreshCw className="w-4 h-4 animate-spin" /> : <ThumbsUp className="w-4 h-4" />}
+                Confirm & Send for Approval
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </AppShell>
   );
 };

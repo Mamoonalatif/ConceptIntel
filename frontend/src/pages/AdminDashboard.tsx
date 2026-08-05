@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { adminService, programService, courseService } from '../services/api';
+import { adminService, programService } from '../services/api';
 import { AppShell, type NavItem } from '../components/AppShell';
 import { useAutoRefresh } from '../hooks/useAutoRefresh';
 import {
@@ -18,13 +18,22 @@ interface TeacherRequest {
   status: string;
 }
 
-type StaffRole = 'teacher' | 'program_coordinator' | 'course_coordinator';
-
+// Program/Course Coordinator are ADDITIVE authorities layered on top of the base
+// 'teacher' role (see is_program_coordinator/is_course_coordinator below) - a
+// teacher can hold either, both, or neither, and keeps every teacher capability
+// regardless. `role` itself only ever varies for legacy accounts still on the
+// older exclusive-role model (see program_name/course_name below), which this
+// panel surfaces read-only but no longer creates.
 interface StaffMember {
   id: number;
   email: string;
   full_name: string;
-  role: StaffRole;
+  role: string;
+  is_program_coordinator: boolean;
+  is_course_coordinator: boolean;
+  // Only ever populated for legacy exclusive-role accounts (role itself equal to
+  // 'program_coordinator'/'course_coordinator') - additive-authority teachers have
+  // no single program/course scope, so these stay null for them.
   program_name?: string | null;
   course_name?: string | null;
 }
@@ -35,12 +44,8 @@ interface UserAccount {
   full_name: string;
   role: string;
   is_active: boolean;
-}
-
-interface CourseOption {
-  id: number;
-  name: string;
-  code: string | null;
+  is_program_coordinator?: boolean;
+  is_course_coordinator?: boolean;
 }
 
 interface Program {
@@ -108,18 +113,12 @@ const AdminDashboard: React.FC = () => {
   const [logsLoading, setLogsLoading] = useState(false);
   const [logsEventFilter, setLogsEventFilter] = useState<string>('');
 
-  // Staff role management
+  // Coordinator authority management - additive is_program_coordinator/
+  // is_course_coordinator flags on an existing teacher account (toggled
+  // independently, no scope panel - see adminService.updateStaffAuthorities).
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [staffLoading, setStaffLoading] = useState(true);
-  const [changingRoleId, setChangingRoleId] = useState<number | null>(null);
-
-  // Inline scope picker
-  const [scopePanelStaffId, setScopePanelStaffId] = useState<number | null>(null);
-  const [scopePanelRole, setScopePanelRole] = useState<StaffRole | null>(null);
-  const [scopeProgramIds, setScopeProgramIds] = useState<number[]>([]);
-  const [scopeCourseIds, setScopeCourseIds] = useState<number[]>([]);
-  const [scopeLoading, setScopeLoading] = useState(false);
-  const [scopeSaving, setScopeSaving] = useState(false);
+  const [changingAuthorityKey, setChangingAuthorityKey] = useState<string | null>(null);
 
   // Manage Programs panel
   const [programs, setPrograms] = useState<Program[]>([]);
@@ -128,10 +127,6 @@ const AdminDashboard: React.FC = () => {
   const [newProgramCode, setNewProgramCode] = useState('');
   const [creatingProgram, setCreatingProgram] = useState(false);
   const [deletingProgramId, setDeletingProgramId] = useState<number | null>(null);
-
-  // All courses (deduplicated)
-  const [allCourses, setAllCourses] = useState<CourseOption[]>([]);
-  const [allCoursesLoaded, setAllCoursesLoaded] = useState(false);
 
   const fetchUsers = async (silent = false) => {
     try {
@@ -163,7 +158,7 @@ const AdminDashboard: React.FC = () => {
   const fetchStaff = async (silent = false) => {
     try {
       if (!silent) setStaffLoading(true);
-      const data = await adminService.listStaff();
+      const data = await adminService.listStaffByAuthority();
       setStaff(data);
     } catch (err: any) {
       if (!silent) setError('Failed to fetch staff accounts. Verify API connection.');
@@ -267,8 +262,14 @@ const AdminDashboard: React.FC = () => {
       setCredentials({ email: data.email, temporary_password: data.temporary_password });
       // Show up in the users/staff lists immediately - no need to wait on a
       // refetch (or a manual refresh) to see the account that was just created.
-      setUsers(prev => [{ id: data.id, email: data.email, full_name: data.full_name, role: data.role, is_active: true }, ...prev]);
-      setStaff(prev => [{ id: data.id, email: data.email, full_name: data.full_name, role: data.role as StaffRole }, ...prev]);
+      setUsers(prev => [{
+        id: data.id, email: data.email, full_name: data.full_name, role: data.role, is_active: true,
+        is_program_coordinator: false, is_course_coordinator: false,
+      }, ...prev]);
+      setStaff(prev => [{
+        id: data.id, email: data.email, full_name: data.full_name, role: data.role,
+        is_program_coordinator: false, is_course_coordinator: false,
+      }, ...prev]);
       setNewTeacherEmail('');
       setNewTeacherName('');
     } catch (err: any) {
@@ -278,53 +279,31 @@ const AdminDashboard: React.FC = () => {
     }
   };
 
-  // Teacher needs no scope, so it fires immediately, same as before. Program/Course
-  // Coordinator instead open an inline picker below the row - the actual role+scope
-  // change is only sent once the admin clicks Save in that panel.
-  const handleRoleSelect = async (staffId: number, role: StaffRole) => {
+  // Program Coordinator and Course Coordinator are ADDITIVE authority flags on an
+  // existing teacher account, independent of each other - a teacher can hold
+  // either, both, or neither, and keeps every teacher capability regardless. No
+  // scope panel: unlike the old exclusive-role model, these flags aren't scoped to
+  // a single program/course (see adminService.updateStaffAuthorities on the
+  // backend - StaffAuthoritiesUpdate has no program_ids/course_ids). Course-level
+  // scoping still exists, just lives on the Program Coordinator Dashboard's
+  // "Course Coordinators" section (CourseCoordinatorAssignment), independent of
+  // this flag.
+  const handleToggleAuthority = async (
+    staffId: number,
+    authority: 'is_program_coordinator' | 'is_course_coordinator',
+    value: boolean
+  ) => {
     setError('');
-    if (role === 'teacher') {
-      setChangingRoleId(staffId);
-      try {
-        const updated = await adminService.changeStaffRole(staffId, role);
-        setStaff(prev => prev.map(s => (s.id === staffId ? { ...s, ...updated } : s)));
-      } catch (err: any) {
-        setError(err.response?.data?.detail || 'Failed to change role');
-      } finally {
-        setChangingRoleId(null);
-      }
-      return;
-    }
-    await openScopePanel(staffId, role);
-  };
-
-  const openScopePanel = async (staffId: number, role: StaffRole) => {
-    setScopePanelStaffId(staffId);
-    setScopePanelRole(role);
-    setScopeProgramIds([]);
-    setScopeCourseIds([]);
-    setScopeLoading(true);
-    setError('');
+    const key = `${staffId}:${authority}`;
+    setChangingAuthorityKey(key);
     try {
-      if (role === 'course_coordinator' && !allCoursesLoaded) {
-        const courses = await courseService.getAll();
-        // Deduplicate courses by course name to support centralized knowledge graph view
-        const uniqueCourses = courses.reduce((acc: CourseOption[], curr: CourseOption) => {
-          if (!acc.some(item => item.name.trim().toLowerCase() === curr.name.trim().toLowerCase())) {
-            acc.push(curr);
-          }
-          return acc;
-        }, []);
-        setAllCourses(uniqueCourses);
-        setAllCoursesLoaded(true);
-      }
-      const currentScope = await adminService.listStaffScope(staffId);
-      setScopeProgramIds(currentScope.program_ids || []);
-      setScopeCourseIds(currentScope.course_ids || []);
+      const updated = await adminService.updateStaffAuthorities(staffId, { [authority]: value });
+      setStaff(prev => prev.map(s => (s.id === staffId ? { ...s, ...updated } : s)));
+      setUsers(prev => prev.map(u => (u.id === staffId ? { ...u, ...updated } : u)));
     } catch (err: any) {
-      setError('Failed to load current scope for this staff member.');
+      setError(err.response?.data?.detail || 'Failed to update coordinator authority');
     } finally {
-      setScopeLoading(false);
+      setChangingAuthorityKey(null);
     }
   };
 
@@ -401,39 +380,6 @@ const AdminDashboard: React.FC = () => {
       setError(err.response?.data?.detail || 'Failed to delete user');
     } finally {
       setDeletingUserId(null);
-    }
-  };
-
-  const closeScopePanel = () => {
-    setScopePanelStaffId(null);
-    setScopePanelRole(null);
-    setScopeProgramIds([]);
-    setScopeCourseIds([]);
-  };
-
-  const selectScopeProgram = (programId: number) => {
-    setScopeProgramIds([programId]);
-  };
-
-  const selectScopeCourse = (courseId: number) => {
-    setScopeCourseIds([courseId]);
-  };
-
-  const handleSaveScope = async () => {
-    if (scopePanelStaffId === null || scopePanelRole === null) return;
-    setScopeSaving(true);
-    setError('');
-    try {
-      const updated = await adminService.changeStaffRole(scopePanelStaffId, scopePanelRole, {
-        program_ids: scopePanelRole === 'program_coordinator' ? scopeProgramIds : undefined,
-        course_ids: scopePanelRole === 'course_coordinator' ? scopeCourseIds : undefined,
-      });
-      setStaff(prev => prev.map(s => (s.id === scopePanelStaffId ? { ...s, ...updated } : s)));
-      closeScopePanel();
-    } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to change role');
-    } finally {
-      setScopeSaving(false);
     }
   };
 
@@ -635,10 +581,11 @@ const AdminDashboard: React.FC = () => {
                       onChange={e => setEditForm(f => ({ ...f, role: e.target.value }))}>
                       <option value="student">Student</option>
                       <option value="teacher">Teacher</option>
-                      <option value="program_coordinator">Program Coordinator</option>
-                      <option value="course_coordinator">Course Coordinator</option>
                       <option value="admin">Admin</option>
                     </select>
+                    <p className="text-[11px] text-text-muted mt-1">
+                      Coordinator authority is granted separately - see "Manage Coordinator Authorities".
+                    </p>
                   </div>
                   <div className="flex items-center gap-2">
                     <input type="checkbox" id="edit-is-active" checked={editForm.is_active}
@@ -859,16 +806,24 @@ const AdminDashboard: React.FC = () => {
         </>
         )}
 
-        {/* Manage Staff Roles: promote/demote an existing teacher/coordinator */}
+        {/* Manage Coordinator Authorities: grant/revoke Program/Course Coordinator
+            authority on an existing teacher account. These are ADDITIVE flags, not a
+            role change - a teacher keeps every teacher capability (uploading, running
+            their own courses) plus whichever authority is toggled, and can hold both,
+            one, or neither independently. No scope panel here: authority alone doesn't
+            pin a coordinator to a single program/course under this model - see the
+            "Course Coordinators" section of the Program Coordinator Dashboard for
+            per-course Course Coordinator assignment, which stays independently scoped. */}
         {activeSection === 'staff-roles' && (
         <div>
           <div className="flex items-center gap-2 mb-4">
             <Users className="w-4 h-4 text-primary" />
-            <h3 className="text-base font-bold text-text-primary">Manage Staff Roles</h3>
+            <h3 className="text-base font-bold text-text-primary">Manage Coordinator Authorities</h3>
           </div>
           <p className="text-xs text-text-muted mb-4 max-w-2xl">
-            Program Coordinator and Course Coordinator are role changes on an existing account -
-            no new account or password is created. Pick a teacher/coordinator below and assign them a role.
+            Program Coordinator and Course Coordinator are ADDITIONAL authorities on top of the
+            teacher role, not a replacement for it - a teacher given one (or both) keeps every
+            teacher capability, plus the coordinator ones. No new account or password is created.
           </p>
 
           {staffLoading ? (
@@ -877,119 +832,71 @@ const AdminDashboard: React.FC = () => {
             </div>
           ) : staff.length === 0 ? (
             <div className="glass-panel rounded-2xl p-8 border border-border text-center text-sm text-text-muted">
-              No teacher/coordinator accounts yet. Create a teacher above, then promote them here.
+              No teacher accounts yet. Create one above, then grant coordinator authority here.
             </div>
           ) : (
             <div className="space-y-3">
-              {staff.map((member) => (
-                <div key={member.id} className="glass-panel rounded-2xl border border-border shadow-card overflow-hidden">
-                  <div className="p-5 flex items-center justify-between gap-4 flex-wrap">
-                    <div>
-                      <p className="font-bold text-text-primary">{member.full_name}</p>
-                      <p className="text-xs text-text-muted flex items-center gap-1 mt-0.5">
-                        <Mail className="w-3 h-3" /> {member.email}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <span className="text-xs font-bold px-2.5 py-1 rounded-full border whitespace-nowrap bg-primary-muted text-primary border-primary/20">
-                        {ROLE_LABELS[member.role]}
-                        {(member.role === 'program_coordinator' && member.program_name) ||
-                         (member.role === 'course_coordinator' && member.course_name)
-                          ? ` · ${member.role === 'program_coordinator' ? member.program_name : member.course_name}`
-                          : ''}
-                      </span>
-                      <select
-                        className="input-light text-xs py-1.5"
-                        value={member.role}
-                        disabled={changingRoleId === member.id}
-                        onChange={(e) => handleRoleSelect(member.id, e.target.value as StaffRole)}
-                      >
-                        <option value="teacher">Teacher</option>
-                        <option value="program_coordinator">Program Coordinator</option>
-                        <option value="course_coordinator">Course Coordinator</option>
-                      </select>
-                    </div>
+              {staff.map((member) => {
+                const isLegacyExclusiveRole = member.role !== 'teacher';
+                return (
+                <div key={member.id} className="glass-panel rounded-2xl p-5 border border-border shadow-card flex items-center justify-between gap-4 flex-wrap">
+                  <div>
+                    <p className="font-bold text-text-primary">{member.full_name}</p>
+                    <p className="text-xs text-text-muted flex items-center gap-1 mt-0.5">
+                      <Mail className="w-3 h-3" /> {member.email}
+                    </p>
                   </div>
-
-                  {scopePanelStaffId === member.id && scopePanelRole && (
-                    <div className="border-t border-border bg-primary-muted/30 p-5">
-                      <p className="text-xs font-bold text-text-secondary mb-3">
-                        Assign as {ROLE_LABELS[scopePanelRole]} - select {scopePanelRole === 'program_coordinator' ? 'a single program' : 'a single course'} to scope them to:
-                      </p>
-
-                      {scopeLoading ? (
-                        <p className="text-xs text-text-muted">Loading current scope...</p>
-                      ) : (
-                        <>
-                          <div className="flex flex-wrap gap-2 mb-4 max-h-48 overflow-y-auto">
-                            {scopePanelRole === 'program_coordinator' ? (
-                              programs.length === 0 ? (
-                                <p className="text-xs text-text-muted">No programs exist yet - create one below first.</p>
-                              ) : (
-                                programs.map((program) => (
-                                  <label
-                                    key={program.id}
-                                    className="flex items-center gap-2 text-xs bg-surface border border-border rounded-lg px-3 py-1.5 cursor-pointer"
-                                  >
-                                    <input
-                                      type="radio"
-                                      name="scope-program"
-                                      checked={scopeProgramIds.includes(program.id)}
-                                      onChange={() => selectScopeProgram(program.id)}
-                                    />
-                                    {program.name}{program.code ? ` (${program.code})` : ''}
-                                  </label>
-                                ))
-                              )
-                            ) : allCourses.length === 0 ? (
-                              <p className="text-xs text-text-muted">No courses exist yet.</p>
-                            ) : (
-                              allCourses.map((course) => (
-                                <label
-                                  key={course.id}
-                                  className="flex items-center gap-2 text-xs bg-surface border border-border rounded-lg px-3 py-1.5 cursor-pointer"
-                                >
-                                  <input
-                                    type="radio"
-                                    name="scope-course"
-                                    checked={scopeCourseIds.includes(course.id)}
-                                    onChange={() => selectScopeCourse(course.id)}
-                                  />
-                                  {course.name}{course.code ? ` (${course.code})` : ''}
-                                </label>
-                              ))
-                            )}
-                          </div>
-
-                          <div className="flex items-center gap-2">
-                            <button
-                              onClick={handleSaveScope}
-                              disabled={scopeSaving}
-                              className="btn-primary text-xs py-1.5 px-4 disabled:opacity-60"
-                            >
-                              {scopeSaving ? <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Saving...</> : 'Save'}
-                            </button>
-                            <button
-                              onClick={closeScopePanel}
-                              disabled={scopeSaving}
-                              className="text-xs font-semibold text-text-muted hover:text-text-secondary px-3 py-1.5"
-                            >
-                              Cancel
-                            </button>
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  )}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs font-bold px-2.5 py-1 rounded-full border whitespace-nowrap bg-primary-muted text-primary border-primary/20">
+                      {ROLE_LABELS[member.role] || member.role}
+                      {isLegacyExclusiveRole && (member.program_name || member.course_name)
+                        ? ` · ${member.program_name || member.course_name}`
+                        : ''}
+                    </span>
+                    {isLegacyExclusiveRole ? (
+                      <span className="text-xs text-text-muted italic" title="This account predates the additive-authority model and still holds an exclusive coordinator role. Move it back to Teacher via Edit User to grant additive authorities instead.">
+                        Legacy exclusive-role account - authorities not applicable
+                      </span>
+                    ) : (
+                      <>
+                        <label className={`flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 rounded-lg border cursor-pointer transition-all ${
+                          member.is_program_coordinator ? 'bg-primary text-white border-primary' : 'bg-background text-text-muted border-border hover:border-primary/40'
+                        } ${changingAuthorityKey === `${member.id}:is_program_coordinator` ? 'opacity-60' : ''}`}>
+                          <input
+                            type="checkbox"
+                            className="hidden"
+                            checked={member.is_program_coordinator}
+                            disabled={changingAuthorityKey === `${member.id}:is_program_coordinator`}
+                            onChange={(e) => handleToggleAuthority(member.id, 'is_program_coordinator', e.target.checked)}
+                          />
+                          Program Coordinator
+                        </label>
+                        <label className={`flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 rounded-lg border cursor-pointer transition-all ${
+                          member.is_course_coordinator ? 'bg-primary text-white border-primary' : 'bg-background text-text-muted border-border hover:border-primary/40'
+                        } ${changingAuthorityKey === `${member.id}:is_course_coordinator` ? 'opacity-60' : ''}`}>
+                          <input
+                            type="checkbox"
+                            className="hidden"
+                            checked={member.is_course_coordinator}
+                            disabled={changingAuthorityKey === `${member.id}:is_course_coordinator`}
+                            onChange={(e) => handleToggleAuthority(member.id, 'is_course_coordinator', e.target.checked)}
+                          />
+                          Course Coordinator
+                        </label>
+                      </>
+                    )}
+                  </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
         )}
 
-        {/* Manage Programs: admin-only CRUD over the Program grouping used to scope
-            Program Coordinators (and, through course-catalog membership, Course Coordinators). */}
+        {/* Manage Programs: admin-only CRUD over the Program grouping used by the
+            course catalog. Model-agnostic - unrelated to how coordinator authority
+            is granted (see "Manage Coordinator Authorities" above). */}
         {activeSection === 'programs' && (
         <div>
           <div className="flex items-center gap-2 mb-4">
@@ -997,7 +904,7 @@ const AdminDashboard: React.FC = () => {
             <h3 className="text-base font-bold text-text-primary">Manage Programs</h3>
           </div>
           <p className="text-xs text-text-muted mb-4 max-w-2xl">
-            Programs group courses (e.g. "Computer Science"). Program Coordinators are scoped to one or more programs above.
+            Programs group courses (e.g. "Computer Science") for the course catalog and reporting.
           </p>
 
           <div className="glass-panel rounded-2xl p-6 border border-border shadow-card mb-4">

@@ -5,7 +5,12 @@ interface User {
   id: number;
   email: string;
   full_name: string;
-  role: 'teacher' | 'student' | 'admin' | 'program_coordinator' | 'course_coordinator';
+  // Base identity - never changes on promotion. Program/Course Coordinator are
+  // ADDITIONAL authority flags below, not separate role values - a teacher given
+  // coordinator authority keeps every teacher capability plus the coordinator ones.
+  role: 'teacher' | 'student' | 'admin';
+  is_program_coordinator: boolean;
+  is_course_coordinator: boolean;
   avatar_url?: string | null;
 }
 

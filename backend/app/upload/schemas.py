@@ -10,6 +10,7 @@ class UploadedFileResponse(BaseModel):
     file_type: str
     file_size: int
     status: str
+    used_ocr: bool = False
     created_at: datetime
 
     class Config:

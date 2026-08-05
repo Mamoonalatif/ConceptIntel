@@ -1,4 +1,13 @@
-"""Retrieval for RAG: similarity search over content_chunks + hallucination guards.
+"""Retrieval for RAG: similarity search over content_chunks (stored as pgvector
+embeddings in Supabase Postgres) + hallucination guards.
+
+Similarity search runs as a real SQL query using pgvector's cosine-distance operator
+(ContentChunk.embedding.cosine_distance(...)) instead of pulling every course's chunks
+into Python and computing cosine similarity by hand - this pushes the nearest-neighbor
+search into the database itself, which is both faster and the correct approach as the
+number of chunks grows (a brute-force Python loop over thousands of rows doesn't scale;
+a SQL ORDER BY does, and can later take an ivfflat/hnsw index for free with no query
+changes).
 
 Three-layer hallucination mitigation, standard practice for grounded generation:
 1. Similarity threshold - a query with no good match returns nothing rather than
@@ -10,7 +19,6 @@ Three-layer hallucination mitigation, standard practice for grounded generation:
    chunks: answer ONLY from the provided context, and say so explicitly if the
    context doesn't cover the question.
 """
-import numpy as np
 from sqlalchemy.orm import Session
 
 from app.database.models import ContentChunk, Course, UploadedFile
@@ -36,13 +44,21 @@ def retrieve(
     similarity_threshold: float = SIMILARITY_THRESHOLD,
 ) -> list[dict]:
     """Top-k most relevant chunks for a course, each with a similarity score and a
-    human-readable citation. Brute-force over all of a course's chunks - at this
-    scale (a few hundred chunks per course) that's milliseconds; no ANN index needed."""
-    chunks = db.query(ContentChunk).filter(ContentChunk.course_id == course_id).all()
-    if not chunks:
+    human-readable citation. pgvector's cosine_distance() runs the nearest-neighbor
+    search inside Postgres, ordered nearest-first - only the top_k rows are ever
+    pulled into Python, regardless of how many chunks the course has."""
+    query_vec = embed_query(query)
+
+    rows = (
+        db.query(ContentChunk, ContentChunk.embedding.cosine_distance(query_vec).label("distance"))
+        .filter(ContentChunk.course_id == course_id)
+        .order_by("distance")
+        .limit(top_k)
+        .all()
+    )
+    if not rows:
         return []
 
-    query_vec = np.array(embed_query(query), dtype=np.float32)
     course = db.query(Course).filter(Course.id == course_id).first()
     course_name = course.name if course else "this course"
     file_names = {
@@ -50,19 +66,14 @@ def retrieve(
         for f in db.query(UploadedFile).filter(UploadedFile.course_id == course_id).all()
     }
 
-    scored = []
-    for chunk in chunks:
-        vec = np.array(chunk.embedding, dtype=np.float32)
-        score = float(np.dot(query_vec, vec))  # both pre-normalized -> this is cosine similarity
-        if score >= similarity_threshold:
-            scored.append((score, chunk))
-    scored.sort(key=lambda pair: pair[0], reverse=True)
-
     results = []
-    for score, chunk in scored[:top_k]:
+    for chunk, distance in rows:
+        similarity = 1.0 - float(distance)  # cosine_distance = 1 - cosine_similarity
+        if similarity < similarity_threshold:
+            continue
         results.append({
             "text": chunk.text,
-            "score": score,
+            "score": similarity,
             "source_type": chunk.source_type,
             "citation": build_citation(course_name, file_names.get(chunk.file_id, "unknown file"), chunk),
         })

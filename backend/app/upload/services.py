@@ -6,20 +6,33 @@ import httpx
 from pathlib import Path
 from app.config import settings
 
+IMAGE_TYPES = {"jpg", "jpeg", "png"}
 
-def extract_text_from_file(filepath: Path, file_type: str) -> str:
-    """Extracts raw text content from PDF, DOCX, PPTX, or TXT file."""
+
+def extract_text_from_file(filepath: Path, file_type: str) -> tuple[str, bool]:
+    """
+    Extracts raw text content from PDF, DOCX, PPTX, TXT, or an image file.
+    Returns (text, used_ocr). For PDFs, any page with no usable text layer (i.e. a
+    scanned page) is rasterized and OCR'd automatically - see
+    app/content_processing/ocr_service.py (EasyOCR + PyMuPDF, pure pip install, no
+    external binary needed). Plain image uploads (jpg/png) are always OCR'd in full.
+    """
     file_type = file_type.lower()
     text = ""
-    
+    used_ocr = False
+
     if not filepath.exists():
         raise FileNotFoundError(f"File not found at path: {filepath}")
 
     if file_type == "pdf":
-        reader = pypdf.PdfReader(filepath)
-        for page in reader.pages:
-            text += page.extract_text() or ""
-        
+        from app.content_processing.ocr_service import extract_pdf_text_with_ocr_fallback
+        text, used_ocr = extract_pdf_text_with_ocr_fallback(filepath)
+
+    elif file_type in IMAGE_TYPES:
+        from app.content_processing.ocr_service import ocr_image_file
+        text = ocr_image_file(filepath)
+        used_ocr = True
+
     elif file_type == "docx":
         doc = docx.Document(filepath)
         text_list = []
@@ -27,7 +40,7 @@ def extract_text_from_file(filepath: Path, file_type: str) -> str:
             if paragraph.text:
                 text_list.append(paragraph.text)
         text = "\n".join(text_list)
-        
+
     elif file_type in ("pptx", "ppt"):
         try:
             prs = pptx.Presentation(filepath)
@@ -45,19 +58,21 @@ def extract_text_from_file(filepath: Path, file_type: str) -> str:
                 )
             raise ValueError(f"Failed to parse PowerPoint slides: {str(e)}")
 
-        
     elif file_type == "txt":
         with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
             text = f.read()
-            
+
     else:
         raise ValueError(f"Unsupported file type: {file_type}")
-        
-    return clean_extracted_text(text)
+
+    return clean_extracted_text(text), used_ocr
 
 
 def clean_extracted_text(text: str) -> str:
-    """Cleans extracted text by removing redundant spacing and formatting."""
+    """Cleans extracted text by removing redundant spacing and formatting. This is
+    the lightweight cleanup applied at extraction time; app/rag/cleaning.py's
+    clean_for_rag() does a more thorough pass (Unicode normalization, de-hyphenation,
+    boilerplate stripping) downstream, for both RAG chunking and Kimi structuring."""
     # Replace multiple spaces with a single space
     text = re.sub(r"[ \t]+", " ", text)
     # Replace three or more newlines with double newline
@@ -68,7 +83,10 @@ def clean_extracted_text(text: str) -> str:
 
 
 def chunk_text(text: str, chunk_size: int = 3000, overlap: int = 300) -> list[str]:
-    """Splits a long string of text into smaller overlapping chunks."""
+    """Naive char-count chunker - kept only for the legacy direct-write extraction
+    path (knowledge_graph/services.py's trigger_concept_extraction). The reviewed
+    pipeline (content_processing) uses app/rag/chunking.py's token-aware chunker
+    instead, for better chunk boundaries."""
     chunks = []
     start = 0
     while start < len(text):
@@ -101,6 +119,10 @@ def get_content_type(extension: str) -> str:
         return "image/webp"
     return "application/octet-stream"
 
+
+# ─────────────────────────────────────────────
+#  STORAGE BACKENDS - AWS S3 (optional)
+# ─────────────────────────────────────────────
 
 def _s3_client():
     import boto3
@@ -152,6 +174,10 @@ def delete_file_from_s3(s3_ref: str) -> None:
         print(f"Warning: Failed to delete S3 object {s3_ref}: {e}")
 
 
+# ─────────────────────────────────────────────
+#  STORAGE BACKENDS - Supabase Storage (optional)
+# ─────────────────────────────────────────────
+
 def _supabase_headers(content_type: str = None) -> dict:
     headers = {
         "Authorization": f"Bearer {settings.SUPABASE_KEY}",
@@ -189,8 +215,13 @@ def upload_file_to_supabase(file_content: bytes, filename: str, content_type: st
     headers = _supabase_headers(content_type)
     headers["x-upsert"] = "true"  # Overwrite if it already exists
 
+    # 30s was too short for real-world files near MAX_FILE_SIZE (25MB) - a 10MB PDF
+    # over a normal connection can genuinely take longer than that to upload. 180s
+    # comfortably covers the full allowed size; connect timeout stays short (10s)
+    # so a genuinely unreachable Supabase project still fails fast.
+    upload_timeout = httpx.Timeout(180.0, connect=10.0)
     with httpx.Client() as client:
-        response = client.post(url, content=file_content, headers=headers, timeout=30.0)
+        response = client.post(url, content=file_content, headers=headers, timeout=upload_timeout)
 
     if response.status_code not in (200, 201):
         raise Exception(f"Supabase storage upload failed with status {response.status_code}: {response.text}")
@@ -202,8 +233,9 @@ def download_file_from_supabase(ref: str) -> bytes:
     """Authenticated download from a private Supabase bucket."""
     bucket, key = _parse_supabase_ref(ref)
     url = f"{settings.SUPABASE_URL}/storage/v1/object/{bucket}/{key}"
+    download_timeout = httpx.Timeout(180.0, connect=10.0)
     with httpx.Client() as client:
-        response = client.get(url, headers=_supabase_headers(), timeout=30.0)
+        response = client.get(url, headers=_supabase_headers(), timeout=download_timeout)
     if response.status_code != 200:
         raise Exception(f"Supabase storage download failed with status {response.status_code}: {response.text}")
     return response.content
@@ -275,4 +307,3 @@ def delete_stored_file(file_ref: str) -> None:
                 filepath.unlink()
             except Exception as e:
                 print(f"Warning: Failed to delete physical file {filepath}: {str(e)}")
-
