@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { AppShell, type NavItem } from '../components/AppShell';
 import { ChangePasswordModal } from '../components/ChangePasswordModal';
+import { Avatar } from '../components/Avatar';
 import { StudyIllustration, TeachIllustration } from '../components/illustrations';
+import { authService } from '../services/api';
 import {
   User,
   Mail,
@@ -15,6 +17,9 @@ import {
   KeyRound,
   Check,
   ArrowLeft,
+  Camera,
+  Trash2,
+  Loader2,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
@@ -76,25 +81,6 @@ const ROLE_META: Record<string, { label: string; icon: React.FC<{ className?: st
   },
 };
 
-/* Avatar with initials fallback — same gradient/shape as the AppShell footer avatar. */
-const UserAvatar: React.FC<{ name: string; size?: 'md' | 'lg' }> = ({ name, size = 'md' }) => {
-  const initials = (name || 'U')
-    .split(' ')
-    .map(n => n[0])
-    .filter(Boolean)
-    .slice(0, 2)
-    .join('')
-    .toUpperCase();
-
-  const sizeCls = size === 'lg' ? 'w-20 h-20 text-2xl rounded-2xl' : 'w-12 h-12 text-base rounded-xl';
-
-  return (
-    <div className={`${sizeCls} bg-gradient-to-tr from-primary to-secondary flex items-center justify-center text-white font-extrabold shadow-glow shrink-0`}>
-      {initials}
-    </div>
-  );
-};
-
 /* Info Row */
 const InfoRow: React.FC<{ label: string; value: string; icon: React.FC<{ className?: string }> }> = ({ label, value, icon: Icon }) => (
   <div className="flex items-center gap-4 p-4 bg-background border border-border rounded-xl">
@@ -109,9 +95,41 @@ const InfoRow: React.FC<{ label: string; value: string; icon: React.FC<{ classNa
 );
 
 const ProfilePage: React.FC = () => {
-  const { user } = useAuth();
+  const { user, refreshUser } = useAuth();
   const navigate = useNavigate();
   const [showChangePassword, setShowChangePassword] = useState(false);
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const [photoError, setPhotoError] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handlePhotoSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setPhotoError('');
+    setPhotoBusy(true);
+    try {
+      await authService.uploadAvatar(file);
+      await refreshUser();
+    } catch (err: any) {
+      setPhotoError(err.response?.data?.detail || 'Failed to upload photo.');
+    } finally {
+      setPhotoBusy(false);
+    }
+  };
+
+  const handleRemovePhoto = async () => {
+    setPhotoError('');
+    setPhotoBusy(true);
+    try {
+      await authService.deleteAvatar();
+      await refreshUser();
+    } catch (err: any) {
+      setPhotoError(err.response?.data?.detail || 'Failed to remove photo.');
+    } finally {
+      setPhotoBusy(false);
+    }
+  };
 
   if (!user) return null;
 
@@ -154,7 +172,7 @@ const ProfilePage: React.FC = () => {
           <div className="flex flex-col-reverse sm:flex-row items-center sm:items-center gap-6">
             <div className="flex-1 w-full text-center sm:text-left">
               <div className="flex flex-col sm:flex-row items-center sm:items-center gap-4">
-                <UserAvatar name={user.full_name} size="lg" />
+                <Avatar userId={user.id} hasAvatar={!!user.avatar_url} version={user.avatar_url} fullName={user.full_name} size="lg" className="shrink-0" />
                 <div className="min-w-0">
                   <h1 className="text-xl font-extrabold text-text-primary truncate">{user.full_name}</h1>
                   <p className="text-sm text-text-secondary flex items-center justify-center sm:justify-start gap-1.5 mt-0.5">
@@ -209,10 +227,35 @@ const ProfilePage: React.FC = () => {
               <p className="text-xs font-bold text-text-muted uppercase tracking-wider">Capabilities</p>
               {roleMeta.capabilities.map(cap => (
                 <div key={cap} className="flex items-center gap-2 text-xs text-text-secondary">
-                  <Check className="w-3.5 h-3.5 text-emerald-500 shrink-0" /> {cap}
+                  <Check className="w-3.5 h-3.5 text-primary shrink-0" /> {cap}
                 </div>
               ))}
             </div>
+          </div>
+        </div>
+
+        {/* Profile Photo Section */}
+        <div className="glass-panel rounded-2xl p-6 border border-border shadow-card">
+          <div className="flex items-center gap-2 mb-1">
+            <Camera className="w-4 h-4 text-primary dark:text-primary-light" />
+            <h2 className="text-base font-bold text-text-primary">Profile Photo</h2>
+          </div>
+          <p className="text-sm text-text-secondary mb-4">
+            Upload a photo so teachers and students recognize you across the platform.
+          </p>
+          {photoError && <p className="text-sm text-rose-500 mb-3">{photoError}</p>}
+          <div className="flex items-center gap-3">
+            <button onClick={() => fileInputRef.current?.click()} disabled={photoBusy} className="btn-primary disabled:opacity-60">
+              {photoBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Camera className="w-4 h-4" />}
+              {user.avatar_url ? 'Change Photo' : 'Upload Photo'}
+            </button>
+            {user.avatar_url && (
+              <button onClick={handleRemovePhoto} disabled={photoBusy} className="btn-ghost text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 disabled:opacity-60">
+                <Trash2 className="w-4 h-4" />
+                Remove
+              </button>
+            )}
+            <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handlePhotoSelected} />
           </div>
         </div>
 

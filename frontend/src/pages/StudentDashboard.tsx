@@ -198,7 +198,7 @@ const StudentDashboard: React.FC = () => {
           </div>
         )}
         {success && (
-          <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 dark:bg-emerald-500/10 dark:border-emerald-500/30 dark:text-emerald-400 rounded-xl p-4 flex items-center gap-3 mb-6 text-sm animate-fade-in">
+          <div className="bg-primary-muted border border-primary/20 text-primary rounded-xl p-4 flex items-center gap-3 mb-6 text-sm animate-fade-in">
             <CheckCircle className="w-5 h-5 shrink-0" />
             <span>{success}</span>
           </div>

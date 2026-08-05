@@ -265,6 +265,10 @@ const AdminDashboard: React.FC = () => {
     try {
       const data = await adminService.createTeacher({ email: newTeacherEmail, full_name: newTeacherName.trim() });
       setCredentials({ email: data.email, temporary_password: data.temporary_password });
+      // Show up in the users/staff lists immediately - no need to wait on a
+      // refetch (or a manual refresh) to see the account that was just created.
+      setUsers(prev => [{ id: data.id, email: data.email, full_name: data.full_name, role: data.role, is_active: true }, ...prev]);
+      setStaff(prev => [{ id: data.id, email: data.email, full_name: data.full_name, role: data.role as StaffRole }, ...prev]);
       setNewTeacherEmail('');
       setNewTeacherName('');
     } catch (err: any) {
@@ -282,8 +286,8 @@ const AdminDashboard: React.FC = () => {
     if (role === 'teacher') {
       setChangingRoleId(staffId);
       try {
-        await adminService.changeStaffRole(staffId, role);
-        fetchStaff();
+        const updated = await adminService.changeStaffRole(staffId, role);
+        setStaff(prev => prev.map(s => (s.id === staffId ? { ...s, ...updated } : s)));
       } catch (err: any) {
         setError(err.response?.data?.detail || 'Failed to change role');
       } finally {
@@ -370,9 +374,12 @@ const AdminDashboard: React.FC = () => {
     setUpdatingUser(true);
     setError('');
     try {
-      await adminService.updateUser(editingUser.id, editForm);
+      const updated = await adminService.updateUser(editingUser.id, editForm);
+      // Patch the row in place instead of waiting on a full refetch - the
+      // change shows up instantly rather than after a second round trip.
+      setUsers(prev => prev.map(u => (u.id === updated.id ? { ...u, ...updated } : u)));
+      setStaff(prev => prev.map(s => (s.id === updated.id ? { ...s, ...updated } : s)));
       setEditingUser(null);
-      fetchUsers();
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to update user profile');
     } finally {
@@ -386,8 +393,10 @@ const AdminDashboard: React.FC = () => {
     setError('');
     try {
       await adminService.deleteUser(userId);
-      fetchUsers();
-      fetchStaff();
+      // Remove the row immediately - no need to wait on a full refetch to
+      // see the deletion reflected.
+      setUsers(prev => prev.filter(u => u.id !== userId));
+      setStaff(prev => prev.filter(s => s.id !== userId));
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to delete user');
     } finally {
@@ -415,12 +424,12 @@ const AdminDashboard: React.FC = () => {
     setScopeSaving(true);
     setError('');
     try {
-      await adminService.changeStaffRole(scopePanelStaffId, scopePanelRole, {
+      const updated = await adminService.changeStaffRole(scopePanelStaffId, scopePanelRole, {
         program_ids: scopePanelRole === 'program_coordinator' ? scopeProgramIds : undefined,
         course_ids: scopePanelRole === 'course_coordinator' ? scopeCourseIds : undefined,
       });
+      setStaff(prev => prev.map(s => (s.id === scopePanelStaffId ? { ...s, ...updated } : s)));
       closeScopePanel();
-      fetchStaff();
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to change role');
     } finally {
@@ -435,13 +444,13 @@ const AdminDashboard: React.FC = () => {
 
     setCreatingProgram(true);
     try {
-      await programService.create({
+      const created = await programService.create({
         name: newProgramName.trim(),
         code: newProgramCode.trim() || undefined,
       });
+      setPrograms(prev => [...prev, created]);
       setNewProgramName('');
       setNewProgramCode('');
-      fetchPrograms();
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to create program');
     } finally {
@@ -454,7 +463,7 @@ const AdminDashboard: React.FC = () => {
     setError('');
     try {
       await programService.delete(programId);
-      fetchPrograms();
+      setPrograms(prev => prev.filter(p => p.id !== programId));
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to delete program');
     } finally {
@@ -499,7 +508,7 @@ const AdminDashboard: React.FC = () => {
       active: activeSection === 'requests',
       onClick: () => setActiveSection('requests'),
       badge: pendingRequests.length > 0 ? (
-        <span className="bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-500/10 dark:text-amber-400 dark:border-amber-500/30 text-[10px] font-bold px-1.5 py-0.5 rounded-full">
+        <span className="bg-primary-muted text-primary border border-primary/20 text-[10px] font-bold px-1.5 py-0.5 rounded-full">
           {pendingRequests.length}
         </span>
       ) : undefined,
@@ -532,7 +541,7 @@ const AdminDashboard: React.FC = () => {
               onClick={handleExportCsv}
               disabled={exportingCsv}
               title="Export currently visible users as CSV"
-              className="flex items-center gap-2 text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 dark:text-emerald-400 dark:bg-emerald-500/10 dark:border-emerald-500/30 dark:hover:bg-emerald-500/20 px-4 py-2 rounded-xl transition-all disabled:opacity-60"
+              className="flex items-center gap-2 text-xs font-bold text-primary bg-primary-muted border border-primary/20 hover:bg-primary/10 px-4 py-2 rounded-xl transition-all disabled:opacity-60"
             >
               {exportingCsv ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
               Export {filteredUsers.length} rows
@@ -551,7 +560,7 @@ const AdminDashboard: React.FC = () => {
                     : 'bg-surface text-text-secondary border-border hover:border-primary/40 hover:text-primary'
                 }`}
               >
-                {tab === 'all' ? 'All Users' : tab === 'students' ? '🎓 Students' : '🏫 Teachers & Staff'}
+                {tab === 'all' ? 'All Users' : tab === 'students' ? 'Students' : 'Teachers & Staff'}
               </button>
             ))}
           </div>
@@ -592,8 +601,8 @@ const AdminDashboard: React.FC = () => {
               className="input-light w-full sm:w-40"
             >
               <option value="">All Statuses</option>
-              <option value="active">✅ Active</option>
-              <option value="suspended">🚫 Suspended</option>
+              <option value="active">Active</option>
+              <option value="suspended">Suspended</option>
             </select>
           </div>
 
@@ -664,16 +673,8 @@ const AdminDashboard: React.FC = () => {
               {filteredUsers.map(u => (
                 <div key={u.id} className="glass-panel rounded-xl p-4 border border-border shadow-card flex items-center justify-between gap-4 flex-wrap hover:border-primary/20 transition-all">
                   <div className="flex items-center gap-3 min-w-0">
-                    <div className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${
-                      u.role === 'student' ? 'bg-emerald-100 dark:bg-emerald-500/15' :
-                      u.role === 'admin' ? 'bg-purple-100 dark:bg-purple-500/15' :
-                      'bg-blue-100 dark:bg-blue-500/15'
-                    }`}>
-                      <span className={`font-bold text-sm ${
-                        u.role === 'student' ? 'text-emerald-700 dark:text-emerald-400' :
-                        u.role === 'admin' ? 'text-purple-700 dark:text-purple-400' :
-                        'text-blue-700 dark:text-blue-400'
-                      }`}>{u.full_name?.charAt(0)?.toUpperCase() || '?'}</span>
+                    <div className="w-9 h-9 rounded-full flex items-center justify-center shrink-0 bg-primary-muted">
+                      <span className="font-bold text-sm text-primary">{u.full_name?.charAt(0)?.toUpperCase() || '?'}</span>
                     </div>
                     <div className="min-w-0">
                       <p className="font-semibold text-text-primary text-sm truncate">{u.full_name}</p>
@@ -683,12 +684,7 @@ const AdminDashboard: React.FC = () => {
                     </div>
                   </div>
                   <div className="flex items-center gap-2 flex-wrap shrink-0">
-                    <span className={`text-xs font-bold px-2.5 py-1 rounded-full border whitespace-nowrap ${
-                      u.role === 'admin' ? 'bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-500/10 dark:text-purple-400 dark:border-purple-500/30'
-                      : u.role === 'teacher' || u.role === 'program_coordinator' || u.role === 'course_coordinator'
-                        ? 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-500/10 dark:text-blue-400 dark:border-blue-500/30'
-                        : 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/30'
-                    }`}>
+                    <span className="text-xs font-bold px-2.5 py-1 rounded-full border whitespace-nowrap bg-primary-muted text-primary border-primary/20">
                       {ROLE_LABELS[u.role] || u.role}
                     </span>
                     {!u.is_active && (
@@ -697,7 +693,7 @@ const AdminDashboard: React.FC = () => {
                       </span>
                     )}
                     <button onClick={() => handleOpenUserEdit(u)}
-                      className="flex items-center gap-1.5 text-xs font-bold text-blue-700 bg-blue-50 border border-blue-200 hover:bg-blue-100 dark:text-blue-400 dark:bg-blue-500/10 dark:border-blue-500/30 px-3 py-1.5 rounded-lg transition-all">
+                      className="flex items-center gap-1.5 text-xs font-bold text-primary bg-primary-muted border border-primary/20 hover:bg-primary/10 px-3 py-1.5 rounded-lg transition-all">
                       <Edit className="w-3.5 h-3.5" /> Edit
                     </button>
                     <button onClick={() => handleDeleteUserAccount(u.id)} disabled={deletingUserId === u.id}
@@ -730,7 +726,7 @@ const AdminDashboard: React.FC = () => {
 
           {/* Event type filter pills */}
           <div className="flex gap-2 mb-5 flex-wrap">
-            {([['', 'All Events'], ['registration', '👤 Registrations'], ['enrollment', '📚 Enrollments'], ['request', '📋 Requests'], ['course', '🏛️ Courses']] as const).map(([val, label]) => (
+            {([['', 'All Events'], ['registration', 'Registrations'], ['enrollment', 'Enrollments'], ['request', 'Requests'], ['course', 'Courses']] as const).map(([val, label]) => (
               <button key={val} onClick={() => setLogsEventFilter(val)}
                 className={`px-3.5 py-1.5 rounded-full text-xs font-bold border transition-all ${
                   logsEventFilter === val
@@ -749,17 +745,14 @@ const AdminDashboard: React.FC = () => {
           ) : (
             <div className="space-y-2">
               {logs.map((log, i) => {
-                const eventColors: Record<string,string> = {
-                  registration: 'bg-teal-50 text-teal-700 border-teal-200 dark:bg-teal-500/10 dark:text-teal-400 dark:border-teal-500/30',
-                  enrollment:   'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-500/10 dark:text-blue-400 dark:border-blue-500/30',
-                  request:      'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-500/10 dark:text-amber-400 dark:border-amber-500/30',
-                  course:       'bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-500/10 dark:text-violet-400 dark:border-violet-500/30',
+                const eventIcons: Record<string, React.FC<{ className?: string }>> = {
+                  registration: UserPlus, enrollment: BookOpen, request: ClipboardList, course: GraduationCap,
                 };
-                const eventIcons: Record<string,string> = { registration:'👤', enrollment:'📚', request:'📋', course:'🏛️' };
+                const EventIcon = eventIcons[log.event_type] || Users;
                 return (
                   <div key={i} className="glass-panel rounded-xl px-4 py-3 border border-border shadow-card flex items-start gap-3 hover:border-primary/20 transition-all">
-                    <div className={`mt-0.5 w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-sm border ${eventColors[log.event_type] || 'bg-surface border-border'}`}>
-                      {eventIcons[log.event_type] || '•'}
+                    <div className="mt-0.5 w-7 h-7 rounded-full flex items-center justify-center shrink-0 border bg-primary-muted border-primary/20 text-primary">
+                      <EventIcon className="w-3.5 h-3.5" />
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold text-text-primary leading-snug">{log.description}</p>
@@ -772,14 +765,14 @@ const AdminDashboard: React.FC = () => {
                       </p>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border whitespace-nowrap ${eventColors[log.event_type] || 'bg-surface border-border text-text-muted'}`}>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border whitespace-nowrap bg-primary-muted text-primary border-primary/20">
                         {log.event_type}
                       </span>
                       {log.status && (
                         <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border whitespace-nowrap ${
-                          log.status === 'approved' ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/30'
-                          : log.status === 'rejected' ? 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-500/10 dark:text-rose-400 dark:border-rose-500/30'
-                          : 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-500/10 dark:text-amber-400 dark:border-amber-500/30'
+                          log.status === 'rejected'
+                            ? 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-500/10 dark:text-rose-400 dark:border-rose-500/30'
+                            : 'bg-primary-muted text-primary border-primary/20'
                         }`}>{log.status}</span>
                       )}
                     </div>
@@ -794,9 +787,9 @@ const AdminDashboard: React.FC = () => {
         {activeSection === 'create-teacher' && (
         <>
         {credentials && (
-          <div className="glass-panel rounded-2xl p-6 border border-emerald-200 dark:border-emerald-500/30 bg-emerald-50/40 dark:bg-emerald-500/10 shadow-card animate-fade-up">
+          <div className="glass-panel rounded-2xl p-6 border border-primary/30 bg-primary-muted/60 shadow-card animate-fade-up">
             <div className="flex items-center gap-2 mb-3">
-              <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+              <CheckCircle2 className="w-5 h-5 text-primary" />
               <h3 className="text-base font-bold text-text-primary">Teacher account created</h3>
             </div>
             <p className="text-sm text-text-secondary mb-3">
@@ -811,7 +804,7 @@ const AdminDashboard: React.FC = () => {
                 <span className="text-text-muted">Temp Password: </span>
                 <span className="font-mono font-bold text-text-primary select-all">{credentials.temporary_password}</span>
                 <button onClick={copyPassword} className="ml-auto text-text-muted hover:text-primary" title="Copy password">
-                  {copied ? <Check className="w-4 h-4 text-emerald-600 dark:text-emerald-400" /> : <Copy className="w-4 h-4" />}
+                  {copied ? <Check className="w-4 h-4 text-primary" /> : <Copy className="w-4 h-4" />}
                 </button>
               </div>
             </div>
@@ -1079,7 +1072,7 @@ const AdminDashboard: React.FC = () => {
             <ClipboardList className="w-4 h-4 text-primary" />
             <h3 className="text-base font-bold text-text-primary">Teacher Access Requests</h3>
             {pendingRequests.length > 0 && (
-              <span className="bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-500/10 dark:text-amber-400 dark:border-amber-500/30 text-xs font-bold px-2 py-0.5 rounded-full">
+              <span className="bg-primary-muted text-primary border border-primary/20 text-xs font-bold px-2 py-0.5 rounded-full">
                 {pendingRequests.length} pending
               </span>
             )}
@@ -1111,7 +1104,7 @@ const AdminDashboard: React.FC = () => {
                         <button
                           onClick={() => handleApprove(req.id)}
                           disabled={processingId === req.id}
-                          className="flex items-center gap-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 dark:text-emerald-400 dark:bg-emerald-500/10 dark:border-emerald-500/30 dark:hover:bg-emerald-500/20 px-3 py-1.5 rounded-lg transition-all disabled:opacity-60"
+                          className="flex items-center gap-1.5 text-xs font-bold text-primary bg-primary-muted border border-primary/20 hover:bg-primary/10 px-3 py-1.5 rounded-lg transition-all disabled:opacity-60"
                         >
                           <CheckCircle2 className="w-3.5 h-3.5" /> Approve
                         </button>
@@ -1126,7 +1119,7 @@ const AdminDashboard: React.FC = () => {
                     ) : (
                       <span className={`text-xs font-bold px-2.5 py-1 rounded-full border ${
                         req.status === 'approved'
-                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/30'
+                          ? 'bg-primary-muted text-primary border-primary/20'
                           : 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-500/10 dark:text-rose-400 dark:border-rose-500/30'
                       }`}>
                         {req.status}

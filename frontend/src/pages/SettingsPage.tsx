@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { AppShell, type NavItem } from '../components/AppShell';
 import { useAuth } from '../context/AuthContext';
 import { ChangePasswordModal } from '../components/ChangePasswordModal';
+import { ProfilePhotoEditor } from '../components/ProfilePhotoEditor';
 import { notificationPreferencesService, type NotificationPreferences } from '../services/api';
 import { ArrowLeft, Settings, RefreshCw, AlertCircle, KeyRound, Mail } from 'lucide-react';
 
@@ -85,6 +86,7 @@ const SettingsPage: React.FC = () => {
   const [error, setError] = useState('');
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [showChangePassword, setShowChangePassword] = useState(false);
+  const [photoError, setPhotoError] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -137,16 +139,14 @@ const SettingsPage: React.FC = () => {
         {user && (
           <div className="glass-panel rounded-2xl p-6 border border-border shadow-card">
             <h2 className="text-base font-bold text-text-primary mb-4">Profile</h2>
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 rounded-xl bg-gradient-to-tr from-primary to-secondary flex items-center justify-center text-white font-extrabold shrink-0">
-                {(user.full_name || 'U')
-                  .split(' ')
-                  .map((n) => n[0])
-                  .filter(Boolean)
-                  .slice(0, 2)
-                  .join('')
-                  .toUpperCase()}
+            {photoError && (
+              <div className="flex items-center gap-2 text-xs font-medium text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-500/30 rounded-lg px-3 py-2 mb-3">
+                <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                {photoError}
               </div>
+            )}
+            <div className="flex items-center gap-4">
+              <ProfilePhotoEditor size="md" badgeSizePx={20} onError={setPhotoError} />
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-semibold text-text-primary truncate">{user.full_name}</p>
                 <p className="text-xs text-text-secondary flex items-center gap-1.5 mt-0.5 truncate">

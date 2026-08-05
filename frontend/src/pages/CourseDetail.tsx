@@ -253,7 +253,7 @@ const CourseDetail: React.FC = () => {
           </div>
         )}
         {success && (
-          <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 dark:bg-emerald-500/10 dark:border-emerald-500/30 dark:text-emerald-400 rounded-xl p-4 mb-5 text-sm flex items-center gap-2 animate-fade-in">
+          <div className="bg-primary-muted border border-primary/20 text-primary rounded-xl p-4 mb-5 text-sm flex items-center gap-2 animate-fade-in">
             <CheckCircle2 className="w-4 h-4 shrink-0" />
             <span>{success}</span>
           </div>
@@ -303,16 +303,16 @@ const CourseDetail: React.FC = () => {
             {/* Quick Stats Row */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 pt-4 border-t border-border">
               {(isTeacher ? [
-                { label: 'Files Uploaded', value: files.length, icon: FileText, color: 'text-primary', bg: 'bg-primary-muted' },
-                { label: 'Processed', value: completedFiles, icon: CheckCircle2, color: 'text-emerald-600 dark:text-emerald-400', bg: 'bg-emerald-50 dark:bg-emerald-500/10' },
-                { label: 'Students', value: students.length, icon: Users, color: 'text-secondary', bg: 'bg-secondary-muted' },
-                { label: 'Avg Progress', value: `${avgProgress}%`, icon: TrendingUp, color: 'text-amber-600 dark:text-amber-400', bg: 'bg-amber-50 dark:bg-amber-500/10' },
+                { label: 'Files Uploaded', value: files.length, icon: FileText },
+                { label: 'Processed', value: completedFiles, icon: CheckCircle2 },
+                { label: 'Students', value: students.length, icon: Users },
+                { label: 'Avg Progress', value: `${avgProgress}%`, icon: TrendingUp },
               ] : [
-                { label: 'My Progress', value: myProgress !== null ? `${myProgress}%` : '—', icon: TrendingUp, color: 'text-amber-600 dark:text-amber-400', bg: 'bg-amber-50 dark:bg-amber-500/10' },
-              ]).map(({ label, value, icon: Icon, color, bg }) => (
+                { label: 'My Progress', value: myProgress !== null ? `${myProgress}%` : '—', icon: TrendingUp },
+              ]).map(({ label, value, icon: Icon }) => (
                 <div key={label} className="flex items-center gap-3">
-                  <div className={`w-9 h-9 ${bg} rounded-xl flex items-center justify-center`}>
-                    <Icon className={`w-4.5 h-4.5 ${color}`} />
+                  <div className="w-9 h-9 bg-primary-muted rounded-xl flex items-center justify-center">
+                    <Icon className="w-4.5 h-4.5 text-primary" />
                   </div>
                   <div>
                     <p className="text-xs text-text-muted">{label}</p>
@@ -347,7 +347,7 @@ const CourseDetail: React.FC = () => {
                     id="rebuild-graph-btn"
                     onClick={handleRebuildGraph}
                     disabled={rebuilding || completedFiles === 0}
-                    className="flex items-center gap-1.5 px-3.5 py-1.5 bg-amber-50 border border-amber-200 text-amber-700 hover:bg-amber-100 dark:bg-amber-500/10 dark:border-amber-500/30 dark:text-amber-400 dark:hover:bg-amber-500/20 font-semibold rounded-lg text-xs transition-all disabled:opacity-50"
+                    className="flex items-center gap-1.5 px-3.5 py-1.5 bg-primary-muted border border-primary/20 text-primary hover:bg-primary/10 font-semibold rounded-lg text-xs transition-all disabled:opacity-50"
                     title="Extract concepts from all completed files"
                   >
                     {rebuilding ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
@@ -422,8 +422,8 @@ const CourseDetail: React.FC = () => {
                           </td>
                           <td className="py-3.5 px-3">
                             <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold ${
-                              file.status === 'Completed' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/30' :
-                              file.status === 'Processing' ? 'bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-500/10 dark:text-blue-400 dark:border-blue-500/30' :
+                              file.status === 'Completed' ? 'bg-primary-muted text-primary border border-primary/20' :
+                              file.status === 'Processing' ? 'bg-primary-muted text-primary border border-primary/20' :
                               file.status === 'Failed'    ? 'bg-red-50 text-red-600 border border-red-200 dark:bg-red-500/10 dark:text-red-400 dark:border-red-500/30' :
                               'bg-card text-text-secondary border border-border'
                             }`}>
@@ -445,7 +445,7 @@ const CourseDetail: React.FC = () => {
                               <>
                                 <button
                                   onClick={() => handleReprocessFile(file.id)}
-                                  className="inline-flex p-1.5 bg-background hover:bg-amber-50 border border-border hover:border-amber-300 text-text-muted hover:text-amber-600 dark:hover:bg-amber-500/10 dark:hover:border-amber-500/30 dark:hover:text-amber-400 rounded-lg transition-all"
+                                  className="inline-flex p-1.5 bg-background hover:bg-primary-muted border border-border hover:border-primary/30 text-text-muted hover:text-primary rounded-lg transition-all"
                                   title="Re-extract concepts"
                                 >
                                   <Play className="w-3.5 h-3.5" />

@@ -22,9 +22,9 @@ interface CourseInstance {
 }
 
 const graphBadgeClass = (status: string) => {
-  if (status === 'Approved') return 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/30';
+  if (status === 'Approved') return 'bg-primary-muted text-primary border-primary/20';
   if (status === 'Rejected') return 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-500/10 dark:text-rose-400 dark:border-rose-500/30';
-  return 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-500/10 dark:text-amber-400 dark:border-amber-500/30';
+  return 'bg-card text-text-secondary border-border';
 };
 
 const CourseCoordinatorDashboard: React.FC = () => {
@@ -148,7 +148,7 @@ const CourseCoordinatorDashboard: React.FC = () => {
                         <button
                           onClick={() => approve(course.id)}
                           disabled={processingId === course.id || course.graph_status === 'Approved'}
-                          className="flex items-center gap-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 dark:text-emerald-400 dark:bg-emerald-500/10 dark:border-emerald-500/30 dark:hover:bg-emerald-500/20 px-3 py-1.5 rounded-lg transition-all disabled:opacity-50"
+                          className="flex items-center gap-1.5 text-xs font-bold text-primary bg-primary-muted border border-primary/20 hover:bg-primary/10 px-3 py-1.5 rounded-lg transition-all disabled:opacity-50"
                         >
                           <CheckCircle2 className="w-3.5 h-3.5" /> Approve
                         </button>

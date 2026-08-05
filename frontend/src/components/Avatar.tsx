@@ -7,7 +7,14 @@ const API_URL = 'http://localhost:8000/api';
 // not a public URL, so a plain <img src> won't work - fetch as a blob with the
 // token attached, same approach as lib/download.ts, and cache the resulting
 // object URL for this component instance's lifetime.
-function useAvatarObjectUrl(userId: number | undefined, hasAvatar: boolean): string | null {
+//
+// `version` should be something that changes whenever the underlying photo
+// does (the backend now returns a unique avatar_url per upload for exactly
+// this reason) - it's appended as a cache-busting query param AND included in
+// the effect's dependency array, so replacing a photo is reflected
+// immediately instead of possibly showing a stale cached response (browser
+// HTTP cache, an intermediate proxy, etc.) for a few minutes.
+function useAvatarObjectUrl(userId: number | undefined, hasAvatar: boolean, version?: string | null): string | null {
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
 
   useEffect(() => {
@@ -18,7 +25,9 @@ function useAvatarObjectUrl(userId: number | undefined, hasAvatar: boolean): str
     let cancelled = false;
     let created: string | null = null;
     const token = localStorage.getItem('token') || sessionStorage.getItem('token');
-    fetch(`${API_URL}/auth/users/${userId}/avatar`, {
+    const cacheBust = version ? `?v=${encodeURIComponent(version)}` : '';
+    fetch(`${API_URL}/auth/users/${userId}/avatar${cacheBust}`, {
+      cache: 'no-store',
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     })
       .then((res) => (res.ok ? res.blob() : Promise.reject(new Error('no avatar'))))
@@ -34,7 +43,7 @@ function useAvatarObjectUrl(userId: number | undefined, hasAvatar: boolean): str
       cancelled = true;
       if (created) URL.revokeObjectURL(created);
     };
-  }, [userId, hasAvatar]);
+  }, [userId, hasAvatar, version]);
 
   return objectUrl;
 }
@@ -42,6 +51,10 @@ function useAvatarObjectUrl(userId: number | undefined, hasAvatar: boolean): str
 interface AvatarProps {
   userId?: number;
   hasAvatar?: boolean;
+  /** The user's current avatar_url (or any value that changes when the photo
+   *  changes) - used to cache-bust the fetch so a replaced/removed photo
+   *  shows up immediately everywhere instead of possibly lagging behind. */
+  version?: string | null;
   fullName?: string;
   size?: 'sm' | 'md' | 'lg';
   className?: string;
@@ -63,8 +76,8 @@ const ICON_SIZE_CLASSES: Record<NonNullable<AvatarProps['size']>, string> = {
  * Shared avatar: shows the user's uploaded profile photo if present, otherwise
  * a plain human icon (not initials) on a flat brand-color fill.
  */
-export const Avatar: React.FC<AvatarProps> = ({ userId, hasAvatar = false, size = 'sm', className = '' }) => {
-  const objectUrl = useAvatarObjectUrl(userId, hasAvatar);
+export const Avatar: React.FC<AvatarProps> = ({ userId, hasAvatar = false, version, size = 'sm', className = '' }) => {
+  const objectUrl = useAvatarObjectUrl(userId, hasAvatar, version);
   const sizeClass = SIZE_CLASSES[size];
   const iconSizeClass = ICON_SIZE_CLASSES[size];
 

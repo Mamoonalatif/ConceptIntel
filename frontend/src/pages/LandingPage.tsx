@@ -327,7 +327,7 @@ export const LandingPage: React.FC = () => {
               <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight leading-[1.05] ci-fade-up">
                 Teach & Learn by
                 <br />
-                <span className="bg-gradient-to-r from-teal-600 via-teal-500 to-teal-600 bg-clip-text text-transparent">
+                <span className="bg-gradient-to-r from-teal-700 via-teal-600 to-teal-700 bg-clip-text text-transparent">
                   Concept
                 </span>
                 <span className="text-text-primary">, Not Just </span>
@@ -341,7 +341,7 @@ export const LandingPage: React.FC = () => {
 
               <div className="flex flex-wrap gap-4 ci-fade-up" style={{ animationDelay: '0.2s' }}>
                 <button onClick={() => navigate('/register')}
-                  className="ci-btn-hover px-7 py-3.5 text-base font-bold flex items-center gap-2 rounded-xl text-white bg-gradient-to-r from-teal-600 to-teal-500 hover:from-teal-700 hover:to-teal-600 shadow-glow">
+                  className="ci-btn-hover px-7 py-3.5 text-base font-bold flex items-center gap-2 rounded-xl text-white bg-gradient-to-r from-teal-700 to-teal-600 hover:from-teal-800 hover:to-teal-700 shadow-glow">
                   Get Started <ArrowRight className="w-5 h-5" />
                 </button>
                 <a href="#how-it-works"
@@ -365,7 +365,7 @@ export const LandingPage: React.FC = () => {
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
           <Reveal className="text-center max-w-2xl mx-auto mb-10">
             
-            <h2 className={sectionHeading}>Built to make <span className="text-teal-500">understanding</span> visible</h2>
+            <h2 className={sectionHeading}>Built to make <span className="text-teal-700 dark:text-teal-400">understanding</span> visible</h2>
           </Reveal>
 
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 items-center">
@@ -410,7 +410,7 @@ export const LandingPage: React.FC = () => {
         <div className="absolute inset-0 bg-gradient-to-b from-transparent via-card/50 to-transparent pointer-events-none" />
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative">
           <Reveal className="text-center max-w-2xl mx-auto mb-14">
-            <h2 className={sectionHeading}>From syllabus to <span className="text-teal-500">adaptive</span> path</h2>
+            <h2 className={sectionHeading}>From syllabus to <span className="text-teal-700 dark:text-teal-400">adaptive</span> path</h2>
             <p className={sectionSub}>
               Teacher-supervised at every step — nothing reaches a student unchecked.
             </p>
@@ -446,7 +446,7 @@ export const LandingPage: React.FC = () => {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <Reveal className="text-center max-w-2xl mx-auto mb-12">
             
-            <h2 className={sectionHeading}>Made for <span className="text-teal-500">teaching and learning</span> first</h2>
+            <h2 className={sectionHeading}>Made for <span className="text-teal-700 dark:text-teal-400">teaching and learning</span> first</h2>
             <p className={sectionSub}>
               Built around teachers and students first — coordinators and admins keep the institution running.
             </p>
@@ -491,7 +491,7 @@ export const LandingPage: React.FC = () => {
                   )}
 
                   <button onClick={() => navigate('/register')}
-                    className="ci-btn-hover mt-auto px-5 py-2.5 rounded-xl text-sm font-bold text-white bg-gradient-to-r from-teal-600 to-teal-500 hover:from-teal-700 hover:to-teal-600 shadow-glow inline-flex items-center gap-2">
+                    className="ci-btn-hover mt-auto px-5 py-2.5 rounded-xl text-sm font-bold text-white bg-gradient-to-r from-teal-700 to-teal-600 hover:from-teal-800 hover:to-teal-700 shadow-glow inline-flex items-center gap-2">
                     Get Started <ArrowRight className="w-4 h-4" />
                   </button>
                 </Reveal>
@@ -507,7 +507,7 @@ export const LandingPage: React.FC = () => {
           <Reveal className="ci-glass rounded-3xl p-8">
             <div className="text-center max-w-2xl mx-auto mb-10">
              
-              <h2 className={sectionHeading}>Where ConceptIntel is <span className="text-teal-500">different</span></h2>
+              <h2 className={sectionHeading}>Where ConceptIntel is <span className="text-teal-700 dark:text-teal-400">different</span></h2>
               <p className={sectionSub}>Subject-agnostic, concept-graph-driven, and always teacher-in-the-loop.</p>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
@@ -532,7 +532,7 @@ export const LandingPage: React.FC = () => {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <Reveal className="text-center max-w-2xl mx-auto mb-10">
            
-            <h2 className={sectionHeading}>Frequently Asked <span className="text-teal-500">Questions</span></h2>
+            <h2 className={sectionHeading}>Frequently Asked <span className="text-teal-700 dark:text-teal-400">Questions</span></h2>
             <p className={sectionSub}>Can't find what you're looking for? Search below or check the answers we get asked most.</p>
           </Reveal>
 
@@ -610,7 +610,7 @@ export const LandingPage: React.FC = () => {
       <section id="contact" className="py-12 relative z-10">
         <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
           <Reveal className="ci-glass rounded-3xl p-8 sm:p-10 text-center">
-            <h2 className="text-xl sm:text-2xl font-extrabold text-text-primary mb-2">Questions? <span className="text-teal-500">Reach out.</span></h2>
+            <h2 className="text-xl sm:text-2xl font-extrabold text-text-primary mb-2">Questions? <span className="text-teal-700 dark:text-teal-400">Reach out.</span></h2>
             <p className="text-text-secondary text-sm leading-relaxed max-w-xl mx-auto">
               Got a question we didn't cover? Check the FAQ above, or send us a message directly and we'll get
               back to you.
@@ -619,7 +619,7 @@ export const LandingPage: React.FC = () => {
             {!contactFormOpen ? (
               <button
                 onClick={() => setContactFormOpen(true)}
-                className="ci-btn-hover mt-6 px-6 py-3 rounded-xl text-sm font-bold text-white bg-gradient-to-r from-teal-600 to-teal-500 hover:from-teal-700 hover:to-teal-600 shadow-glow inline-flex items-center gap-2"
+                className="ci-btn-hover mt-6 px-6 py-3 rounded-xl text-sm font-bold text-white bg-gradient-to-r from-teal-700 to-teal-600 hover:from-teal-800 hover:to-teal-700 shadow-glow inline-flex items-center gap-2"
               >
                 <MessageSquare className="w-4 h-4" /> Contact Us
               </button>
@@ -655,7 +655,7 @@ export const LandingPage: React.FC = () => {
                   <button
                     type="submit"
                     disabled={contactStatus === 'sending'}
-                    className="ci-btn-hover shrink-0 px-6 py-3 rounded-xl text-sm font-bold text-white bg-gradient-to-r from-teal-600 to-teal-500 hover:from-teal-700 hover:to-teal-600 shadow-glow inline-flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:translate-y-0">
+                    className="ci-btn-hover shrink-0 px-6 py-3 rounded-xl text-sm font-bold text-white bg-gradient-to-r from-teal-700 to-teal-600 hover:from-teal-800 hover:to-teal-700 shadow-glow inline-flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:translate-y-0">
                     {contactStatus === 'sending' ? (
                       <>Sending <Loader2 className="w-4 h-4 animate-spin" /></>
                     ) : (

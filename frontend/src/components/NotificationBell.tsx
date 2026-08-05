@@ -15,9 +15,22 @@ const PRIORITY_STYLES: Record<string, { icon: React.ElementType; className: stri
   error: { icon: XCircle, className: 'text-rose-600 bg-rose-50 dark:text-rose-400 dark:bg-rose-500/10' },
 };
 
-export const NotificationBell: React.FC = () => {
+interface NotificationBellProps {
+  /** Controlled open state (e.g. driven by the profile dropdown's "Notifications"
+   *  entry). When omitted, the bell manages its own open/close state as before. */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+}
+
+export const NotificationBell: React.FC<NotificationBellProps> = ({ open: controlledOpen, onOpenChange }) => {
   const navigate = useNavigate();
-  const [open, setOpen] = useState(false);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const open = controlledOpen !== undefined ? controlledOpen : uncontrolledOpen;
+  const setOpen = (value: boolean | ((prev: boolean) => boolean)) => {
+    const resolved = typeof value === 'function' ? (value as (prev: boolean) => boolean)(open) : value;
+    onOpenChange?.(resolved);
+    setUncontrolledOpen(resolved);
+  };
   const [items, setItems] = useState<NotificationItem[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(false);

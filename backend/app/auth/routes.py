@@ -1,5 +1,6 @@
 import csv
 import io
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Set
@@ -15,7 +16,10 @@ from app.database.connection import get_db
 from app.database.models import (
     User, TeacherRequest, Program, Course, CourseCatalog,
     ProgramCoordinatorAssignment, CourseCoordinatorAssignment,
+    Assignment, AssignmentSubmission, Announcement, Material, Meeting,
+    Comment, ChatMessage, NotificationPreference,
 )
+from app.courses.services import delete_course_cascade
 from app.auth.schemas import (
     UserCreate, UserLogin, UserResponse, Token, TokenData,
     AdminCreateTeacher, TeacherCredentialsResponse,
@@ -426,7 +430,14 @@ def upload_avatar(
             print(f"Warning: failed to delete previous avatar for user {current_user.id}: {str(e)}")
 
     try:
-        new_url = store_file(content, Path(file.filename).name, extension, f"avatars/{current_user.id}")
+        # A fresh, unique filename per upload (not the original filename) so
+        # re-uploading a photo with the same name (e.g. "photo.jpg" every
+        # time) always produces a new avatar_url - both so any storage-layer
+        # CDN caching keyed on the object path can't serve a stale copy, and
+        # so the frontend has a value that reliably changes to cache-bust its
+        # own avatar fetch against.
+        unique_name = f"{uuid.uuid4().hex}{extension}"
+        new_url = store_file(content, unique_name, extension, f"avatars/{current_user.id}")
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Avatar upload failed: {str(e)}")
 
@@ -464,17 +475,23 @@ def get_user_avatar(
     authenticated-streaming approach as course file/material downloads (see
     app/upload/routes.py), since avatar_url is a private storage reference, not a
     public URL."""
+    no_cache_headers = {"Cache-Control": "no-store, no-cache, must-revalidate", "Pragma": "no-cache"}
+
     user = db.query(User).filter(User.id == user_id).first()
     if not user or not user.avatar_url:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No avatar for this user")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No avatar for this user", headers=no_cache_headers)
 
     try:
         content = download_stored_file(user.avatar_url)
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Failed to fetch avatar: {str(e)}")
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Failed to fetch avatar: {str(e)}", headers=no_cache_headers)
 
     extension = Path(user.avatar_url).suffix or ".jpg"
-    return Response(content=content, media_type=get_content_type(extension))
+    # Never let the browser (or any intermediary) cache this response - a
+    # replaced/removed photo must show up immediately, not after whatever
+    # heuristic freshness lifetime the browser assigns to an unlabeled
+    # response on this same URL.
+    return Response(content=content, media_type=get_content_type(extension), headers=no_cache_headers)
 
 
 # --- Teacher provisioning: request access (public) ---
@@ -893,7 +910,16 @@ def delete_user(
     db: Session = Depends(get_db),
     current_admin: User = Depends(get_current_admin)
 ):
-    """Admin endpoint to permanently delete a student, teacher, or coordinator account."""
+    """Admin endpoint to permanently delete a student, teacher, or coordinator account.
+
+    Only Course/Enrollment/UploadedFile/Notification cascade automatically via
+    their SQLAlchemy relationship on User - every other table with a FK to
+    users.id (assignments, announcements, materials, meetings, comments, chat
+    history, notification preferences, coordinator scope assignments) has no
+    cascade configured, so a plain `db.delete(user)` raises a foreign-key
+    IntegrityError for any user with real activity (which is effectively every
+    non-throwaway account). This explicitly clears those dependents first, in
+    dependency order, before deleting the user row."""
     if user_id == current_admin.id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="You cannot delete your own admin account")
 
@@ -901,7 +927,25 @@ def delete_user(
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
-    db.delete(user)
+    # Courses this user teaches - reuse the same cascade-safe course deletion
+    # used by the admin/coordinator "delete course" endpoints, which also
+    # clears graph_build_jobs/graph_revisions/graph_edit_proposals (schema-drift
+    # tables with no SQLAlchemy model but still FK'd to courses.id at the DB
+    # level - missing this was the earlier cause of "delete" failing for any
+    # teacher whose course had ever gone through knowledge-graph review).
+    owned_courses = db.query(Course).filter(Course.teacher_id == user_id).all()
+    for course in owned_courses:
+        delete_course_cascade(db, course)
+
+    # This user's own activity as a student/participant, regardless of course ownership.
+    db.query(AssignmentSubmission).filter(AssignmentSubmission.student_id == user_id).delete(synchronize_session=False)
+    db.query(Comment).filter(Comment.author_id == user_id).delete(synchronize_session=False)
+    db.query(ChatMessage).filter(ChatMessage.user_id == user_id).delete(synchronize_session=False)
+    db.query(NotificationPreference).filter(NotificationPreference.user_id == user_id).delete(synchronize_session=False)
+    db.query(ProgramCoordinatorAssignment).filter(ProgramCoordinatorAssignment.user_id == user_id).delete(synchronize_session=False)
+    db.query(CourseCoordinatorAssignment).filter(CourseCoordinatorAssignment.user_id == user_id).delete(synchronize_session=False)
+
+    db.delete(user)  # cascades Course -> Enrollment/UploadedFile/ContentChunk, and Notification
     db.commit()
     return {"message": f"User {user.email} successfully deleted"}
 

@@ -26,6 +26,7 @@ from app.assistant.routes import router as assistant_router
 from app.calendar.routes import router as calendar_router
 from app.contact.routes import router as contact_router
 from app.comments.routes import router as comments_router
+from app.analytics.routes import router as analytics_router
 
 logger = logging.getLogger("conceptintel")
 
@@ -113,6 +114,7 @@ app.include_router(assistant_router, prefix="/api")
 app.include_router(calendar_router, prefix="/api")
 app.include_router(contact_router, prefix="/api")
 app.include_router(comments_router, prefix="/api")
+app.include_router(analytics_router, prefix="/api")
 
 
 @app.get("/")

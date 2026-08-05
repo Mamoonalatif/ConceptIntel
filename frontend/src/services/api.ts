@@ -7,6 +7,11 @@ const api = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
+  // Without a timeout, a request that hangs (a dropped connection to the
+  // database, a slow network blip) never resolves or rejects - the calling
+  // button/form is left showing its loading spinner forever ("stuck in a
+  // loading loop") instead of failing and letting the user retry.
+  timeout: 20000,
 });
 
 // Inject authorization token on every request if present
@@ -78,6 +83,19 @@ export const authService = {
   },
   requestTeacherAccess: async (data: { email: string; full_name: string; reason?: string }) => {
     const res = await api.post('/auth/teacher-requests', data);
+    return res.data;
+  },
+  uploadAvatar: async (file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const res = await api.post('/auth/me/avatar', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 60000,
+    });
+    return res.data;
+  },
+  deleteAvatar: async () => {
+    const res = await api.delete('/auth/me/avatar');
     return res.data;
   },
 };
@@ -350,6 +368,7 @@ export const uploadService = {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
+      timeout: 60000,
     });
     return res.data;
   },
@@ -376,6 +395,7 @@ export const uploadService = {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
+      timeout: 60000,
     });
     return res.data;
   },
@@ -567,6 +587,7 @@ export const materialService = {
     if (data.file) formData.append('file', data.file);
     const res = await api.post(`/courses/${courseId}/materials`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 60000,
     });
     return res.data;
   },
@@ -750,6 +771,7 @@ export const assignmentService = {
     if (data.file) formData.append('file', data.file);
     const res = await api.post(`/courses/${courseId}/assignments`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 60000,
     });
     return res.data;
   },
@@ -771,6 +793,7 @@ export const assignmentService = {
     formData.append('file', file);
     const res = await api.post(`/courses/${courseId}/assignments/${assignmentId}/submit`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 60000,
     });
     return res.data;
   },
@@ -780,4 +803,65 @@ export const assignmentService = {
   },
   downloadSubmissionUrl: (courseId: number, assignmentId: number, submissionId: number) =>
     `http://localhost:8000/api/courses/${courseId}/assignments/${assignmentId}/submissions/${submissionId}/download`,
+};
+
+export interface AssignmentStat {
+  id: number;
+  title: string;
+  due_date: string | null;
+  total_students: number;
+  submitted_count: number;
+  late_count: number;
+  graded_count: number;
+  avg_grade: number | null;
+}
+
+export interface StudentStat {
+  student_id: number;
+  full_name: string;
+  email: string;
+  submitted_count: number;
+  total_assignments: number;
+  completion_rate: number;
+  graded_count: number;
+  avg_grade: number | null;
+  /** One entry per CourseAnalytics.assignments, same order: 'submitted' | 'late' | 'missing'. */
+  assignment_status: ('submitted' | 'late' | 'missing')[];
+}
+
+export interface CourseAnalytics {
+  course_id: number;
+  course_name: string;
+  total_students: number;
+  total_assignments: number;
+  concept_count: number;
+  edge_count: number;
+  easy_count: number;
+  medium_count: number;
+  hard_count: number;
+  avg_completion_rate: number;
+  at_risk_count: number;
+  assignments: AssignmentStat[];
+  students: StudentStat[];
+}
+
+export interface MyCourseProgress {
+  course_id: number;
+  course_name: string;
+  submitted_count: number;
+  total_assignments: number;
+  completion_rate: number;
+  graded_count: number;
+  avg_grade: number | null;
+}
+
+export const analyticsService = {
+  getCourseAnalytics: async (courseId: number): Promise<CourseAnalytics> => {
+    const res = await api.get(`/analytics/course/${courseId}`);
+    return res.data;
+  },
+  getMyProgress: async (): Promise<MyCourseProgress[]> => {
+    const res = await api.get('/analytics/my-progress');
+    return res.data;
+  },
 };

@@ -38,6 +38,13 @@ class Settings:
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
     OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
+    # Gemini API Key & Model Configuration - an alternative provider for the AI
+    # Assistant chatbot (app/assistant/services.py). AI_PROVIDER picks which one
+    # is actually called; the other's key can stay blank.
+    AI_PROVIDER: str = os.getenv("AI_PROVIDER", "openai")  # "openai" | "gemini"
+    GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
+    GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+
     # AWS S3 File Storage (Optional - takes priority over Supabase/local when set).
     # Bucket is expected to be PRIVATE - files are read/written via authenticated
     # boto3 calls, never a public URL (see app/upload/services.py).

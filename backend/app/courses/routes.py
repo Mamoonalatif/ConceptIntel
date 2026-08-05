@@ -17,6 +17,7 @@ from app.auth.routes import (
     ProgramScope, resolve_program_ids, resolve_course_ids,
 )
 from app.courses.access import assert_course_access
+from app.courses.services import delete_course_cascade
 
 router = APIRouter(prefix="/courses", tags=["Courses"])
 
@@ -272,8 +273,7 @@ def delete_course(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Course not found or you do not have permission to delete it"
         )
-    db.delete(course)
-    db.commit()
+    delete_course_cascade(db, course)
     return None
 
 
@@ -378,8 +378,7 @@ def admin_delete_course(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
     program_id = course.catalog_entry.program_id if course.catalog_entry else None
     _assert_program_in_scope(scope, program_id)
-    db.delete(course)
-    db.commit()
+    delete_course_cascade(db, course)
     return None
 
 

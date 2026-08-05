@@ -421,7 +421,7 @@ const ProgramCoordinatorDashboard: React.FC = () => {
         <div>
           <h3 className="text-base font-bold text-text-primary mb-4">Course Coordinators</h3>
           {staffPickerError && (
-            <div className="bg-amber-50 border border-amber-200 text-amber-700 dark:bg-amber-500/10 dark:border-amber-500/30 dark:text-amber-400 rounded-xl p-3 flex items-center gap-2 text-xs mb-3">
+            <div className="bg-red-50 border border-red-200 text-red-600 dark:bg-red-500/10 dark:border-red-500/30 dark:text-red-400 rounded-xl p-3 flex items-center gap-2 text-xs mb-3">
               <AlertCircle className="w-4 h-4 shrink-0" />
               <span>{staffPickerError}</span>
             </div>

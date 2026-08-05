@@ -17,6 +17,7 @@ interface AuthContextType {
   loginWithGoogle: (idToken: string, rememberMe?: boolean) => Promise<any>;
   register: (userData: any) => Promise<any>;
   logout: () => void;
+  refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -95,8 +96,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setIsLoading(false);
   };
 
+  // Re-fetches /auth/me so a change made elsewhere (e.g. uploading/removing a
+  // profile photo) is reflected in `user` everywhere it's consumed, without a
+  // full page reload.
+  const refreshUser = async () => {
+    const userData = await authService.getMe();
+    setUser(userData);
+  };
+
   return (
-    <AuthContext.Provider value={{ user, token, isLoading, login, loginWithGoogle, register, logout }}>
+    <AuthContext.Provider value={{ user, token, isLoading, login, loginWithGoogle, register, logout, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );

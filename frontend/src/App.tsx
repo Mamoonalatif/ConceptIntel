@@ -21,6 +21,7 @@ import ProfilePage from './pages/ProfilePage';
 import CalendarPage from './pages/CalendarPage';
 import AssistantPage from './pages/AssistantPage';
 import SettingsPage from './pages/SettingsPage';
+import AnalyticsDashboard from './pages/AnalyticsDashboard';
 
 const queryClient = new QueryClient();
 
@@ -121,6 +122,14 @@ const AppContent: React.FC = () => {
           element={
             <PrivateRoute>
               <SettingsPage />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/analytics"
+          element={
+            <PrivateRoute>
+              <AnalyticsDashboard />
             </PrivateRoute>
           }
         />

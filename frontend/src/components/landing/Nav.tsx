@@ -94,7 +94,7 @@ export const Nav: React.FC<{ active?: 'about'; onBrandClick?: () => void }> = ({
             Login
           </button>
           <button onClick={() => navigate('/register')}
-            className="rounded-xl text-sm font-bold px-5 py-2 flex items-center gap-1.5 text-white bg-gradient-to-r from-teal-600 to-teal-500 hover:from-teal-700 hover:to-teal-600 shadow-glow hover:shadow-lg hover:-translate-y-0.5 hover:underline transition-all">
+            className="rounded-xl text-sm font-bold px-5 py-2 flex items-center gap-1.5 text-white bg-gradient-to-r from-teal-700 to-teal-600 hover:from-teal-800 hover:to-teal-700 shadow-glow hover:shadow-lg hover:-translate-y-0.5 hover:underline transition-all">
             Signup <ChevronRight className="w-4 h-4" />
           </button>
         </div>
@@ -138,7 +138,7 @@ export const Nav: React.FC<{ active?: 'about'; onBrandClick?: () => void }> = ({
           </button>
           <div className="flex gap-3 pt-2">
             <button onClick={() => navigate('/login')} className="flex-1 py-2.5 border border-border rounded-xl text-sm font-semibold text-text-secondary text-center hover:underline">Login</button>
-            <button onClick={() => navigate('/register')} className="flex-1 py-2.5 text-sm font-bold text-center justify-center rounded-xl text-white bg-gradient-to-r from-teal-600 to-teal-500 hover:underline">Signup</button>
+            <button onClick={() => navigate('/register')} className="flex-1 py-2.5 text-sm font-bold text-center justify-center rounded-xl text-white bg-gradient-to-r from-teal-700 to-teal-600 hover:underline">Signup</button>
           </div>
         </div>
       )}
