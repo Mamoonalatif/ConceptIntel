@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { API_URL } from '../services/api';
 
 /** Single-color fox-face silhouette, drawn to match the stroke weight/viewBox
  *  convention of a lucide icon (24x24, currentColor) so it drops in wherever
@@ -15,8 +16,6 @@ const FoxFaceIcon: React.FC<{ className?: string }> = ({ className }) => (
     <circle cx="12" cy="15.2" r="1" fill="currentColor" opacity="0.7" />
   </svg>
 );
-
-const API_URL = 'http://localhost:8000/api';
 
 // Avatar bytes are served behind auth (see backend GET /auth/users/{id}/avatar),
 // not a public URL, so a plain <img src> won't work - fetch as a blob with the

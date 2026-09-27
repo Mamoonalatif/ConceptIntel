@@ -3,7 +3,7 @@ import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext';
 import {
   courseService, uploadService, enrollmentService, contentProcessingService,
-  type ContentSearchResult,
+  API_URL, type ContentSearchResult,
 } from '../services/api';
 import type { GraphBuildJob, GraphRevision } from '../services/api';
 import { useAutoRefresh } from '../hooks/useAutoRefresh';
@@ -679,7 +679,7 @@ const CourseDetail: React.FC = () => {
                           </td>
                           <td className="py-3.5 px-3 text-right space-x-1">
                             <a
-                              href={`http://localhost:8000/api/files/${file.id}`}
+                              href={`${API_URL}/files/${file.id}`}
                               target="_blank"
                               rel="noreferrer"
                               className="inline-flex p-1.5 bg-background hover:bg-primary-muted border border-border text-text-muted hover:text-primary rounded-lg transition-all"

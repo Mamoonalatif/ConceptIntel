@@ -1,6 +1,11 @@
 import axios from 'axios';
 
-const API_URL = 'http://localhost:8000/api';
+// VITE_API_URL lets a deployed build (Vercel) point at the real backend host
+// instead of the local dev server - falls back to localhost so nothing has to
+// change for local development. Exported so components that build a raw
+// download URL (Avatar.tsx, CourseDetail.tsx) don't each hardcode their own
+// copy of this same host.
+export const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
 
 const api = axios.create({
   baseURL: API_URL,
@@ -1086,7 +1091,7 @@ export const materialService = {
     await api.delete(`/courses/${courseId}/materials/${materialId}`);
   },
   downloadAttachmentUrl: (courseId: number, materialId: number) =>
-    `http://localhost:8000/api/courses/${courseId}/materials/${materialId}/download`,
+    `${API_URL}/courses/${courseId}/materials/${materialId}/download`,
 };
 
 // Shape returned by /courses/{id}/meetings - matches backend/app/meetings/schemas.py
@@ -1270,7 +1275,7 @@ export const assignmentService = {
     await api.delete(`/courses/${courseId}/assignments/${assignmentId}`);
   },
   downloadAttachmentUrl: (courseId: number, assignmentId: number) =>
-    `http://localhost:8000/api/courses/${courseId}/assignments/${assignmentId}/download`,
+    `${API_URL}/courses/${courseId}/assignments/${assignmentId}/download`,
   submit: async (courseId: number, assignmentId: number, file: File): Promise<SubmissionSummary> => {
     const formData = new FormData();
     formData.append('file', file);
@@ -1285,7 +1290,7 @@ export const assignmentService = {
     return res.data;
   },
   downloadSubmissionUrl: (courseId: number, assignmentId: number, submissionId: number) =>
-    `http://localhost:8000/api/courses/${courseId}/assignments/${assignmentId}/submissions/${submissionId}/download`,
+    `${API_URL}/courses/${courseId}/assignments/${assignmentId}/submissions/${submissionId}/download`,
   // AI concept-level grading - extracts the submission's text, compares it against
   // the course's knowledge-graph concepts, and returns a grade + explainable
   // per-concept feedback (see backend/app/assignments/grading_service.py). Safe to
