@@ -44,3 +44,11 @@ lerna-debug.log*
 
 # --- Uploaded course material artifacts (local dev storage) ---
 backend/uploads/
+
+# --- Personal presentation/pitch materials - not part of the app, kept locally only ---
+5 Min Qualifying Pitch*.pptx
+ConceptIntel_Pitchdeck.pptx
+ConceptIntel_PASHA_ICT_Awards_2026_PitchDeck.pdf
+ConceptIntel_Implementation_Overview.docx
+PASHA_Pitch_Script.md
+knowlegd_graph.mp4
