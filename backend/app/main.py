@@ -1,3 +1,4 @@
+import os
 import uvicorn
 import logging
 import threading
@@ -53,6 +54,22 @@ if settings.SENTRY_DSN:
     logger.info("Sentry error monitoring enabled.")
 else:
     logger.info("SENTRY_DSN not set - Sentry error monitoring disabled.")
+
+if settings.JWT_SECRET == "super_secret_conceptintel_token_signing_key_2026":
+    logger.warning(
+        "JWT_SECRET is not set - using the built-in development default. Every "
+        "deployment left on this default shares the same signing key, letting "
+        "anyone forge a valid auth token. Set a real JWT_SECRET in production."
+    )
+
+if not (settings.AWS_ACCESS_KEY_ID and settings.AWS_SECRET_ACCESS_KEY and settings.AWS_S3_BUCKET) \
+        and not (settings.SUPABASE_URL and settings.SUPABASE_KEY):
+    logger.warning(
+        "No S3 or Supabase storage configured - uploaded files (course materials, "
+        "assignment attachments/submissions) will be written to local disk. On "
+        "Render's free tier this disk is ephemeral and is wiped on every restart "
+        "or redeploy. Set SUPABASE_URL+SUPABASE_KEY (or AWS_*) before going live."
+    )
 
 # Automatically create PostgreSQL tables on startup
 # Wrapped in try-except so app can still boot even if DB is temporarily unavailable
@@ -137,10 +154,13 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
-# Enable CORS for frontend API calls
+# Enable CORS for frontend API calls - origins come from ALLOWED_ORIGINS (comma-
+# separated), defaulting to the local Vite dev server. Auth here is a Bearer
+# token, not cookies, so this deliberately does not mix allow_credentials with a
+# wildcard origin (CORS's browsers reject that combination anyway).
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000", "*"],
+    allow_origins=[o.strip() for o in settings.ALLOWED_ORIGINS.split(",") if o.strip()],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -247,4 +267,6 @@ def health_check():
 
 
 if __name__ == "__main__":
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
+    # Render (and most PaaS hosts) inject the port to bind via $PORT rather than
+    # letting the app choose one - falls back to 8000 for local `python app/main.py`.
+    uvicorn.run("app.main:app", host="0.0.0.0", port=int(os.getenv("PORT", "8000")), reload=True)

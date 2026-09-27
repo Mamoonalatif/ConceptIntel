@@ -25,6 +25,16 @@ class Settings:
     # Google Sign-In (OAuth 2.0 client ID from Google Cloud Console, "Web application" type)
     GOOGLE_CLIENT_ID: str = os.getenv("GOOGLE_CLIENT_ID", "")
 
+    # Public URL of the deployed frontend (e.g. https://conceptintel.vercel.app, no
+    # trailing slash needed) - used to build links in outbound emails/notifications
+    # (password reset, grade notifications). Defaults to the local Vite dev server.
+    FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:5173")
+
+    # Comma-separated list of origins allowed to call this API (e.g.
+    # "https://conceptintel.vercel.app,https://www.mydomain.com"). Defaults cover
+    # local dev only - set this in production instead of relying on "*".
+    ALLOWED_ORIGINS: str = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:3000")
+
     # Outbound email (Gmail SMTP with an App Password - free, no third-party signup).
     # Leave unset to skip email delivery; credentials are still shown in the API
     # response either way, so nothing breaks if this isn't configured.
