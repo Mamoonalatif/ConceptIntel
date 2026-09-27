@@ -6,9 +6,18 @@ FROM python:3.11-slim
 # libgl1/libglib2.0-0: opencv-python-headless (an easyocr dependency) needs these
 # even in headless mode - omitting them fails at import time with "libGL.so.1:
 # cannot open shared object file", not at pip install time.
+# libmagic1: python-magic (app/rag/validation.py) is a thin ctypes wrapper around
+# this shared library, not a bundled copy of it - omitting it fails at import
+# time with "ImportError: failed to find libmagic".
+# tesseract-ocr: pytesseract (app/rag/ocr.py) wraps this CLI binary - unlike the
+# two above, its absence degrades gracefully (OCR fallback just gets skipped with
+# a log warning, see is_tesseract_available()) rather than crashing on import,
+# but scanned/photographed PDF uploads silently lose their OCR fallback without it.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1 \
     libglib2.0-0 \
+    libmagic1 \
+    tesseract-ocr \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
