@@ -22,7 +22,7 @@ import {
   Layers,
 } from 'lucide-react';
 import { GraphIllustration, StudyIllustration } from '../components/illustrations';
-import logoWhite from '../assets/logo_white.png';
+import { FoxMark } from '../components/FoxMark';
 import { Nav } from '../components/landing/Nav';
 import { Footer } from '../components/landing/Footer';
 import { Reveal } from '../components/landing/Reveal';
@@ -41,7 +41,7 @@ const ALL_12_MODULES = [
     gradient: 'from-teal-500 to-emerald-500',
   },
   {
-    title: 'Knowledge Graph',
+    title: 'Concept Graph',
     desc: 'Course material is structured into an interactive, teacher-editable concept-dependency graph.',
     icon: Network,
     gradient: 'from-cyan-500 to-teal-600',
@@ -112,7 +112,7 @@ const DIFFERENTIATORS = [
   {
     icon: Network,
     title: 'Concept-graph-driven',
-    desc: 'Every course becomes a prerequisite-linked knowledge graph instead of a flat list of modules — so both a gap and its cause are visible, not just a low score.',
+    desc: 'Every course becomes a prerequisite-linked concept graph instead of a flat list of modules — so both a gap and its cause are visible, not just a low score.',
     gradient: 'from-teal-500 to-emerald-500',
   },
   {
@@ -136,8 +136,8 @@ export const AboutPage: React.FC = () => {
     <div className="min-h-screen bg-background text-text-primary overflow-x-hidden relative">
       {/* Same colored background wash as the homepage, for visual continuity. */}
       <div className="fixed inset-0 -z-10 pointer-events-none">
-        <div className="absolute inset-0 bg-gradient-to-b from-teal-50 via-background to-background dark:from-teal-950/30 dark:via-background dark:to-background" />
-        <div className="absolute top-[-8%] left-1/2 -translate-x-1/2 w-[1100px] h-[700px] rounded-full bg-teal-400/15 dark:bg-teal-500/10 blur-[120px]" />
+        <div className="absolute inset-0 bg-gradient-to-b from-primary-muted via-background to-background dark:from-primary-muted/40 dark:via-background dark:to-background" />
+        <div className="absolute top-[-8%] left-1/2 -translate-x-1/2 w-[1100px] h-[700px] rounded-full bg-primary/15 dark:bg-primary/10 blur-[120px]" />
         <div className="absolute bottom-[-5%] right-[-10%] w-[520px] h-[520px] rounded-full bg-slate-300/10 dark:bg-slate-500/5 blur-[120px]" />
       </div>
 
@@ -201,7 +201,7 @@ export const AboutPage: React.FC = () => {
                 </p>
                 <p>
                   So instead of another course-management dashboard, we set out to build the missing layer
-                  underneath one — a knowledge graph of the actual concepts in a course, kept accurate by the
+                  underneath one — a concept graph of the actual concepts in a course, kept accurate by the
                   teachers who own that content, and used to drive everything from AI-generated study material to
                   adaptive learning paths and concept-level assignment feedback.
                 </p>
@@ -223,7 +223,7 @@ export const AboutPage: React.FC = () => {
             <div className={sectionEyebrow}>
               <Layers className="w-3.5 h-3.5" /> Platform Architecture
             </div>
-            <h2 className={sectionHeading}>The <span className="text-teal-500">12 Modules</span> of ConceptIntel</h2>
+            <h2 className={sectionHeading}>The <span className="text-primary">12 Modules</span> of ConceptIntel</h2>
             <p className={sectionSub}>
               From raw syllabus upload to personalized adaptive paths — explore all twelve core components that power the platform.
             </p>
@@ -243,7 +243,7 @@ export const AboutPage: React.FC = () => {
                   </div>
                   <div className="mt-4 pt-3 border-t border-border/40 flex items-center justify-between text-xs font-semibold text-text-muted">
                     <span>Module 0{i + 1}</span>
-                    <span className="text-teal-600 dark:text-teal-400 font-bold">ConceptIntel</span>
+                    <span className="text-primary font-bold">ConceptIntel</span>
                   </div>
                 </Reveal>
               );
@@ -312,20 +312,20 @@ export const AboutPage: React.FC = () => {
       {/* ── CTA ── */}
       <section className="py-14 relative z-10">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
-          <Reveal className="rounded-3xl p-12 relative overflow-hidden bg-gradient-to-br from-teal-700 via-teal-600 to-teal-800">
+          <Reveal className="rounded-3xl p-12 relative overflow-hidden bg-primary">
             <div className="relative z-10 space-y-6">
               <div className="flex justify-center">
-                <img src={logoWhite} alt="" width={48} height={48} className="w-12 h-12 object-contain" />
+                <FoxMark className="w-12 h-12" tone="white" />
               </div>
               <h2 className="text-3xl sm:text-4xl font-extrabold text-white">
                 See it in action
               </h2>
-              <p className="text-teal-50/90 text-lg max-w-2xl mx-auto leading-relaxed">
+              <p className="text-white/90 text-lg max-w-2xl mx-auto leading-relaxed">
                 Create an account and explore the concept graph for yourself.
               </p>
               <div className="flex flex-wrap gap-4 justify-center pt-2">
                 <button onClick={() => navigate('/register')}
-                  className="ci-btn-hover px-8 py-4 text-base font-bold flex items-center gap-2 rounded-xl bg-white text-teal-700 hover:bg-teal-50 shadow-lg">
+                  className="ci-btn-hover px-8 py-4 text-base font-bold flex items-center gap-2 rounded-xl bg-white text-primary hover:bg-primary-muted shadow-lg">
                   Get Started Free <ArrowRight className="w-5 h-5" />
                 </button>
                 <button onClick={() => navigate('/')}

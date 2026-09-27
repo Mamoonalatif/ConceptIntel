@@ -1,73 +1,113 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Baloo+2:wght@400;500;600;700;800&family=Nunito:wght@400;500;600;700;800;900&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 /* ─────────────────────────────────────────────
-   THEME VARIABLES — clean, professional education-app palette
-   (flat surfaces, neutral grays, one calm blue accent - no gradients/glow).
+   THEME VARIABLES — fox-mascot brand system.
+   Warm fox-orange is the hero brand color (matches the mascot's fur exactly,
+   used for every primary action/active state), deep teal is the secondary
+   "knowledge" accent (a cool counterpart, distinct from Duolingo's green/blue
+   pairing so this reads as its own identity, not a reskin). Surfaces/text carry
+   a faint warm tint instead of neutral gray or the old teal tint, so the whole
+   app - not just the mascot art - feels like it belongs to the same character.
    Values are "R G B" channel triples (no rgb()/commas) so Tailwind's
    `rgb(var(--x) / <alpha-value>)` colors in tailwind.config.js can apply
    opacity modifiers. `.dark` is toggled on <html> by ThemeContext.
 ───────────────────────────────────────────── */
 :root {
-  /* Light theme - subtly teal-tinted elevation scale (ties the dashboard's
-     page background to the brand color instead of a stark neutral gray) -
-     the tint is faint enough that cards/surfaces still read as clean white. */
-  --bg:      244 249 248; /* faint teal-tinted off-white page background */
-  --surface: 255 255 255; /* white cards / panels / header */
-  --card:    241 248 247; /* faint teal-tinted nested card bg */
-  --border:  221 232 230; /* teal-tinted neutral border */
+  /* Light theme - neutral surfaces with only a whisper of warmth, NOT an
+     orange-tinted page - orange is reserved for the brand accent below
+     (buttons, links, active states, the mascot) so it reads as a deliberate
+     accent against a calm neutral base, not a wash of color over everything. */
+  --bg: 250 248 246;
+  /* barely-warm off-white page background */
+  --surface: 255 255 255;
+  /* white cards / panels / header */
+  --card: 247 244 240;
+  /* barely-warm nested card bg */
+  --border: 231 225 217;
+  /* soft warm-neutral border */
 
-  --text-primary:   32 33 36;   /* near-black, neutral (not blue-black) */
-  --text-secondary: 95 99 104;  /* neutral gray */
-  --text-muted:     154 160 166; /* lighter neutral gray */
+  --text-primary: 32 28 24;
+  /* near-black, warm-leaning (not blue-black) */
+  --text-secondary: 100 92 84;
+  /* warm-neutral gray */
+  --text-muted: 158 148 138;
+  /* lighter warm-neutral gray */
 
-  /* Brand accent - muted teal (final). This is the platform's identity color,
-     used consistently everywhere - dashboards, illustrations, landing page -
-     desaturated enough to stay calm/professional rather than vivid/playful. */
-  --primary:        15 118 110;   /* muted teal (teal-700) */
-  --primary-hover:  17 94 89;     /* darker teal, hover state (teal-800) */
-  --primary-light:  45 175 165;   /* brighter teal - text/border legibility only */
-  --primary-muted:  230 246 244;  /* pale teal tint bg */
+  /* Brand accent - fox orange. This IS the mascot's fur color, so every
+     primary button/link/active-state reads as "the fox's color", not an
+     arbitrary corporate blue - the identity move Duolingo made with green. */
+  --primary: 234 130 60;
+  /* fox orange */
+  --primary-hover: 194 84 31;
+  /* rust - hover/pressed state, matches the teacher-fox's auburn fur */
+  --primary-light: 194 84 31;
+  /* rust again - plain text/border on white needs the darker value for contrast */
+  --primary-muted: 253 234 218;
+  /* pale orange tint bg */
 
-  /* Secondary accent - muted warm gray (stone), used sparingly for a second
-     data series/status - a neutral partner to the teal, not a second hue. */
-  --secondary:        87 83 78;   /* stone-600 */
-  --secondary-hover:  68 64 60;   /* stone-700 */
-  --secondary-light:  120 113 108; /* stone-500 */
-  --secondary-muted:  245 245 244; /* stone-100 */
+  /* Secondary accent - deep teal. The cool counterpart to the fox's warm fur:
+     used for the "knowledge/graph" half of the product (concept nodes, the
+     secondary CTA, data visualizations) so the app has two ownable hues, not
+     one color plus gray. */
+  --secondary: 15 118 110;
+  /* deep teal */
+  --secondary-hover: 17 94 89;
+  /* darker teal, hover state */
+  --secondary-light: 45 175 165;
+  /* brighter teal - text/border legibility only */
+  --secondary-muted: 230 246 244;
+  /* pale teal tint bg */
 
-  --shadow-color: 32 33 36;
+  --shadow-color: 32 28 24;
 }
 
 :root.dark {
-  /* Dark theme - subtly teal-tinted charcoal elevation scale, matching the
-     light theme's tie-in to the brand color rather than a stark neutral. */
-  --bg:      15 20 19;    /* near-black, faintly teal-tinted page background */
-  --surface: 27 33 32;    /* raised panels / header */
-  --card:    34 41 40;    /* nested card, one step lighter than surface */
-  --border:  49 58 57;    /* teal-tinted neutral border, visible on dark surfaces */
+  /* Dark theme - the same restrained warm-neutral elevation scale as light
+     mode, not an orange-tinted near-black - same reasoning: orange is the
+     accent, not the ambient page color. */
+  --bg: 18 16 14;
+  /* near-black, barely-warm page background */
+  --surface: 30 27 24;
+  /* raised panels / header */
+  --card: 38 34 30;
+  /* nested card, one step lighter than surface */
+  --border: 55 49 43;
+  /* warm-neutral border, visible on dark surfaces */
 
-  --text-primary:   232 234 237; /* near-white */
-  --text-secondary: 154 160 166; /* neutral gray */
-  --text-muted:     116 122 128; /* muted gray */
+  --text-primary: 237 232 226;
+  /* warm-leaning near-white */
+  --text-secondary: 168 158 148;
+  /* warm-neutral gray */
+  --text-muted: 126 116 106;
+  /* muted warm-neutral gray */
 
   /* Same values as light mode (NOT brightened) - --primary/--secondary back the
-     solid badge/button/banner fills that carry white text/icons, and a dark teal
-     fill reads fine under white in either theme. --primary-light/--secondary-light
-     are the ones that get brightened below, since those back plain text/border
-     color directly against the page background, where dark-on-dark would vanish. */
-  --primary:        15 118 110;  /* muted teal, same as light */
-  --primary-hover:  17 94 89;    /* darker teal, same as light */
-  --primary-light:  94 199 188;  /* brighter teal - text/border legibility only */
-  --primary-muted:  15 42 40;    /* dark teal tint, not a pale tint */
+     solid badge/button/banner fills that carry white text/icons, and a fill at
+     this strength reads fine under white in either theme. --primary-light/
+     --secondary-light are the ones that get brightened below, since those back
+     plain text/border color directly against the page background, where
+     dark-on-dark would vanish. */
+  --primary: 234 130 60;
+  /* fox orange, same as light */
+  --primary-hover: 194 84 31;
+  /* rust, same as light */
+  --primary-light: 247 165 110;
+  /* brighter orange - text/border legibility only */
+  --primary-muted: 61 35 17;
+  /* dark orange tint, not a pale tint */
 
-  --secondary:        87 83 78;   /* stone-600, same as light */
-  --secondary-hover:  68 64 60;   /* stone-700, same as light */
-  --secondary-light:  168 162 158; /* stone-400 - brightened for text/border legibility */
-  --secondary-muted:  41 37 36;    /* stone-800 */
+  --secondary: 15 118 110;
+  /* deep teal, same as light */
+  --secondary-hover: 17 94 89;
+  /* darker teal, same as light */
+  --secondary-light: 94 199 188;
+  /* brighter teal - text/border legibility only */
+  --secondary-muted: 15 42 40;
+  /* dark teal tint */
 
   --shadow-color: 0 0 0;
 }
@@ -76,14 +116,28 @@
   html {
     scroll-behavior: smooth;
   }
+
   body {
     @apply bg-background text-text-primary antialiased;
-    font-family: 'Inter', system-ui, sans-serif;
+    font-family: 'Nunito', system-ui, sans-serif;
     overflow-x: hidden;
     transition: background-color 0.2s ease, color 0.2s ease;
   }
+
   * {
     box-sizing: border-box;
+  }
+
+  /* Duolingo-style hierarchy: chunky rounded display font for headings,
+     friendly rounded sans for everything else. */
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: 'Baloo 2', 'Nunito', system-ui, sans-serif;
+    font-weight: 700;
   }
 }
 
@@ -136,6 +190,7 @@
     opacity: 0;
     transform: translateX(24px);
   }
+
   to {
     opacity: 1;
     transform: translateX(0);
@@ -143,29 +198,66 @@
 }
 
 @keyframes fade-in {
-  from { opacity: 0; transform: translateY(8px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 @keyframes fade-up {
-  from { opacity: 0; transform: translateY(20px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 @keyframes pulse-glow {
-  0%, 100% { box-shadow: 0 0 0 0 rgb(var(--primary) / 0); }
-  50%       { box-shadow: 0 0 12px 2px rgb(var(--primary) / 0.10); }
+
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgb(var(--primary) / 0);
+  }
+
+  50% {
+    box-shadow: 0 0 12px 2px rgb(var(--primary) / 0.10);
+  }
 }
 
 @keyframes shimmer {
-  0%   { background-position: -200% 0; }
-  100% { background-position: 200% 0; }
+  0% {
+    background-position: -200% 0;
+  }
+
+  100% {
+    background-position: 200% 0;
+  }
 }
 
-.animate-slide-in  { animation: slide-in 0.28s cubic-bezier(0.25, 0.46, 0.45, 0.94) both; }
-.animate-fade-in   { animation: fade-in 0.35s ease-out both; }
-.animate-fade-up   { animation: fade-up 0.4s ease-out both; }
-.animate-pulse-glow { animation: pulse-glow 2.5s ease-in-out infinite; }
+.animate-slide-in {
+  animation: slide-in 0.28s cubic-bezier(0.25, 0.46, 0.45, 0.94) both;
+}
+
+.animate-fade-in {
+  animation: fade-in 0.35s ease-out both;
+}
+
+.animate-fade-up {
+  animation: fade-up 0.4s ease-out both;
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2.5s ease-in-out infinite;
+}
 
 /* Shimmer loader */
 .shimmer-loader {
@@ -263,6 +355,7 @@
    FORM INPUT OVERRIDES
 ───────────────────────────────────────────── */
 @layer components {
+
   /* Defined inside @layer components so Tailwind utilities (pl-10/pr-10 etc, which
      compile into @layer utilities) win the cascade and can override this padding -
      otherwise the icon overlaps the input text since both rules have equal
@@ -304,29 +397,41 @@
    styles - reused as-is by every dashboard so button radius/padding/weight
    stays consistent across the app (10px radius, 0.6rem/1.25rem padding).
 ───────────────────────────────────────────── */
+/* Chunky, tactile "pressable" button - a solid color band along the bottom
+   edge stands in for a shadow, so the button reads as a physical 3D block
+   that visibly presses flat on click rather than just darkening. This is the
+   button language the fox mascot's playful, rounded illustration style calls
+   for - a flat corporate button looked wrong next to it. */
 .btn-primary {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.6rem 1.25rem;
+  padding: 0.65rem 1.35rem;
   background: rgb(var(--primary));
   color: white;
-  font-weight: 600;
+  font-weight: 800;
   font-size: 0.875rem;
-  border-radius: 8px;
+  border-radius: 14px;
   border: none;
   cursor: pointer;
-  transition: background-color 0.15s ease, box-shadow 0.15s ease;
-  box-shadow: 0 1px 2px rgb(var(--shadow-color) / 0.12);
+  transition: transform 0.1s ease, box-shadow 0.1s ease, background-color 0.15s ease;
+  box-shadow: 0 4px 0 rgb(var(--primary-hover));
 }
 
 .btn-primary:hover {
-  background: rgb(var(--primary-hover));
-  box-shadow: 0 2px 6px rgb(var(--shadow-color) / 0.16);
+  background: rgb(var(--primary));
+  transform: translateY(1px);
+  box-shadow: 0 3px 0 rgb(var(--primary-hover));
 }
 
 .btn-primary:active {
-  transform: scale(0.98);
+  transform: translateY(4px);
+  box-shadow: 0 0 0 rgb(var(--primary-hover));
+}
+
+.btn-primary:disabled {
+  transform: none;
+  box-shadow: 0 4px 0 rgb(var(--primary-hover));
 }
 
 /* ─────────────────────────────────────────────
@@ -343,49 +448,66 @@
 .dark .text-primary {
   color: rgb(var(--primary-light));
 }
+
 .dark .hover\:text-primary:hover {
   color: rgb(var(--primary-light));
 }
+
 .dark .text-secondary {
   color: rgb(var(--secondary-light));
 }
+
 .dark .hover\:text-secondary:hover {
   color: rgb(var(--secondary-light));
 }
+
 .dark .border-primary {
   border-color: rgb(var(--primary-light));
 }
+
 .dark .border-primary\/20 {
   border-color: rgb(var(--primary-light) / 0.2);
 }
+
 .dark .border-primary\/30 {
   border-color: rgb(var(--primary-light) / 0.3);
 }
+
 .dark .hover\:border-primary:hover {
   border-color: rgb(var(--primary-light));
 }
+
 .dark .hover\:border-primary\/20:hover {
   border-color: rgb(var(--primary-light) / 0.2);
 }
+
 .dark .hover\:border-primary\/30:hover {
   border-color: rgb(var(--primary-light) / 0.3);
 }
+
 .dark .hover\:border-primary\/40:hover {
   border-color: rgb(var(--primary-light) / 0.4);
 }
+
 .dark .border-secondary {
   border-color: rgb(var(--secondary-light));
 }
+
 .dark .border-secondary\/20 {
   border-color: rgb(var(--secondary-light) / 0.2);
 }
+
 .dark .border-secondary\/30 {
   border-color: rgb(var(--secondary-light) / 0.3);
 }
+
 .dark .hover\:border-secondary:hover {
   border-color: rgb(var(--secondary-light));
 }
 
+/* Ghost's secondary-action counterpart to btn-primary's chunky press effect:
+   a thick, bold outline rather than a bottom-shadow block (this one isn't
+   meant to look "pressable", just as confidently drawn). */
 .btn-ghost {
   display: inline-flex;
   align-items: center;
@@ -393,18 +515,73 @@
   padding: 0.6rem 1.25rem;
   background: transparent;
   color: rgb(var(--text-secondary));
-  font-weight: 500;
+  font-weight: 700;
   font-size: 0.875rem;
-  border-radius: 10px;
-  border: 1.5px solid rgb(var(--border));
+  border-radius: 14px;
+  border: 2px solid rgb(var(--border));
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.15s ease;
 }
 
 .btn-ghost:hover {
-  background: rgb(var(--bg));
-  border-color: rgb(var(--primary-light));
+  background: rgb(var(--primary-muted));
+  border-color: rgb(var(--primary));
+  color: rgb(var(--primary-hover));
+  transform: translateY(-1px);
+}
+
+.btn-ghost:active {
+  transform: translateY(0);
+}
+
+/* Soft-filled secondary action - used across the app (course header actions,
+   AI generate/refine buttons, composer toolbars) as `.btn-secondary`, but this
+   class was never actually defined: every one of those buttons was rendering
+   as unstyled default browser markup. Distinct from `.btn-ghost` (fully
+   transparent, bold outline) by being a filled, quieter companion to
+   `.btn-primary` - same radius/padding family, no bottom-shadow press effect
+   since that's primary's signature move alone. */
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 1.25rem;
+  background: rgb(var(--primary-muted));
+  color: rgb(var(--primary));
+  font-weight: 700;
+  font-size: 0.875rem;
+  border-radius: 14px;
+  border: 2px solid rgb(var(--primary) / 0.2);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-secondary:hover {
+  background: rgb(var(--primary));
+  color: white;
+  border-color: rgb(var(--primary));
+  transform: translateY(-1px);
+}
+
+.btn-secondary:active {
+  transform: translateY(0);
+}
+
+.btn-secondary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.dark .btn-secondary {
   color: rgb(var(--primary-light));
+  border-color: rgb(var(--primary-light) / 0.3);
+}
+
+.dark .btn-secondary:hover {
+  background: rgb(var(--primary-light));
+  color: rgb(var(--bg));
+  border-color: rgb(var(--primary-light));
 }
 
 /* ─────────────────────────────────────────────
@@ -462,11 +639,13 @@
   color: #4ade80;
   border-color: rgba(22, 163, 74, 0.35);
 }
+
 .dark .badge-medium {
   background: rgba(217, 119, 6, 0.18);
   color: #fbbf24;
   border-color: rgba(217, 119, 6, 0.35);
 }
+
 .dark .badge-hard {
   background: rgba(220, 38, 38, 0.18);
   color: #f87171;
@@ -482,6 +661,7 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+
 .line-clamp-2 {
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -535,4 +715,102 @@
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+}
+
+/* ─────────────────────────────────────────────
+   DUOLINGO FOX THEME UTILITIES & 3D BUTTONS
+───────────────────────────────────────────── */
+@keyframes wiggle {
+
+  0%,
+  100% {
+    transform: rotate(-4deg);
+  }
+
+  50% {
+    transform: rotate(4deg);
+  }
+}
+
+@keyframes fox-pop {
+  0% {
+    transform: scale(0.9) translateY(4px);
+    opacity: 0;
+  }
+
+  70% {
+    transform: scale(1.05) translateY(-2px);
+    opacity: 1;
+  }
+
+  100% {
+    transform: scale(1) translateY(0);
+    opacity: 1;
+  }
+}
+
+.animate-wiggle {
+  animation: wiggle 2s ease-in-out infinite;
+}
+
+.animate-fox-pop {
+  animation: fox-pop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+/* International Academic Buttons */
+.btn-academic {
+  @apply relative inline-flex items-center justify-center font-semibold text-sm rounded-xl px-5 py-2.5 transition-all duration-200 cursor-pointer select-none shadow-sm hover:shadow-md active:scale-[0.98];
+}
+
+.btn-academic-primary {
+  @apply btn-academic text-white bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 border border-indigo-500/30;
+}
+
+.btn-academic-outline {
+  @apply btn-academic text-text-primary bg-surface hover:bg-card border border-border;
+}
+
+.btn-academic-amber {
+  @apply btn-academic text-white bg-amber-600 hover:bg-amber-700 active:bg-amber-800 border border-amber-500/30;
+}
+
+/* Compatibility aliases */
+.btn-smart {
+  @apply btn-academic;
+}
+
+.btn-smart-primary {
+  @apply btn-academic-primary;
+}
+
+.btn-smart-secondary {
+  @apply btn-academic-outline;
+}
+
+.btn-smart-success {
+  @apply btn-academic-primary;
+}
+
+.btn-smart-surface {
+  @apply btn-academic-outline;
+}
+
+.btn-duo {
+  @apply btn-academic;
+}
+
+.btn-duo-primary {
+  @apply btn-academic-primary;
+}
+
+.btn-duo-success {
+  @apply btn-academic-primary;
+}
+
+.btn-duo-sky {
+  @apply btn-academic-primary;
+}
+
+.btn-duo-surface {
+  @apply btn-academic-outline;
 }

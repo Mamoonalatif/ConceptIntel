@@ -11,7 +11,6 @@ import {
   Brain,
   BarChart3,
   Globe,
-  HelpCircle,
   Plus,
   Minus,
   Search,
@@ -21,6 +20,7 @@ import {
   GraduationCap,
 } from 'lucide-react';
 import { StudyIllustration, TeachIllustration, AdminIllustration, FAQIllustration } from '../components/illustrations';
+import { FoxMascot } from '../components/FoxMascot';
 import { Nav } from '../components/landing/Nav';
 import { Footer } from '../components/landing/Footer';
 import { Reveal } from '../components/landing/Reveal';
@@ -36,28 +36,29 @@ const sectionHeading = 'text-3xl sm:text-4xl font-extrabold text-text-primary tr
 const sectionSub = 'text-text-secondary text-base mt-3 leading-relaxed';
 
 /* ─────────────────────────────────────────────
-   Hero illustration — a small two-person scene rather than a single
-   centered icon-graphic: the teacher gestures at the knowledge-graph panel
-   while a student studies alongside, echoing the "teach & learn together"
-   headline. Credibility stat cards float around the pair.
+   Hero visual featuring the Neutral Fox Mascot Starter Animation!
 ───────────────────────────────────────────── */
 const HeroVisual: React.FC = () => (
-  <div className="relative w-full flex items-center justify-center">
-    {/* Single teacher illustration — the smaller, redundant student figure
-        that used to overlap it here was removed to avoid two competing
-        visuals in the hero. */}
-    <div className="relative z-20 w-full max-w-md" style={{ animation: 'ci-float 6s ease-in-out infinite' }}>
-      <TeachIllustration className="w-full h-auto drop-shadow-xl" />
+  <div className="relative w-full flex items-center justify-center py-8">
+    <div className="relative z-20 flex flex-col items-center justify-center" style={{ animation: 'ci-float 5s ease-in-out infinite' }}>
+      <div className="relative p-2">
+        <div className="absolute inset-0 bg-primary/20 rounded-full blur-3xl animate-pulse" />
+        <FoxMascot pose="happy" size={270} animated={true} />
+      </div>
+      <div className="mt-5 bg-surface/95 backdrop-blur-md rounded-2xl px-5 py-2.5 shadow-lg border border-border flex items-center gap-2.5">
+        <span className="text-xl">🦊</span>
+        <span className="text-sm font-extrabold text-text-primary">Welcome to ConceptIntel!</span>
+      </div>
     </div>
 
-    {/* Floating stat callouts */}
-    <div className="absolute top-0 right-0 sm:-right-6 z-20 ci-glass rounded-2xl p-3 shadow-card w-32" style={{ animation: 'ci-fade-up 0.6s ease-out 0.4s both' }}>
-      <p className="text-[9px] font-bold text-text-muted uppercase tracking-wider">Concept mastery</p>
-      <p className="text-lg font-extrabold text-teal-600 dark:text-teal-400">+34%</p>
+    {/* Floating stat callouts positioned neatly outside mascot bounds without overlap */}
+    <div className="absolute -top-3 -right-2 sm:-right-8 z-30 ci-glass rounded-2xl p-3.5 shadow-card w-40 animate-fade-up">
+      <p className="text-[10px] font-bold text-text-muted uppercase tracking-wider">Concept mastery</p>
+      <p className="text-xl font-extrabold text-primary">+34%</p>
     </div>
-    <div className="absolute bottom-4 left-0 sm:-left-6 z-20 ci-glass rounded-2xl p-3 shadow-card w-32" style={{ animation: 'ci-fade-up 0.6s ease-out 0.6s both' }}>
-      <p className="text-[9px] font-bold text-text-muted uppercase tracking-wider">Concepts mapped</p>
-      <p className="text-lg font-extrabold text-text-primary">2,847</p>
+    <div className="absolute top-12 -left-2 sm:-left-8 z-30 ci-glass rounded-2xl p-3.5 shadow-card w-40 animate-fade-up">
+      <p className="text-[10px] font-bold text-text-muted uppercase tracking-wider">Concepts mapped</p>
+      <p className="text-xl font-extrabold text-text-primary">2,847</p>
     </div>
   </div>
 );
@@ -102,7 +103,7 @@ interface RoleInfo {
 const ROLES: RoleInfo[] = [
   {
     role: 'Student',
-    desc: 'Explore the knowledge graph and follow an adaptive learning path.',
+    desc: 'Explore the concept graph and follow an adaptive learning path.',
     Visual: StudyIllustration,
   },
   {
@@ -143,7 +144,7 @@ const FAQS = [
     a: 'Yes. Every AI-generated grade, resource or graph edit is reviewed and approved by a teacher first.',
   },
   {
-    q: "What if my course doesn't have a knowledge graph yet?",
+    q: "What if my course doesn't have a concept graph yet?",
     a: 'Upload your content once and the AI drafts one automatically — teachers refine it from there.',
   },
   {
@@ -263,10 +264,10 @@ export const LandingPage: React.FC = () => {
   return (
     <div className="min-h-screen bg-background text-text-primary overflow-x-hidden relative">
       {/* ── Colored page background wash (marketing page only — richer than
-          the flat dashboard background, tied to the teal brand color) ── */}
+          the flat dashboard background, tied to the fox-orange brand color) ── */}
       <div className="fixed inset-0 -z-10 pointer-events-none">
-        <div className="absolute inset-0 bg-gradient-to-b from-teal-50 via-background to-background dark:from-teal-950/30 dark:via-background dark:to-background" />
-        <div className="absolute top-[-8%] left-1/2 -translate-x-1/2 w-[1100px] h-[700px] rounded-full bg-teal-400/15 dark:bg-teal-500/10 blur-[120px]" />
+        <div className="absolute inset-0 bg-gradient-to-b from-primary-muted via-background to-background dark:from-primary-muted/40 dark:via-background dark:to-background" />
+        <div className="absolute top-[-8%] left-1/2 -translate-x-1/2 w-[1100px] h-[700px] rounded-full bg-primary/15 dark:bg-primary/10 blur-[120px]" />
         <div className="absolute top-[45%] right-[-12%] w-[560px] h-[560px] rounded-full bg-slate-300/10 dark:bg-slate-500/5 blur-[120px]" />
         <div className="absolute bottom-[-5%] left-[-10%] w-[520px] h-[520px] rounded-full bg-rose-300/10 dark:bg-rose-500/5 blur-[120px]" />
       </div>
@@ -316,7 +317,7 @@ export const LandingPage: React.FC = () => {
       {/* ── HERO SECTION — pt-16 compensates for the fixed navbar height ── */}
       <section className="relative overflow-hidden pt-16">
         <div className="absolute inset-0 pointer-events-none overflow-hidden">
-          <div className="ci-blob absolute -top-24 -left-16 w-96 h-96 rounded-full bg-teal-400/20 dark:bg-teal-500/10 blur-3xl" />
+          <div className="ci-blob absolute -top-24 -left-16 w-96 h-96 rounded-full bg-primary/20 dark:bg-primary/10 blur-3xl" />
           <div className="ci-blob absolute top-40 -right-24 w-[28rem] h-[28rem] rounded-full bg-slate-300/20 dark:bg-slate-500/10 blur-3xl" style={{ animationDelay: '4s' }} />
           <div className="ci-blob absolute bottom-0 left-1/3 w-80 h-80 rounded-full bg-rose-300/15 dark:bg-rose-500/10 blur-3xl" style={{ animationDelay: '8s' }} />
         </div>
@@ -327,7 +328,7 @@ export const LandingPage: React.FC = () => {
               <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight leading-[1.05] ci-fade-up">
                 Teach & Learn by
                 <br />
-                <span className="bg-gradient-to-r from-teal-700 via-teal-600 to-teal-700 bg-clip-text text-transparent">
+                <span className="text-primary">
                   Concept
                 </span>
                 <span className="text-text-primary">, Not Just </span>
@@ -336,12 +337,12 @@ export const LandingPage: React.FC = () => {
 
               <p className="text-lg text-text-secondary leading-relaxed max-w-xl ci-fade-up" style={{ animationDelay: '0.1s' }}>
                 Most platforms track courses and grades — not understanding. ConceptIntel maps your curriculum into a
-                knowledge graph, so every gap is visible and every path is adaptive.
+                concept graph, so every gap is visible and every path is adaptive.
               </p>
 
               <div className="flex flex-wrap gap-4 ci-fade-up" style={{ animationDelay: '0.2s' }}>
                 <button onClick={() => navigate('/register')}
-                  className="ci-btn-hover px-7 py-3.5 text-base font-bold flex items-center gap-2 rounded-xl text-white bg-gradient-to-r from-teal-700 to-teal-600 hover:from-teal-800 hover:to-teal-700 shadow-glow">
+                  className="ci-btn-hover px-7 py-3.5 text-base font-bold flex items-center gap-2 rounded-xl text-white bg-primary hover:bg-primary-hover shadow-glow">
                   Get Started <ArrowRight className="w-5 h-5" />
                 </button>
                 <a href="#how-it-works"
@@ -364,8 +365,8 @@ export const LandingPage: React.FC = () => {
       <section id="about" className="relative py-12 sm:py-14 z-10">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
           <Reveal className="text-center max-w-2xl mx-auto mb-10">
-            
-            <h2 className={sectionHeading}>Built to make <span className="text-teal-700 dark:text-teal-400">understanding</span> visible</h2>
+
+            <h2 className={sectionHeading}>Built to make <span className="text-primary">understanding</span> visible</h2>
           </Reveal>
 
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 items-center">
@@ -374,7 +375,7 @@ export const LandingPage: React.FC = () => {
             </Reveal>
 
             <Reveal delay={0.1} className="lg:col-span-7 order-1 lg:order-2">
-           
+
 
               <div className="mt-7 space-y-2">
                 {BENEFITS.map(b => {
@@ -410,7 +411,7 @@ export const LandingPage: React.FC = () => {
         <div className="absolute inset-0 bg-gradient-to-b from-transparent via-card/50 to-transparent pointer-events-none" />
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative">
           <Reveal className="text-center max-w-2xl mx-auto mb-14">
-            <h2 className={sectionHeading}>From syllabus to <span className="text-teal-700 dark:text-teal-400">adaptive</span> path</h2>
+            <h2 className={sectionHeading}>From syllabus to <span className="text-primary">adaptive</span> path</h2>
             <p className={sectionSub}>
               Teacher-supervised at every step — nothing reaches a student unchecked.
             </p>
@@ -445,8 +446,8 @@ export const LandingPage: React.FC = () => {
       <section id="roles" className="py-14 relative z-10">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <Reveal className="text-center max-w-2xl mx-auto mb-12">
-            
-            <h2 className={sectionHeading}>Made for <span className="text-teal-700 dark:text-teal-400">teaching and learning</span> first</h2>
+
+            <h2 className={sectionHeading}>Made for <span className="text-primary">teaching and learning</span> first</h2>
             <p className={sectionSub}>
               Built around teachers and students first — coordinators and admins keep the institution running.
             </p>
@@ -464,9 +465,8 @@ export const LandingPage: React.FC = () => {
                 <Reveal
                   key={role.role}
                   delay={i * 0.1}
-                  className={`ci-card-hover rounded-3xl border border-border bg-card shadow-card p-7 w-full sm:max-w-xs flex flex-col items-center text-center ${
-                    isTeacher ? 'sm:-translate-y-6 sm:scale-105 z-10 border-primary/30' : 'sm:translate-y-3'
-                  }`}
+                  className={`ci-card-hover rounded-3xl border border-border bg-card shadow-card p-7 w-full sm:max-w-xs flex flex-col items-center text-center ${isTeacher ? 'sm:-translate-y-6 sm:scale-105 z-10 border-primary/30' : 'sm:translate-y-3'
+                    }`}
                 >
                   <div className="w-40 h-40 mb-5 flex items-center justify-center">
                     <Visual className="w-full h-full drop-shadow-sm" />
@@ -476,7 +476,7 @@ export const LandingPage: React.FC = () => {
 
                   {isTeacher && (
                     <div className="mb-4">
-                      <p className="text-[10px] font-bold text-text-muted uppercase tracking-wider mb-2">Also available as</p>
+                      <p className="text-[11px] font-bold text-text-muted uppercase tracking-wider mb-2">Also available as</p>
                       <div className="flex flex-wrap justify-center gap-2">
                         {TEACHER_SUBROLES.map(sub => {
                           const SubIcon = sub.icon;
@@ -491,7 +491,7 @@ export const LandingPage: React.FC = () => {
                   )}
 
                   <button onClick={() => navigate('/register')}
-                    className="ci-btn-hover mt-auto px-5 py-2.5 rounded-xl text-sm font-bold text-white bg-gradient-to-r from-teal-700 to-teal-600 hover:from-teal-800 hover:to-teal-700 shadow-glow inline-flex items-center gap-2">
+                    className="ci-btn-hover mt-auto px-5 py-2.5 rounded-xl text-sm font-bold text-white bg-primary hover:bg-primary-hover shadow-glow inline-flex items-center gap-2">
                     Get Started <ArrowRight className="w-4 h-4" />
                   </button>
                 </Reveal>
@@ -506,8 +506,8 @@ export const LandingPage: React.FC = () => {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <Reveal className="ci-glass rounded-3xl p-8">
             <div className="text-center max-w-2xl mx-auto mb-10">
-             
-              <h2 className={sectionHeading}>Where ConceptIntel is <span className="text-teal-700 dark:text-teal-400">different</span></h2>
+
+              <h2 className={sectionHeading}>Where ConceptIntel is <span className="text-primary">different</span></h2>
               <p className={sectionSub}>Subject-agnostic, concept-graph-driven, and always teacher-in-the-loop.</p>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
@@ -515,8 +515,8 @@ export const LandingPage: React.FC = () => {
                 const Icon = f.icon;
                 return (
                   <Reveal key={f.title} delay={i * 0.06} className="ci-card-hover rounded-xl border border-border bg-surface/60 p-5 text-center flex flex-col items-center h-full">
-                    <div className="w-11 h-11 rounded-xl border border-teal-500/30 flex items-center justify-center mb-3 text-teal-500 transition-colors">
-                      <Icon className="w-6 h-6 stroke-teal-500 stroke-[1.75]" />
+                    <div className="w-11 h-11 rounded-xl border border-primary/30 flex items-center justify-center mb-3 text-primary transition-colors">
+                      <Icon className="w-6 h-6 stroke-primary stroke-[1.75]" />
                     </div>
                     <p className="text-sm font-bold text-text-primary leading-snug">{f.title}</p>
                   </Reveal>
@@ -531,8 +531,8 @@ export const LandingPage: React.FC = () => {
       <section id="faq" className="py-14 relative z-10 overflow-hidden">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <Reveal className="text-center max-w-2xl mx-auto mb-10">
-           
-            <h2 className={sectionHeading}>Frequently Asked <span className="text-teal-700 dark:text-teal-400">Questions</span></h2>
+
+            <h2 className={sectionHeading}>Frequently Asked <span className="text-primary">Questions</span></h2>
             <p className={sectionSub}>Can't find what you're looking for? Search below or check the answers we get asked most.</p>
           </Reveal>
 
@@ -584,33 +584,23 @@ export const LandingPage: React.FC = () => {
             </div>
 
             {/* Right: illustrated character next to giant "FAQ" lettering, with
-                floating question-mark doodles — teal-themed echo of the reference
-                image's playful FAQ visual. Hidden on small screens, plenty of
-                whitespace elsewhere on the page already. */}
-            <Reveal delay={0.1} className="hidden lg:flex lg:col-span-5 justify-center relative h-full min-h-[420px] items-center">
-              <span className="absolute -top-2 right-4 text-[7rem] font-extrabold text-primary/10 dark:text-primary/25 leading-none select-none tracking-tight">
-                FAQ
-              </span>
-              <HelpCircle className="absolute top-6 left-2 w-9 h-9 text-slate-400/50" style={{ animation: 'ci-float 6s ease-in-out infinite' }} />
-              <HelpCircle className="absolute bottom-16 right-2 w-6 h-6 text-teal-400/50" style={{ animation: 'ci-float 7s ease-in-out infinite', animationDelay: '1s' }} />
-              <span className="absolute top-16 right-10 text-3xl font-extrabold text-teal-500/30 select-none" style={{ animation: 'ci-float 5s ease-in-out infinite', animationDelay: '0.5s' }}>?</span>
-              <span className="absolute bottom-10 left-6 text-2xl font-extrabold text-slate-400/40 select-none" style={{ animation: 'ci-float 6.5s ease-in-out infinite', animationDelay: '1.5s' }}>?</span>
-              <div className="absolute top-1/3 right-0 w-2.5 h-2.5 rounded-full bg-teal-400/50" style={{ animation: 'ci-float 4s ease-in-out infinite' }} />
-              <div className="absolute bottom-1/4 left-0 w-2 h-2 rounded-full bg-slate-400/50" style={{ animation: 'ci-float 5.5s ease-in-out infinite', animationDelay: '0.8s' }} />
-
+                floating question-mark doodles — fox-orange-themed echo of the
+                reference image's playful FAQ visual. Hidden on small screens,
+                plenty of whitespace elsewhere on the page already. */}
+            <Reveal delay={0.1} className="hidden lg:flex lg:col-span-5 justify-center relative h-full min-h-[380px] items-center">
               <FAQIllustration className="relative z-10 w-64 sm:w-80 h-auto drop-shadow-xl" />
             </Reveal>
           </div>
         </div>
       </section>
 
-    
+
 
       {/* ── CONTACT ── */}
       <section id="contact" className="py-12 relative z-10">
         <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
           <Reveal className="ci-glass rounded-3xl p-8 sm:p-10 text-center">
-            <h2 className="text-xl sm:text-2xl font-extrabold text-text-primary mb-2">Questions? <span className="text-teal-700 dark:text-teal-400">Reach out.</span></h2>
+            <h2 className="text-xl sm:text-2xl font-extrabold text-text-primary mb-2">Questions? <span className="text-primary">Reach out.</span></h2>
             <p className="text-text-secondary text-sm leading-relaxed max-w-xl mx-auto">
               Got a question we didn't cover? Check the FAQ above, or send us a message directly and we'll get
               back to you.
@@ -619,7 +609,7 @@ export const LandingPage: React.FC = () => {
             {!contactFormOpen ? (
               <button
                 onClick={() => setContactFormOpen(true)}
-                className="ci-btn-hover mt-6 px-6 py-3 rounded-xl text-sm font-bold text-white bg-gradient-to-r from-teal-700 to-teal-600 hover:from-teal-800 hover:to-teal-700 shadow-glow inline-flex items-center gap-2"
+                className="ci-btn-hover mt-6 px-6 py-3 rounded-xl text-sm font-bold text-white bg-primary hover:bg-primary-hover shadow-glow inline-flex items-center gap-2"
               >
                 <MessageSquare className="w-4 h-4" /> Contact Us
               </button>
@@ -655,7 +645,7 @@ export const LandingPage: React.FC = () => {
                   <button
                     type="submit"
                     disabled={contactStatus === 'sending'}
-                    className="ci-btn-hover shrink-0 px-6 py-3 rounded-xl text-sm font-bold text-white bg-gradient-to-r from-teal-700 to-teal-600 hover:from-teal-800 hover:to-teal-700 shadow-glow inline-flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:translate-y-0">
+                    className="ci-btn-hover shrink-0 px-6 py-3 rounded-xl text-sm font-bold text-white bg-primary hover:bg-primary-hover shadow-glow inline-flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:translate-y-0">
                     {contactStatus === 'sending' ? (
                       <>Sending <Loader2 className="w-4 h-4 animate-spin" /></>
                     ) : (
@@ -663,7 +653,7 @@ export const LandingPage: React.FC = () => {
                     )}
                   </button>
                   {contactStatus === 'success' && (
-                    <span className="text-sm font-semibold text-teal-600 dark:text-teal-400 inline-flex items-center gap-1.5">
+                    <span className="text-sm font-semibold text-primary inline-flex items-center gap-1.5">
                       <CheckCircle className="w-4 h-4" /> Message sent!
                     </span>
                   )}

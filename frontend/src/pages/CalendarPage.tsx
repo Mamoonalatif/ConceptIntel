@@ -6,8 +6,8 @@ import { calendarService } from '../services/api';
 import type { CalendarEventItem } from '../services/api';
 import { parseUtc } from '../lib/time';
 import { EmptyStateIllustration } from '../components/illustrations';
+import { getPrimaryNavItems } from '../lib/roleNav';
 import {
-  ArrowLeft,
   CalendarDays,
   ChevronLeft,
   ChevronRight,
@@ -18,12 +18,6 @@ import {
 } from 'lucide-react';
 
 const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-
-const defaultDashboardFor = (role?: string) => {
-  if (role === 'admin') return '/admin';
-  if (role === 'teacher') return '/teacher';
-  return '/student';
-};
 
 /** One calendar day cell's worth of data. */
 interface DayCell {
@@ -130,9 +124,9 @@ const CalendarPage: React.FC = () => {
   const goPrevMonth = () => setMonthAnchor((m) => new Date(m.getFullYear(), m.getMonth() - 1, 1));
   const goNextMonth = () => setMonthAnchor((m) => new Date(m.getFullYear(), m.getMonth() + 1, 1));
 
-  const navItems: NavItem[] = [
-    { key: 'back', label: 'Back to Dashboard', icon: ArrowLeft, onClick: () => navigate(defaultDashboardFor(user?.role)) },
-  ];
+  // Same role-specific top section as the user's own dashboard, so the sidebar
+  // looks identical everywhere instead of collapsing to just the global links.
+  const navItems: NavItem[] = getPrimaryNavItems(user, navigate);
 
   const selectedDayEvents = selectedDay ? grid.find((c) => isSameDay(c.date, selectedDay))?.events ?? [] : [];
 
@@ -202,7 +196,7 @@ const CalendarPage: React.FC = () => {
               {/* Weekday header */}
               <div className="grid grid-cols-7 gap-1 mb-1">
                 {WEEKDAY_LABELS.map((d) => (
-                  <div key={d} className="text-center text-[10px] font-bold text-text-muted uppercase tracking-wider py-0.5">
+                  <div key={d} className="text-center text-[11px] font-bold text-text-muted uppercase tracking-wider py-0.5">
                     {d}
                   </div>
                 ))}
@@ -225,7 +219,7 @@ const CalendarPage: React.FC = () => {
                       }`}
                     >
                       <span
-                        className={`text-[11px] font-bold w-5 h-5 flex items-center justify-center rounded-full shrink-0 ${
+                        className={`text-[12px] font-bold w-5 h-5 flex items-center justify-center rounded-full shrink-0 ${
                           cell.isToday
                             ? 'bg-primary text-white'
                             : cell.inCurrentMonth

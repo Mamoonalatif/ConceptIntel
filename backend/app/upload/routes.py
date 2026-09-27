@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks, status
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks, status
 from fastapi.responses import FileResponse
 from fastapi import Response
 from sqlalchemy.orm import Session
@@ -23,7 +23,6 @@ from app.courses.access import assert_course_access
 from app.auth.routes import get_current_teacher, get_current_user
 from app.notifications.service import create_notification, notify_course_students
 from app.notifications.types import NotificationType
-from app.email_service import send_notification_email
 
 
 router = APIRouter(prefix="/files", tags=["Content Upload"])
@@ -108,22 +107,59 @@ def process_uploaded_file_task(file_id: int):
         # RAG ingestion: clean -> chunk -> caption images -> dedup -> embed -> store.
         # Best-effort - a failure here doesn't roll back the successful text
         # extraction above (the file stays usable, just without semantic search
-        # over it), so it's wrapped separately.
+        # over it), so it's wrapped separately. rag_status is what actually records
+        # the outcome now - `status` above only ever meant "text extraction done".
         try:
             from app.rag.pipeline import process_file_for_rag
             course = db.query(Course).filter(Course.id == file_record.course_id).first()
-            chunk_count = process_file_for_rag(
-                db=db,
-                course_id=file_record.course_id,
-                file_id=file_record.id,
-                course_name=course.name if course else "this course",
-                file_name=file_record.filename,
-                raw_text=extracted_text,
-                file_type=file_record.file_type,
-                filepath=filepath,
-            )
-            print(f"RAG pipeline stored {chunk_count} chunks for file ID {file_id}.")
+            if file_record.material_kind == "outline":
+                # process_file_for_rag also short-circuits on this, but skip the call
+                # entirely so a genuine "outline, never embedded by design" is never
+                # confused with a completed embed of zero chunks.
+                file_record.rag_status = "Skipped"
+                file_record.rag_error = None
+                db.commit()
+
+                # The outline text often already states CLOs/PLOs explicitly (a
+                # "Course Learning Outcomes" section is standard in most syllabi) -
+                # auto-extract them now instead of waiting for a teacher to click
+                # the manual "auto-extract" action. Best-effort: no outline text,
+                # no OPENROUTER_API_KEY, or a transient AI failure must not fail
+                # this upload - see app/outcomes/services.py.
+                try:
+                    from app.outcomes.services import auto_extract_clos_for_course, auto_tag_untagged_concepts
+                    extraction = auto_extract_clos_for_course(db, file_record.course_id, file_record.teacher_id)
+                    if extraction["created"]:
+                        catalog_id = course.catalog_id if course and course.catalog_id is not None else file_record.course_id
+                        # Covers the "outline uploaded after the graph already exists"
+                        # ordering - if concepts are already in Neo4j, tag them with
+                        # these brand-new CLOs right away rather than waiting for the
+                        # next graph revision (the more common ordering's own hook,
+                        # see revision_service.coordinator_decide).
+                        auto_tag_untagged_concepts(db, catalog_id)
+                except Exception as e:
+                    print(f"Warning: CLO auto-extraction failed for file ID {file_id}: {str(e)}")
+            else:
+                chunk_count = process_file_for_rag(
+                    db=db,
+                    course_id=file_record.course_id,
+                    file_id=file_record.id,
+                    course_name=course.name if course else "this course",
+                    file_name=file_record.filename,
+                    raw_text=extracted_text,
+                    file_type=file_record.file_type,
+                    filepath=filepath,
+                    material_kind=file_record.material_kind,
+                )
+                file_record.rag_status = "Completed"
+                file_record.rag_error = None
+                db.commit()
+                print(f"RAG pipeline stored {chunk_count} chunks for file ID {file_id}.")
         except Exception as e:
+            db.rollback()
+            file_record.rag_status = "Failed"
+            file_record.rag_error = str(e)[:2000]
+            db.commit()
             print(f"RAG pipeline error for file ID {file_id} (text extraction still succeeded): {str(e)}")
 
     except Exception as e:
@@ -135,20 +171,14 @@ def process_uploaded_file_task(file_id: int):
             try:
                 course = db.query(Course).filter(Course.id == file_record.course_id).first()
                 if course:
+                    # create_notification already emails the teacher in a background
+                    # thread - no need for a second, duplicate send_notification_email call.
                     create_notification(
                         db, course.teacher_id, NotificationType.FILE_PROCESSING_FAILED,
                         title="File processing failed",
                         message=f"'{file_record.filename}' could not be processed in {course.name}. Please try re-uploading.",
                         link=f"/course/{course.id}",
                     )
-                    teacher = db.query(User).filter(User.id == course.teacher_id).first()
-                    if teacher:
-                        send_notification_email(
-                            teacher.email, teacher.full_name,
-                            title="File processing failed",
-                            message=f"'{file_record.filename}' could not be processed in {course.name}. Please try re-uploading.",
-                            link=f"/course/{course.id}",
-                        )
             except Exception as notif_err:
                 print(f"Warning: failed to create file-failed notification: {str(notif_err)}")
         print(f"Background parsing error for file ID {file_id}: {str(e)}")
@@ -163,9 +193,25 @@ def upload_file(
     course_id: int,
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
+    material_kind: str = Form("material"),
     db: Session = Depends(get_db),
     current_teacher: User = Depends(get_current_teacher)
 ):
+    """Upload one course file.
+
+    material_kind splits the two genuinely different things a teacher uploads:
+
+      "material" - slides, notes, textbook chapters. Chunked and embedded, then
+                   retrieved to ground content generation and assignment grading.
+      "outline"  - the course outline / syllabus. Never embedded (see
+                   app/rag/pipeline.py for why), and fed to concept extraction as
+                   structured scope context instead.
+
+    The distinction is not cosmetic. Before it existed, an uploaded outline was
+    mined for concepts like "Credit Hours", "Code PHY", "TEXT AND MATERIAL" and
+    "Halliday" (a textbook author's surname), all of which landed in the concept
+    graph as if they were course concepts.
+    """
     # 1. Validate course exists and teacher owns it
     course = db.query(Course).filter(Course.id == course_id, Course.teacher_id == current_teacher.id).first()
     if not course:
@@ -211,6 +257,13 @@ def upload_file(
     safe_filename = file_path_obj.name
     file_type = extension.replace(".", "")
 
+    kind = (material_kind or "material").strip().lower()
+    if kind not in ("material", "outline"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="material_kind must be either 'material' or 'outline'.",
+        )
+
     # 3. Store file (S3 > Supabase > local, whichever is configured)
     file_url = _store_file(content, safe_filename, extension, course_id)
 
@@ -222,6 +275,7 @@ def upload_file(
         file_url=file_url,
         file_type=file_type,
         file_size=file_size,
+        material_kind=kind,
         status="Uploaded"
     )
     db.add(new_file)
@@ -426,6 +480,8 @@ def replace_file(
     file_record.status = "Uploaded"
     file_record.extracted_text = None
     file_record.used_ocr = False
+    file_record.rag_status = "Pending"
+    file_record.rag_error = None
 
     db.commit()
     db.refresh(file_record)
@@ -451,6 +507,8 @@ def reprocess_file(
         )
 
     file_record.status = "Uploaded"
+    file_record.rag_status = "Pending"
+    file_record.rag_error = None
     db.commit()
 
     background_tasks.add_task(process_uploaded_file_task, file_record.id)

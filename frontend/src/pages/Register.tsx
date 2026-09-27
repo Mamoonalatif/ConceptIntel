@@ -3,10 +3,55 @@ import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { PasswordChecklist, isPasswordValid } from '../components/PasswordChecklist';
 import { isValidEmail } from '../lib/validators';
-import { AuthVisualPanel } from '../components/AuthVisualPanel';
-import { AuthIllustration } from '../components/illustrations';
-import logo from '../assets/logo.png';
+import { FoxMark } from '../components/FoxMark';
+import { FoxMascot } from '../components/FoxMascot';
+import type { MascotRole } from '../components/FoxMascot';
 import { Lock, Mail, User, AlertCircle, Loader2, Eye, EyeOff, CheckCircle2, XCircle, ArrowLeft } from 'lucide-react';
+
+type RegPanelTab = 'student' | 'teacher' | 'admin';
+
+const REG_PANEL_TABS: { id: RegPanelTab; label: string; tagline: string; desc: string; role: MascotRole; pose: 'focused' | 'confident' | 'happy' }[] = [
+  { id: 'student', label: 'For Students', tagline: 'Your goals matter', desc: 'Explore your concept graph and follow an adaptive learning path tailored to your gaps.', role: 'student', pose: 'focused' },
+  { id: 'teacher', label: 'For Teachers', tagline: 'Better Teaching,\nBrighter Futures', desc: 'Upload content, curate the AI concept graph, and supervise every output before students see it.', role: 'teacher', pose: 'confident' },
+  { id: 'admin', label: 'For Admins', tagline: 'Institutional\nOversight, Simplified', desc: 'Platform-wide control over programs, staff accounts, and access requests.', role: 'admin', pose: 'happy' },
+];
+
+const RegLeftPanel: React.FC = () => {
+  const [active, setActive] = useState<RegPanelTab>('student');
+  const tab = REG_PANEL_TABS.find(t => t.id === active)!;
+  return (
+    <div className="hidden lg:flex lg:w-[44%] bg-gradient-to-br from-primary to-primary-hover relative overflow-hidden flex-col justify-between p-10">
+      <div className="absolute top-[-80px] left-[-60px] w-80 h-80 rounded-full bg-white/10 blur-3xl pointer-events-none" />
+      <div className="absolute bottom-[-60px] right-[-40px] w-60 h-60 rounded-full bg-white/10 blur-3xl pointer-events-none" />
+      <div className="flex items-center gap-3 z-10">
+        <FoxMark className="w-[38px] h-[38px]" tone="white" />
+        <div className="flex items-baseline gap-0.5">
+          <span className="text-white text-lg font-bold">Concept</span>
+          <span className="text-white/70 text-lg font-bold">Intel</span>
+        </div>
+      </div>
+      <div className="z-10 flex flex-col items-center text-center flex-1 justify-center">
+        <div className="flex gap-1.5 mb-8 bg-white/15 rounded-full p-1">
+          {REG_PANEL_TABS.map(t => (
+            <button key={t.id} onClick={() => setActive(t.id)}
+              className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all duration-200 ${
+                active === t.id ? 'bg-white text-primary shadow-md' : 'text-white/80 hover:text-white hover:bg-white/20'
+              }`}>{t.label}</button>
+          ))}
+        </div>
+        <div className="transition-all duration-300">
+          <FoxMascot key={tab.id} pose={tab.pose} role={tab.role} size={220} animated={true} />
+        </div>
+        <h2 className="mt-6 text-2xl font-extrabold text-white leading-snug whitespace-pre-line">{tab.tagline}</h2>
+        <p className="mt-3 text-white/75 text-sm leading-relaxed max-w-xs">{tab.desc}</p>
+        <div className="mt-6 inline-flex items-center gap-2 bg-white/15 border border-white/25 px-4 py-1.5 rounded-full">
+          <span className="text-xs font-bold text-white tracking-wide uppercase">{tab.label}</span>
+        </div>
+      </div>
+      <p className="z-10 text-white/50 text-xs text-center">Different Roles · Same Goal — Smarter Learning Together</p>
+    </div>
+  );
+};
 
 const FULL_NAME_PATTERN = /^[A-Za-z]+(?: [A-Za-z]+)*$/;
 const ILLEGAL_NAME_CHAR_PATTERN = /[^A-Za-z ]/;
@@ -68,11 +113,7 @@ const Register: React.FC = () => {
   return (
     <div className="h-screen bg-background flex flex-col overflow-hidden">
       <div className="flex-1 flex overflow-hidden">
-        <AuthVisualPanel
-          tagline={'Start your\nlearning journey'}
-          description="Create your account and join students mapping knowledge at universities worldwide."
-          illustration={AuthIllustration}
-        />
+        <RegLeftPanel />
 
         {/* Right: Register Form */}
         <div className="flex-1 flex items-center justify-center p-6 relative overflow-y-auto">
@@ -90,17 +131,22 @@ const Register: React.FC = () => {
 
             {/* Mobile Logo */}
             <div className="flex lg:hidden items-center gap-2 justify-center mb-6">
-              <img src={logo} alt="ConceptIntel" width={34} height={34} className="w-[34px] h-[34px] object-contain" />
+              <FoxMark className="w-[34px] h-[34px]" />
               <div className="flex items-baseline gap-0.5">
                 <span className="text-xl font-bold text-text-primary">Concept</span>
                 <span className="text-xl font-bold text-primary">Intel</span>
               </div>
             </div>
 
-          <div className="glass-panel rounded-2xl shadow-card p-8 animate-fade-up">
-            <div className="mb-6">
-              <h1 className="text-2xl font-extrabold text-text-primary">Create Account</h1>
-              <p className="text-text-secondary text-sm mt-2">Join ConceptIntel as a student to start mapping concepts</p>
+          <div className="glass-panel rounded-3xl shadow-card p-8 animate-fade-up relative">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h1 className="text-2xl font-extrabold text-text-primary">Create Account</h1>
+                <p className="text-text-secondary text-sm mt-1">Join ConceptIntel as a student</p>
+              </div>
+              <div className="shrink-0 -mr-2 -mt-4">
+                <FoxMascot pose={password.length > 0 && !showPassword ? 'peeking' : 'waving'} size={80} animated={true} />
+              </div>
             </div>
 
             {error && (

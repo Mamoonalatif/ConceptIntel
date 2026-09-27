@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { enrollmentService } from '../services/api';
 import EnrollmentCodeForm from '../components/EnrollmentCodeForm';
 import { AppShell, type NavItem } from '../components/AppShell';
 import { ToDoList } from '../components/ToDoList';
+import { TodayTeachingWidget } from '../components/TodayTeachingWidget';
 import { EmptyStateIllustration } from '../components/illustrations';
+import { getCourseBannerClass } from '../lib/courseTheme';
 import { useAutoRefresh } from '../hooks/useAutoRefresh';
 import {
   GraduationCap, BookOpen, User, Hash, ArrowRight,
@@ -24,31 +26,26 @@ interface EnrollmentDetail {
     code: string;
     semester: string;
     status: string;
+    theme_color?: string | null;
   };
 }
-
-// Classroom-style banner palette — cycles through the app's existing brand
-// colors plus a few standard Tailwind accents, picked by course id so each
-// card keeps a stable color across renders.
-const BANNER_GRADIENTS = [
-  'from-primary to-primary-hover',
-  'from-secondary to-secondary-hover',
-  'from-rose-500 to-rose-600',
-  'from-amber-500 to-amber-600',
-  'from-emerald-600 to-emerald-700',
-];
-const getBannerGradient = (id: number) => BANNER_GRADIENTS[Math.abs(id) % BANNER_GRADIENTS.length];
 
 const StudentDashboard: React.FC = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const [enrollments, setEnrollments] = useState<EnrollmentDetail[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [showJoinModal, setShowJoinModal] = useState(false);
-  const [activeTab, setActiveTab] = useState<'classes' | 'todo'>('classes');
+  // Arriving from another page's sidebar (see lib/roleNav.ts) passes which tab
+  // to land on via router state, so the sidebar's "My Classes"/"To-Do" links
+  // work the same from anywhere, not just from this dashboard itself.
+  const [activeTab, setActiveTab] = useState<'classes' | 'todo'>(
+    (location.state as { tab?: 'classes' | 'todo' } | null)?.tab || 'classes'
+  );
 
   const fetchEnrollments = async (silent = false) => {
     try {
@@ -86,6 +83,12 @@ const StudentDashboard: React.FC = () => {
     return 'text-rose-500 dark:text-rose-400';
   };
 
+  // Per-course rows are NOT listed here - AppShell already fetches this
+  // student's enrollments itself and splices them in right after "My Classes"
+  // (see AppShell.tsx's own myCourses/expandedNavItems), specifically so pages
+  // like this one don't each have to load and render the course list
+  // themselves. Doing it here too used to duplicate every course in the
+  // sidebar - one row from this list, one row from AppShell's own splice.
   const navItems: NavItem[] = [
     {
       key: 'classes',
@@ -94,13 +97,6 @@ const StudentDashboard: React.FC = () => {
       active: activeTab === 'classes',
       onClick: () => setActiveTab('classes'),
     },
-    ...enrollments.map((enr) => ({
-      key: `course-${enr.course.id}`,
-      label: enr.course.name,
-      icon: BookOpen,
-      nested: true,
-      onClick: () => navigate(`/course/${enr.course.id}`),
-    })),
     {
       key: 'todo',
       label: 'To-Do',
@@ -149,7 +145,7 @@ const StudentDashboard: React.FC = () => {
                   {user?.full_name} <Star className="w-5 h-5 text-amber-400" />
                 </h2>
                 <p className="text-text-secondary text-sm mt-2 leading-relaxed">
-                  Track conceptual milestones, explore knowledge graphs, and build your learning path.
+                  Track conceptual milestones, explore concept graphs, and build your learning path.
                 </p>
               </div>
               <div className="w-14 h-14 bg-gradient-to-br from-primary/10 to-secondary/10 rounded-2xl flex items-center justify-center shrink-0">
@@ -206,6 +202,13 @@ const StudentDashboard: React.FC = () => {
 
         {activeTab === 'todo' && <ToDoList />}
 
+        {activeTab === 'classes' && !loading && enrollments.length > 0 && (
+          <TodayTeachingWidget
+            role="student"
+            courses={enrollments.map((e) => ({ id: e.course.id, name: e.course.name }))}
+          />
+        )}
+
         {/* Courses Grid */}
         {activeTab === 'classes' && (loading ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -251,13 +254,13 @@ const StudentDashboard: React.FC = () => {
                   onClick={() => navigate(`/course/${enr.course.id}`)}
                 >
                   {/* Classroom-style banner */}
-                  <div className={`relative h-24 px-5 pt-4 pb-8 bg-gradient-to-br ${getBannerGradient(enr.course.id)}`}>
+                  <div className={`relative h-24 px-5 pt-4 pb-8 bg-gradient-to-br ${getCourseBannerClass(enr.course)}`}>
                     <div className="flex items-center justify-between">
-                      <span className="bg-white/20 backdrop-blur-sm text-white text-[11px] font-bold px-2.5 py-1 rounded-lg flex items-center gap-1">
+                      <span className="bg-white/20 backdrop-blur-sm text-white text-[12px] font-bold px-2.5 py-1 rounded-lg flex items-center gap-1">
                         <Hash className="w-3 h-3" />
                         {enr.course.code || 'NO-CODE'}
                       </span>
-                      <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full ${
+                      <span className={`text-[12px] font-bold px-2.5 py-1 rounded-full ${
                         enr.course.status.toLowerCase() === 'open'
                           ? 'bg-white/90 text-emerald-700'
                           : 'bg-white/90 text-amber-700'

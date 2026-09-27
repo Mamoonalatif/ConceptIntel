@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { clearApiCache } from '../services/api';
 
 /**
  * Keeps a dashboard's data fresh without a manual page reload: refetches on an
@@ -13,11 +14,20 @@ export function useAutoRefresh(fetchFn: () => void, intervalMs: number = 15000) 
   fetchRef.current = fetchFn;
 
   useEffect(() => {
-    const interval = setInterval(() => fetchRef.current(), intervalMs);
+    // Drop the GET cache first: this hook exists precisely to go and look for
+    // NEW server state, so serving it a memoized response would defeat it. The
+    // cache still covers the case it's there for - navigating back to a screen
+    // you just came from - because that path doesn't run this.
+    const refresh = () => {
+      clearApiCache();
+      fetchRef.current();
+    };
 
-    const onFocus = () => fetchRef.current();
+    const interval = setInterval(refresh, intervalMs);
+
+    const onFocus = () => refresh();
     const onVisibilityChange = () => {
-      if (document.visibilityState === 'visible') fetchRef.current();
+      if (document.visibilityState === 'visible') refresh();
     };
 
     window.addEventListener('focus', onFocus);

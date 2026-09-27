@@ -1,5 +1,6 @@
 from pydantic import BaseModel
 from datetime import datetime
+from typing import Optional
 
 class UploadedFileResponse(BaseModel):
     id: int
@@ -11,6 +12,17 @@ class UploadedFileResponse(BaseModel):
     file_size: int
     status: str
     used_ocr: bool = False
+    # "material" (chunked + embedded for retrieval) or "outline" (never embedded -
+    # passed to the model as structured scope context instead). See
+    # app/rag/pipeline.py. Defaulted so responses built from pre-migration rows
+    # still validate.
+    material_kind: str = "material"
+    # Whether RAG ingestion (chunk/embed) actually succeeded - distinct from `status`
+    # above, which only reflects text extraction. See app/upload/routes.py -
+    # process_uploaded_file_task. Defaulted so responses from pre-migration rows
+    # still validate.
+    rag_status: str = "Pending"
+    rag_error: Optional[str] = None
     created_at: datetime
 
     class Config:

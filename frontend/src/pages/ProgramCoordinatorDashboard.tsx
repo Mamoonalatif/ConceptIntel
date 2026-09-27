@@ -8,6 +8,7 @@ import { useAutoRefresh } from '../hooks/useAutoRefresh';
 import {
   Layers, Plus, RefreshCw, AlertCircle, Pencil, Trash2, X, Check, UserPlus, BookOpen, Network,
 } from 'lucide-react';
+import { EmptyStateIllustration } from '../components/illustrations';
 
 type ProgramCoordSection = 'catalog' | 'instances' | 'coordinators';
 
@@ -390,7 +391,10 @@ const ProgramCoordinatorDashboard: React.FC = () => {
           {loading ? (
             <div className="glass-panel rounded-2xl p-8 border border-border text-center text-sm text-text-muted">Loading...</div>
           ) : courses.length === 0 ? (
-            <div className="glass-panel rounded-2xl p-8 border border-border text-center text-sm text-text-muted">No courses created yet.</div>
+            <div className="glass-panel rounded-2xl p-8 border border-border text-center text-sm text-text-muted">
+              <EmptyStateIllustration className="w-20 h-20 mx-auto mb-2" />
+              No courses created yet.
+            </div>
           ) : (
             <div className="space-y-3">
               {courses.map((course) => (
@@ -439,6 +443,7 @@ const ProgramCoordinatorDashboard: React.FC = () => {
             <div className="glass-panel rounded-2xl p-8 border border-border text-center text-sm text-text-muted">Loading...</div>
           ) : myCourses.length === 0 ? (
             <div className="glass-panel rounded-2xl p-8 border border-border text-center text-sm text-text-muted">
+              <EmptyStateIllustration className="w-20 h-20 mx-auto mb-2" />
               No courses under your program(s) yet.
             </div>
           ) : (

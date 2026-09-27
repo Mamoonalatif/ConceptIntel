@@ -1,6 +1,6 @@
 import React from 'react';
 import { AuthIllustration } from './illustrations';
-import logoWhite from '../assets/logo_white.png';
+import { FoxMark } from '../components/FoxMark';
 
 export interface AuthVisualPanelProps {
   /** Short heading shown under the illustration, e.g. "Welcome back". Use
@@ -23,7 +23,7 @@ export const AuthVisualPanel: React.FC<AuthVisualPanelProps> = ({
     <div className="hidden lg:flex lg:w-[42%] bg-gradient-to-br from-primary to-primary-hover relative overflow-hidden flex-col justify-between p-11">
       {/* Logo */}
       <div className="flex items-center gap-3 z-10">
-        <img src={logoWhite} alt="ConceptIntel" width={38} height={38} className="w-[38px] h-[38px] object-contain" />
+        <FoxMark className="w-[38px] h-[38px]" tone="white" />
         <div className="flex items-baseline gap-0.5">
           <span className="text-white text-lg font-bold">Concept</span>
           <span className="text-white/70 text-lg font-bold">Intel</span>

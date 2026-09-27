@@ -34,9 +34,34 @@ def _fail_job(job_id: int, error_message: str) -> None:
         db.close()
 
 
+def get_course_outline_text(db, course_id: int, max_chars: int = 8000) -> str:
+    """The course outline(s) for a course, concatenated.
+
+    Returned separately from the teaching material and never mixed into it. An
+    outline is a scope document: it says which topics the course covers and in what
+    order. Fed to extraction as *material*, it produced concepts like "Credit Hours",
+    "Code PHY", "TEXT AND MATERIAL" and "Halliday" (a textbook author) - it names
+    administrative fields and bibliography entries with exactly the same syntax it
+    names real topics, and the extractor cannot tell them apart. Fed as scope
+    context instead, the same document becomes the single most useful signal for
+    deciding which concepts belong in the graph at all.
+    """
+    outlines = db.query(UploadedFile).filter(
+        UploadedFile.course_id == course_id,
+        UploadedFile.status == "Completed",
+        UploadedFile.material_kind == "outline",
+    ).all()
+    text = "\n\n".join(f.extracted_text for f in outlines if f.extracted_text)
+    return text[:max_chars]
+
+
 def stage_extract_text(job_id: int) -> str:
     """Stage 1: gather already-extracted text (OCR'd at upload time if needed) from
-    every successfully processed file uploaded for this course."""
+    every successfully processed file uploaded for this course.
+
+    Only material_kind='material' files are returned. Course outlines are excluded
+    here and re-introduced in stage 2 as scope context - see get_course_outline_text().
+    """
     db = SessionLocal()
     try:
         job = _get_job_or_raise(db, job_id)
@@ -44,11 +69,24 @@ def stage_extract_text(job_id: int) -> str:
 
         files = db.query(UploadedFile).filter(
             UploadedFile.course_id == job.course_id,
-            UploadedFile.status == "Completed"
+            UploadedFile.status == "Completed",
+            UploadedFile.material_kind == "material",
         ).all()
         combined = "\n\n".join(f.extracted_text for f in files if f.extracted_text)
 
         if not combined.strip():
+            outline_only = db.query(UploadedFile).filter(
+                UploadedFile.course_id == job.course_id,
+                UploadedFile.status == "Completed",
+                UploadedFile.material_kind == "outline",
+            ).count()
+            if outline_only:
+                raise ValueError(
+                    f"This course has {outline_only} course outline file(s) but no teaching "
+                    "material. A concept graph is built from lecture content, not from the "
+                    "outline - the outline only defines the scope. Upload slides, notes or "
+                    "textbook chapters as 'Course material' and try again."
+                )
             raise ValueError(
                 "No extracted text available - make sure at least one uploaded file "
                 "for this course has finished processing (status 'Completed')."
@@ -77,6 +115,7 @@ def stage_clean_and_structure(job_id: int, combined_text: str) -> List[Dict[str,
         course_name = catalog.name if catalog else f"Course #{job.catalog_id}"
         course_code = catalog.code if catalog else None
         existing_concept_names = neo4j_service.get_existing_concept_names(job.catalog_id)
+        course_outline = get_course_outline_text(db, job.course_id)
 
         return kimi_service.structure_full_text(
             combined_text,
@@ -84,6 +123,7 @@ def stage_clean_and_structure(job_id: int, combined_text: str) -> List[Dict[str,
             course_code=course_code,
             teacher_notes=job.teacher_notes,
             existing_concept_names=existing_concept_names,
+            course_outline=course_outline,
         )
     except Exception as e:
         logger.error("Pipeline stage_clean_and_structure failed for job %d: %s", job_id, str(e))

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 
 import ReactFlow, {
@@ -12,18 +12,28 @@ import ReactFlow, {
   MarkerType,
   Position,
   useReactFlow,
+  useViewport,
   ReactFlowProvider,
 } from 'reactflow';
 // CSS is imported once in main.tsx (before index.css, so Tailwind wins the cascade) -
 // not here, to avoid a second copy racing the import order that fix depends on.
 
 import { useAuth } from '../context/AuthContext';
-import { graphService, courseService } from '../services/api';
+import { graphService, courseService, contentGenerationService, outcomesService, clearApiCache } from '../services/api';
+import { FoxSpinner } from '../components/FoxSpinner';
+import type { CLO } from '../services/api';
+import { apiErrorMessage } from '../lib/apiError';
+import { layoutPrerequisiteGraph } from '../lib/graphLayout';
 import {
   ArrowLeft, RefreshCw, Plus, Link as LinkIcon, Save, Info,
   Trash2, AlertCircle, CheckCircle2, Search, BarChart3,
-  X, BookOpen, Zap
+  X, BookOpen, Zap, Maximize2, Minimize2, Download,
+  FileImage, FileCode, FileText, Table2, ZoomIn, ZoomOut, Sparkles
 } from 'lucide-react';
+import {
+  buildGraphSvg, downloadSvg, downloadPng, printGraphAsPdf,
+  downloadConceptCsv, slugify, type ExportNode, type ExportEdge
+} from '../lib/graphExport';
 
 interface Concept {
   id: string;
@@ -31,6 +41,7 @@ interface Concept {
   description: string;
   difficulty: string;
   course_id: number;
+  material?: string;
 }
 
 // ── Node Difficulty → Light Theme Badge Classes ──
@@ -42,17 +53,68 @@ const getDifficultyStyles = (difficulty: string) => {
   }
 };
 
+// ── Zoom controls ──
+// React Flow's own <Controls/> sit in the bottom-left corner of the canvas and
+// are easy to miss; in fullscreen there is also no browser zoom UI to fall back
+// on (and Ctrl +/- there would scale the entire page, toolbar included, rather
+// than the graph). These live in the toolbar so they're in the same place either
+// way.
+//
+// Deliberately its own component: useViewport() re-renders its caller on every
+// frame of a pan or zoom, and hoisting that into the page component would re-run
+// the whole 100-node tree continuously while dragging. Isolated here, only the
+// percentage label repaints.
+const ZoomControls: React.FC = () => {
+  const { zoomIn, zoomOut, fitView } = useReactFlow();
+  const { zoom } = useViewport();
+
+  return (
+    <div className="flex items-center rounded-lg border border-border overflow-hidden">
+      <button
+        id="zoom-out-btn"
+        onClick={() => zoomOut({ duration: 200 })}
+        className="px-2 py-1.5 text-text-secondary hover:text-primary hover:bg-primary-muted transition-all"
+        title="Zoom out (−)"
+      >
+        <ZoomOut className="w-3.5 h-3.5" />
+      </button>
+      <button
+        onClick={() => fitView({ padding: 0.18, duration: 300 })}
+        className="px-2 py-1.5 text-[12px] font-semibold text-text-secondary hover:text-primary hover:bg-primary-muted border-x border-border transition-all tabular-nums min-w-[3.25rem]"
+        title="Fit the whole graph on screen (0)"
+      >
+        {Math.round(zoom * 100)}%
+      </button>
+      <button
+        id="zoom-in-btn"
+        onClick={() => zoomIn({ duration: 200 })}
+        className="px-2 py-1.5 text-text-secondary hover:text-primary hover:bg-primary-muted transition-all"
+        title="Zoom in (+)"
+      >
+        <ZoomIn className="w-3.5 h-3.5" />
+      </button>
+    </div>
+  );
+};
+
 // ── Inner component that uses useReactFlow ──
 const KnowledgeGraphInner: React.FC = () => {
   const { courseId } = useParams<{ courseId: string }>();
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { setCenter } = useReactFlow();
+  const { setCenter, zoomIn, zoomOut, fitView } = useReactFlow();
 
   const idNum = parseInt(courseId || '0');
   const isTeacher = user?.role === 'teacher';
 
   const [courseName, setCourseName] = useState('');
+  // CLO outcomes layer: which CLOs exist for this course's catalog subject, and
+  // which ones each concept currently addresses (see app/outcomes/* on the
+  // backend). Loaded once the catalog id is known.
+  const [catalogId, setCatalogId] = useState<number | null>(null);
+  const [clos, setClos] = useState<CLO[]>([]);
+  const [conceptCloMap, setConceptCloMap] = useState<Record<string, number[]>>({});
+  const [savingConceptClos, setSavingConceptClos] = useState(false);
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [concepts, setConcepts] = useState<Concept[]>([]);
@@ -67,17 +129,55 @@ const KnowledgeGraphInner: React.FC = () => {
   // Analytics panel
   const [showAnalytics, setShowAnalytics] = useState(false);
 
+  // Fullscreen + export. Large graphs (a full semester's course can run to 100+
+  // concepts) are unreadable in the ~60% of the window left over after the app
+  // chrome, so the whole page can go true-fullscreen; and the export menu hands
+  // the same graph over in soft form for reports/printouts.
+  const pageRef = useRef<HTMLDivElement>(null);
+  const exportMenuRef = useRef<HTMLDivElement>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const [exporting, setExporting] = useState('');
+
   // Selected Node Side Panel (opened from the popup's "Edit" button, teacher only)
   const [selectedNode, setSelectedNode] = useState<Concept | null>(null);
   const [editName, setEditName] = useState('');
   const [editDesc, setEditDesc] = useState('');
   const [editDiff, setEditDiff] = useState('Medium');
   const [updatingNode, setUpdatingNode] = useState(false);
+  // Per-action in-flight flags. Every mutating button reflects its own state
+  // immediately (spinner + disabled) rather than looking idle while a request is
+  // running, which is what made double submits possible.
+  const [deletingNode, setDeletingNode] = useState(false);
+  const [creatingNode, setCreatingNode] = useState(false);
+  const [creatingEdge, setCreatingEdge] = useState(false);
+  const [removingLinkId, setRemovingLinkId] = useState('');
 
   // Click popup: a lightweight floating card showing name/difficulty/description
   // right where the node was clicked, rather than jumping straight to a persistent
   // sidebar. Position is clamped to the viewport so it never renders off-screen.
   const [popupNode, setPopupNode] = useState<{ concept: Concept; x: number; y: number } | null>(null);
+
+  // Inline "generate study material" composer inside the node popup.
+  const [genOpen, setGenOpen] = useState(false);
+  const [genType, setGenType] = useState('flashcard');
+  const [genDiff, setGenDiff] = useState<'Easy' | 'Medium' | 'Hard'>('Medium');
+  const [genTarget, setGenTarget] = useState<'concept' | 'parent' | 'combined'>('concept');
+  const [genBusy, setGenBusy] = useState(false);
+  const [genMsg, setGenMsg] = useState('');
+
+  // Detailed "material" field on the selected node - AI-generate/refine, teacher
+  // only. Both actions submit a GraphEditProposal awaiting coordinator approval,
+  // same as every other node edit, so success just confirms submission.
+  const [materialBusy, setMaterialBusy] = useState(false);
+  const [materialRefineOpen, setMaterialRefineOpen] = useState(false);
+  const [materialInstruction, setMaterialInstruction] = useState('');
+
+  // Auto-extract CLOs from the course outline - teacher only. CLOs have no other
+  // creation UI in this app, so this is the first way to get them onto a subject
+  // at all without hitting the API directly.
+  const [autoExtractingClos, setAutoExtractingClos] = useState(false);
+  const [cloExtractMsg, setCloExtractMsg] = useState('');
 
   // Add Node Modal
   const [showNodeModal, setShowNodeModal] = useState(false);
@@ -91,66 +191,38 @@ const KnowledgeGraphInner: React.FC = () => {
   const [targetName, setTargetName] = useState('');
 
   // ── Level-Based Hierarchical Layout ──
+  // Top-to-bottom prerequisite pyramid: foundational concepts (no prerequisites
+  // of their own) sit at the top row, with edges running down toward whatever
+  // depends on them - a concept's prerequisite is always above it, and the
+  // arrowhead (markerStart, below) points back up at that prerequisite.
+  // Algorithm lives in lib/graphLayout.ts (see the notes there on why plain
+  // levelling wasn't enough); this just applies the result to the flow nodes.
   const applyLevelLayout = useCallback((nodesList: any[], edgesList: any[]) => {
-    const adj: Record<string, string[]> = {};
-    const inDegree: Record<string, number> = {};
-    nodesList.forEach(n => { adj[n.id] = []; inDegree[n.id] = 0; });
-    edgesList.forEach(e => {
-      if (adj[e.source]) {
-        adj[e.source].push(e.target);
-        inDegree[e.target] = (inDegree[e.target] || 0) + 1;
-      }
-    });
-
-    const levels: Record<string, number> = {};
-    const queue: string[] = [];
-    nodesList.forEach(n => {
-      if (inDegree[n.id] === 0) { levels[n.id] = 0; queue.push(n.id); }
-    });
-    while (queue.length > 0) {
-      const u = queue.shift()!;
-      adj[u].forEach(v => {
-        levels[v] = Math.max(levels[v] || 0, levels[u] + 1);
-        queue.push(v);
-      });
-    }
-
-    const levelGroups: Record<number, string[]> = {};
-    nodesList.forEach(n => {
-      const lvl = levels[n.id] || 0;
-      if (!levelGroups[lvl]) levelGroups[lvl] = [];
-      levelGroups[lvl].push(n.id);
-    });
-
-    // Top-to-bottom prerequisite pyramid: foundational concepts (no prerequisites
-    // of their own) sit at the top row, with straight edges running down toward
-    // whatever depends on them - a concept's prerequisite is always above it, and
-    // the arrowhead (markerStart, below) points back up at that prerequisite.
-    const hSpacing = 160;
-    const vSpacing = 160;
-
-    return nodesList.map(node => {
-      const lvl = levels[node.id] || 0;
-      const group = levelGroups[lvl];
-      const idx = group.indexOf(node.id);
-      const groupW = (group.length - 1) * hSpacing;
-      return {
-        ...node,
-        position: {
-          x: idx * hSpacing - groupW / 2 + 500,
-          y: lvl * vSpacing + 60,
-        }
-      };
-    });
+    const { positions } = layoutPrerequisiteGraph(nodesList, edgesList);
+    return nodesList.map(node => ({ ...node, position: positions[node.id] }));
   }, []);
 
   // ── Load Graph Data ──
-  const loadGraphData = async () => {
+  // `force` bypasses the GET cache in services/api.ts - the Refresh button must
+  // always mean "go and ask the server", never "hand me what you already had".
+  const loadGraphData = async (force = false) => {
     try {
+      if (force) clearApiCache();
       setLoading(true);
       setError('');
       const courseData = await courseService.getDetails(idNum);
       setCourseName(courseData.name);
+      setCatalogId(courseData.catalog_id ?? null);
+      if (courseData.catalog_id) {
+        outcomesService.listCLOs(courseData.catalog_id).then(setClos).catch(() => setClos([]));
+        outcomesService.listConceptCLOMap(courseData.catalog_id)
+          .then((rows) => {
+            const map: Record<string, number[]> = {};
+            rows.forEach((r) => { map[r.concept_node_id] = r.clo_ids; });
+            setConceptCloMap(map);
+          })
+          .catch(() => setConceptCloMap({}));
+      }
       const data = await graphService.getGraph(idNum);
       setConcepts(data.nodes);
 
@@ -163,7 +235,7 @@ const KnowledgeGraphInner: React.FC = () => {
             // everything else (description, difficulty label) lives in the click
             // popup below, not on the node itself.
             label: (
-              <span className="text-[11px] font-bold leading-tight line-clamp-2 text-center px-1">
+              <span className="text-[12px] font-bold leading-tight line-clamp-2 text-center px-1">
                 {concept.name}
               </span>
             ),
@@ -184,25 +256,42 @@ const KnowledgeGraphInner: React.FC = () => {
         id: edge.id,
         source: edge.source,
         target: edge.target,
-        type: 'straight',
+        // Bezier, not straight. A hub concept that many others depend on produced
+        // a fan of straight lines cutting diagonally across the whole canvas and
+        // through unrelated nodes - the main source of the clutter. Curves leave
+        // each node vertically and bend toward their target, so links that span
+        // distant rows bow around what's between them instead of slicing through.
+        type: 'default',
         animated: false,
         // markerStart (not markerEnd): the arrowhead sits at the SOURCE end of the
         // line - the prerequisite concept - pointing back up at it, since that's
         // what "X is a prerequisite of Y" means: the arrow points at the thing you
         // need first, not at the thing it unlocks.
-        markerStart: { type: MarkerType.ArrowClosed, color: '#64748b', width: 18, height: 18 },
-        style: { strokeWidth: 1.5, stroke: '#64748b' },
+        markerStart: { type: MarkerType.ArrowClosed, color: '#94a3b8', width: 16, height: 16 },
+        // Lighter and thinner than the nodes so the concepts stay the foreground
+        // and a dense middle row reads as texture rather than a wall of lines.
+        style: { strokeWidth: 1.25, stroke: '#94a3b8', strokeOpacity: 0.65 },
       }));
 
       const structured = applyLevelLayout(flowNodes, flowEdges);
       setNodes(structured);
       setEdges(flowEdges);
-    } catch {
-      setError('Could not load graph data. Ensure the backend is running.');
+    } catch (err) {
+      setError(apiErrorMessage(err, 'Could not load the concept graph.'));
     } finally {
       setLoading(false);
     }
   };
+
+  // Students don't view/interact with the raw concept graph directly - they
+  // work with it indirectly (generated study materials, mastery tracking, the
+  // Adaptive Engine's revision plan). Redirect rather than just hiding the
+  // entry point, so a direct URL doesn't bypass this.
+  useEffect(() => {
+    if (user && user.role === 'student') {
+      navigate(`/course/${courseId}`, { replace: true });
+    }
+  }, [user, courseId]);
 
   useEffect(() => { if (idNum) loadGraphData(); }, [courseId]);
 
@@ -213,6 +302,105 @@ const KnowledgeGraphInner: React.FC = () => {
   useEffect(() => {
     if (error)   { const t = setTimeout(() => setError(''), 6000);   return () => clearTimeout(t); }
   }, [error]);
+
+  // ── Fullscreen ──
+  // Driven off the browser's own fullscreenchange event rather than assumed from
+  // the click, so pressing Esc (which never goes through our button) still leaves
+  // the icon in the right state.
+  useEffect(() => {
+    const sync = () => setIsFullscreen(Boolean(document.fullscreenElement));
+    document.addEventListener('fullscreenchange', sync);
+    return () => document.removeEventListener('fullscreenchange', sync);
+  }, []);
+
+  const toggleFullscreen = async () => {
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen();
+      else await pageRef.current?.requestFullscreen();
+    } catch {
+      setError('Fullscreen was blocked by the browser.');
+    }
+  };
+
+  // Keyboard zoom: +/- to step, 0 to fit. Only bound for teachers (students
+  // never get the canvas) and deliberately ignored while typing, so pressing
+  // "-" inside the concept-search box or a description field types a character
+  // instead of zooming the graph out from under you.
+  useEffect(() => {
+    if (!isTeacher) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;   // leave browser zoom alone
+      const el = document.activeElement;
+      const tag = el?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (el as HTMLElement)?.isContentEditable) return;
+
+      if (e.key === '+' || e.key === '=') { e.preventDefault(); zoomIn({ duration: 200 }); }
+      else if (e.key === '-' || e.key === '_') { e.preventDefault(); zoomOut({ duration: 200 }); }
+      else if (e.key === '0') { e.preventDefault(); fitView({ padding: 0.18, duration: 300 }); }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isTeacher, zoomIn, zoomOut, fitView]);
+
+  // ── Export menu ──
+  useEffect(() => {
+    if (!showExportMenu) return;
+    const onOutsideClick = (e: MouseEvent) => {
+      // globalThis.Node, not Node - reactflow's Node type is imported above and
+      // would otherwise shadow the DOM one here.
+      if (!exportMenuRef.current?.contains(e.target as globalThis.Node)) setShowExportMenu(false);
+    };
+    document.addEventListener('mousedown', onOutsideClick);
+    return () => document.removeEventListener('mousedown', onOutsideClick);
+  }, [showExportMenu]);
+
+  // The export redraws the graph from these positions rather than capturing the
+  // canvas, so every concept lands in the file - not just the part currently
+  // panned into view.
+  const exportPayload = useMemo(() => {
+    const exportNodes: ExportNode[] = nodes.map(n => ({
+      id: n.id,
+      x: n.position.x,
+      y: n.position.y,
+      name: (n.data as any)?.concept?.name ?? n.id,
+      difficulty: (n.data as any)?.concept?.difficulty ?? 'Medium',
+    }));
+    const exportEdges: ExportEdge[] = edges.map(e => ({ source: e.source, target: e.target }));
+    return { exportNodes, exportEdges };
+  }, [nodes, edges]);
+
+  const handleExport = async (format: 'png' | 'svg' | 'pdf' | 'csv') => {
+    setShowExportMenu(false);
+    if (concepts.length === 0) { setError('There are no concepts to export yet.'); return; }
+
+    const base = `${slugify(courseName || 'course')}-knowledge-graph`;
+    const { exportNodes, exportEdges } = exportPayload;
+    setExporting(format);
+    try {
+      if (format === 'csv') {
+        const descriptions = Object.fromEntries(concepts.map(c => [c.id, c.description]));
+        downloadConceptCsv(exportNodes, exportEdges, descriptions, `${base}.csv`);
+      } else {
+        const svg = buildGraphSvg(
+          exportNodes, exportEdges,
+          courseName || 'Course',
+          new Date().toLocaleDateString(),
+        );
+        if (format === 'svg') downloadSvg(svg, `${base}.svg`);
+        else if (format === 'png') await downloadPng(svg, `${base}.png`);
+        else printGraphAsPdf(svg, base);
+      }
+      setSuccess(
+        format === 'pdf'
+          ? 'Print dialog opened — choose "Save as PDF" as the destination.'
+          : `Concept graph downloaded as ${format.toUpperCase()}.`,
+      );
+    } catch (e: any) {
+      setError(e?.message || 'Export failed.');
+    } finally {
+      setExporting('');
+    }
+  };
 
   // ── Node Click: open a popup right at the click point, not the sidebar ──
   const onNodeClick = (event: React.MouseEvent, node: Node) => {
@@ -268,8 +456,8 @@ const KnowledgeGraphInner: React.FC = () => {
       setSuccess(`Update to "${editName}" submitted for course coordinator approval.`);
       setSelectedNode(null);
       loadGraphData();
-    } catch {
-      setError('Failed to update concept.');
+    } catch (err) {
+      setError(apiErrorMessage(err, 'Could not save your changes to this concept.'));
     } finally {
       setUpdatingNode(false);
     }
@@ -279,54 +467,128 @@ const KnowledgeGraphInner: React.FC = () => {
   const handleDeleteNode = async () => {
     if (!selectedNode) return;
     if (!window.confirm(`Delete concept "${selectedNode.name}"? All prerequisite links will also be removed.`)) return;
+    setDeletingNode(true);
     try {
       await graphService.deleteNode(idNum, selectedNode.id);
       setSuccess(`Deletion of "${selectedNode.name}" submitted for course coordinator approval.`);
       setSelectedNode(null);
       loadGraphData();
-    } catch {
-      setError('Failed to delete concept.');
+    } catch (err) {
+      setError(apiErrorMessage(err, 'Could not delete this concept.'));
+    } finally {
+      setDeletingNode(false);
+    }
+  };
+
+  // ── Generate/Refine Material (AI) ──
+  const handleGenerateMaterial = async () => {
+    if (!selectedNode || materialBusy) return;
+    setMaterialBusy(true);
+    try {
+      await graphService.generateNodeMaterial(idNum, selectedNode.id);
+      setSuccess(`Detailed material for "${selectedNode.name}" generated and submitted for course coordinator approval.`);
+    } catch (err) {
+      setError(apiErrorMessage(err, 'Could not generate material for this concept.'));
+    } finally {
+      setMaterialBusy(false);
+    }
+  };
+
+  const handleEditMaterial = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedNode || materialBusy || !materialInstruction.trim()) return;
+    setMaterialBusy(true);
+    try {
+      await graphService.editNodeMaterial(idNum, selectedNode.id, materialInstruction.trim());
+      setSuccess(`Refinement to "${selectedNode.name}"'s material submitted for course coordinator approval.`);
+      setMaterialInstruction('');
+      setMaterialRefineOpen(false);
+    } catch (err) {
+      setError(apiErrorMessage(err, 'Could not refine material for this concept.'));
+    } finally {
+      setMaterialBusy(false);
+    }
+  };
+
+  // ── Auto-extract CLOs from the course outline (AI) ──
+  const handleAutoExtractClos = async () => {
+    if (autoExtractingClos) return;
+    setAutoExtractingClos(true);
+    setCloExtractMsg('');
+    try {
+      const result = await outcomesService.autoExtractCLOs(idNum);
+      if (catalogId) {
+        const [freshClos, freshMap] = await Promise.all([
+          outcomesService.listCLOs(catalogId),
+          outcomesService.listConceptCLOMap(catalogId),
+        ]);
+        setClos(freshClos);
+        const map: Record<string, number[]> = {};
+        freshMap.forEach((r) => { map[r.concept_node_id] = r.clo_ids; });
+        setConceptCloMap(map);
+      }
+      setCloExtractMsg(
+        `Extracted ${result.created_clos.length} new CLO(s)`
+        + (result.plo_links_created > 0 ? `, linked to ${result.plo_links_created} PLO(s)` : '')
+        + (result.concepts_tagged > 0 ? `, tagged ${result.concepts_tagged} concept(s)` : '')
+        + '.'
+      );
+    } catch (err) {
+      setError(apiErrorMessage(err, 'Could not auto-extract CLOs from the course outline.'));
+    } finally {
+      setAutoExtractingClos(false);
     }
   };
 
   // ── Create Node ──
   const handleCreateNode = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (creatingNode) return;   // guard against a double submit from a fast second click
+    setCreatingNode(true);
     try {
       await graphService.createNode(idNum, { name: newName, description: newDesc, difficulty: newDiff });
       setSuccess(`Concept "${newName}" submitted for course coordinator approval.`);
       setNewName(''); setNewDesc(''); setNewDiff('Medium');
       setShowNodeModal(false);
       loadGraphData();
-    } catch {
-      setError('Failed to create concept node.');
+    } catch (err) {
+      setError(apiErrorMessage(err, 'Could not create this concept.'));
+    } finally {
+      setCreatingNode(false);
     }
   };
 
   // ── Create Edge ──
   const handleCreateEdge = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (creatingEdge) return;
     if (sourceName === targetName) { setError('A concept cannot be its own prerequisite.'); return; }
+    setCreatingEdge(true);
     try {
       await graphService.createPrerequisite(sourceName, targetName, idNum);
       setSuccess(`Link "${sourceName}" → "${targetName}" submitted for course coordinator approval.`);
       setSourceName(''); setTargetName('');
       setShowEdgeModal(false);
       loadGraphData();
-    } catch {
-      setError('Failed to link prerequisite.');
+    } catch (err) {
+      setError(apiErrorMessage(err, 'Could not link these concepts.'));
+    } finally {
+      setCreatingEdge(false);
     }
   };
 
   // ── Delete Relationship ──
   const handleDeleteRelationship = async (sourceId: string, targetId: string) => {
     if (!window.confirm('Remove this prerequisite connection?')) return;
+    setRemovingLinkId(`${sourceId}->${targetId}`);
     try {
       await graphService.deleteRelationship(idNum, sourceId, targetId);
       setSuccess('Removal of prerequisite link submitted for course coordinator approval.');
       loadGraphData();
-    } catch {
-      setError('Failed to delete connection.');
+    } catch (err) {
+      setError(apiErrorMessage(err, 'Could not remove this prerequisite link.'));
+    } finally {
+      setRemovingLinkId('');
     }
   };
 
@@ -341,6 +603,79 @@ const KnowledgeGraphInner: React.FC = () => {
       });
   }, [selectedNode, edges, concepts]);
 
+  // ── The popup node's own prerequisite, for "generate for the parent instead" ──
+  // Edge direction is prerequisite -> dependent, so a parent is the SOURCE of an
+  // edge pointing at this node. Only the first is offered: the backend picks the
+  // most foundational one by importance, and one clear choice beats a sub-menu here.
+  const parentOfPopupNode = useMemo(() => {
+    if (!popupNode) return null;
+    const parentEdge = edges.find(e => e.target === popupNode.concept.id);
+    if (!parentEdge) return null;
+    return concepts.find(c => c.id === parentEdge.source) ?? null;
+  }, [popupNode, edges, concepts]);
+
+  const handleGenerateFromGraph = async () => {
+    if (!popupNode) return;
+    setGenBusy(true);
+    setGenMsg('');
+    try {
+      const created = await contentGenerationService.generate(idNum, {
+        concept_node_id: popupNode.concept.id,
+        concept_name: popupNode.concept.name,
+        content_type: genType,
+        difficulty: genDiff,
+        target: genTarget,
+      });
+      setGenOpen(false);
+      setGenTarget('concept');
+      setSuccess(`"${created.title}" generated and waiting for your review.`);
+    } catch (err) {
+      setGenMsg(apiErrorMessage(err, 'Could not generate material for this concept.'));
+    } finally {
+      setGenBusy(false);
+    }
+  };
+
+  // ── Focus mode ──
+  // On a course-sized graph even a well-ordered layout is busy. Selecting a
+  // concept fades everything that isn't it or one hop away, so you can actually
+  // trace what a concept depends on and what depends on it. Nothing is hidden -
+  // dimmed, not removed - so the overall shape stays readable.
+  const focusId = popupNode?.concept.id ?? selectedNode?.id ?? highlightedId ?? null;
+
+  const neighbourIds = useMemo(() => {
+    if (!focusId) return null;
+    const set = new Set<string>([focusId]);
+    edges.forEach(e => {
+      if (e.source === focusId) set.add(e.target);
+      if (e.target === focusId) set.add(e.source);
+    });
+    return set;
+  }, [focusId, edges]);
+
+  const displayNodes = useMemo(() => nodes.map(n => ({
+    ...n,
+    className: `${n.className} ${n.id === highlightedId ? 'ring-2 ring-primary ring-offset-2 scale-105' : ''}`,
+    style: {
+      ...n.style,
+      opacity: neighbourIds && !neighbourIds.has(n.id) ? 0.22 : 1,
+      transition: 'opacity 180ms ease',
+    },
+  })), [nodes, highlightedId, neighbourIds]);
+
+  const displayEdges = useMemo(() => edges.map(e => {
+    const related = !focusId || e.source === focusId || e.target === focusId;
+    return {
+      ...e,
+      style: {
+        ...e.style,
+        strokeOpacity: related ? (focusId ? 0.95 : 0.65) : 0.08,
+        strokeWidth: related && focusId ? 2 : 1.25,
+        stroke: related && focusId ? '#6366f1' : '#94a3b8',
+      },
+    };
+  }), [edges, focusId]);
+
   // ── Graph Analytics ──
   const analytics = useMemo(() => {
     const easy   = concepts.filter(c => c.difficulty.toLowerCase() === 'easy').length;
@@ -351,7 +686,7 @@ const KnowledgeGraphInner: React.FC = () => {
   }, [concepts, edges]);
 
   return (
-    <div className="h-screen w-screen bg-background flex flex-col overflow-hidden">
+    <div ref={pageRef} className="h-screen w-screen bg-background flex flex-col overflow-hidden">
 
       {/* ── Top Header ── */}
       <header className="glass-panel border-b border-border py-3 px-5 flex items-center justify-between shrink-0 z-20 shadow-soft">
@@ -364,7 +699,7 @@ const KnowledgeGraphInner: React.FC = () => {
           </button>
           <div>
             <h2 className="text-base font-bold text-text-primary flex items-center gap-1.5">
-              <span className="gradient-text">Knowledge Graph</span>
+              <span className="gradient-text">Concept Graph</span>
               {courseName && <span className="text-text-muted font-normal">— {courseName}</span>}
             </h2>
             <p className="text-xs text-text-muted">Concept prerequisite map</p>
@@ -395,7 +730,7 @@ const KnowledgeGraphInner: React.FC = () => {
                   >
                     <div className={`w-2 h-2 rounded-full border-2 ${styles.border}`} />
                     <span className="text-xs font-medium text-text-primary truncate">{c.name}</span>
-                    <span className="ml-auto text-[10px] text-text-muted">{c.difficulty}</span>
+                    <span className="ml-auto text-[11px] text-text-muted">{c.difficulty}</span>
                   </button>
                 );
               })}
@@ -438,12 +773,69 @@ const KnowledgeGraphInner: React.FC = () => {
             </>
           )}
 
+          {isTeacher && (
+            <>
+              <ZoomControls />
+
+              {/* Export ("soft form" download) */}
+              <div className="relative" ref={exportMenuRef}>
+                <button
+                  id="export-graph-btn"
+                  onClick={() => setShowExportMenu(v => !v)}
+                  disabled={Boolean(exporting)}
+                  className={`flex items-center gap-1 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all disabled:opacity-60 ${
+                    showExportMenu ? 'bg-primary-muted border-primary/30 text-primary' : 'border-border text-text-secondary hover:text-primary hover:bg-primary-muted'
+                  }`}
+                  title="Download this graph"
+                >
+                  <Download className={`w-3.5 h-3.5 ${exporting ? 'animate-pulse' : ''}`} />
+                  {exporting ? 'Preparing…' : 'Download'}
+                </button>
+
+                {showExportMenu && (
+                  <div className="absolute right-0 top-full mt-1 w-60 bg-surface border border-border rounded-xl shadow-hover z-50 overflow-hidden animate-fade-in">
+                    {([
+                      { key: 'png', icon: FileImage, label: 'PNG image',    hint: 'Full graph, 2x resolution' },
+                      { key: 'pdf', icon: FileText,  label: 'PDF document', hint: 'Via print → Save as PDF' },
+                      { key: 'svg', icon: FileCode,  label: 'SVG vector',   hint: 'Scales to any size' },
+                      { key: 'csv', icon: Table2,    label: 'Concept list (CSV)', hint: 'Names, difficulty, prerequisites' },
+                    ] as const).map(({ key, icon: Icon, label, hint }) => (
+                      <button
+                        key={key}
+                        onClick={() => handleExport(key)}
+                        className="w-full flex items-start gap-2.5 px-3 py-2.5 hover:bg-background text-left transition-colors"
+                      >
+                        <Icon className="w-4 h-4 text-primary shrink-0 mt-0.5" />
+                        <span className="min-w-0">
+                          <span className="block text-xs font-semibold text-text-primary">{label}</span>
+                          <span className="block text-[11px] text-text-muted leading-tight">{hint}</span>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Fullscreen - the whole page goes fullscreen (not just the canvas)
+                  so this toolbar, and the way back out, stay reachable. */}
+              <button
+                id="fullscreen-graph-btn"
+                onClick={toggleFullscreen}
+                className="p-2 border border-border text-text-secondary hover:text-primary hover:bg-primary-muted rounded-lg transition-all"
+                title={isFullscreen ? 'Exit fullscreen (Esc)' : 'Open graph in fullscreen'}
+              >
+                {isFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+              </button>
+            </>
+          )}
+
           <button
-            onClick={loadGraphData}
-            className="p-2 border border-border text-text-secondary hover:text-primary hover:bg-primary-muted rounded-lg transition-all"
+            onClick={() => loadGraphData(true)}
+            disabled={loading}
+            className="p-2 border border-border text-text-secondary hover:text-primary hover:bg-primary-muted rounded-lg transition-all disabled:opacity-60"
             title="Refresh graph"
           >
-            <RefreshCw className="w-3.5 h-3.5" />
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
           </button>
         </div>
       </header>
@@ -485,7 +877,7 @@ const KnowledgeGraphInner: React.FC = () => {
                   </div>
                 )}
               </div>
-              <div className="flex items-center gap-3 text-[10px] text-text-muted shrink-0">
+              <div className="flex items-center gap-3 text-[11px] text-text-muted shrink-0">
                 <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-400 inline-block" />Easy</span>
                 <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-400 inline-block" />Med</span>
                 <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-rose-400 inline-block" />Hard</span>
@@ -520,24 +912,24 @@ const KnowledgeGraphInner: React.FC = () => {
         <div className="flex-1 h-full">
           {loading ? (
             <div className="h-full flex flex-col items-center justify-center gap-4">
-              <div className="w-16 h-16 bg-primary-muted rounded-2xl flex items-center justify-center">
-                <RefreshCw className="w-8 h-8 text-primary animate-spin" />
-              </div>
-              <p className="text-text-secondary text-sm">Loading knowledge structures...</p>
+              <FoxSpinner className="w-14 h-14" label="Loading knowledge structures..." />
             </div>
           ) : isTeacher ? (
             <ReactFlow
-              nodes={nodes.map(n => ({
-                ...n,
-                className: `${n.className} ${n.id === highlightedId ? 'ring-2 ring-primary ring-offset-2 scale-105' : ''}`,
-              }))}
-              edges={edges}
+              nodes={displayNodes}
+              edges={displayEdges}
               onNodesChange={onNodesChange}
               onEdgesChange={onEdgesChange}
               onNodeClick={onNodeClick}
-              onPaneClick={() => setPopupNode(null)}
+              onPaneClick={() => { setPopupNode(null); setSelectedNode(null); }}
               onMove={() => setPopupNode(null)}
               fitView
+              // Wider zoom range and a little breathing room around the fitted
+              // graph, so a 100+ concept course zooms out far enough to see the
+              // whole prerequisite pyramid instead of clipping at the default 0.5.
+              fitViewOptions={{ padding: 0.18 }}
+              minZoom={0.08}
+              maxZoom={2.5}
             >
               <Background color="#dde3f0" gap={20} size={1} />
               <Controls />
@@ -607,13 +999,94 @@ const KnowledgeGraphInner: React.FC = () => {
               </button>
             </div>
             <p className="text-xs text-text-secondary leading-relaxed max-h-32 overflow-y-auto">{popupNode.concept.description}</p>
+
+            {/* ── Generate study material straight from the graph ──
+                The graph is where a teacher actually notices "students are weak here",
+                so generation belongs at that moment rather than behind a trip to
+                another page. The parent option resolves the concept's prerequisite
+                server-side, so nothing here needs to know the parent's node id. */}
             {isTeacher && (
-              <button
-                onClick={openEditFromPopup}
-                className="mt-3 w-full flex items-center justify-center gap-1.5 py-1.5 text-xs font-semibold text-primary bg-primary-muted hover:bg-primary hover:text-white rounded-lg transition-all"
-              >
-                Edit Concept
-              </button>
+              <div className="mt-3 border-t border-border pt-3">
+                {!genOpen ? (
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => { setGenOpen(true); setGenMsg(''); }}
+                      className="flex-1 flex items-center justify-center gap-1.5 py-1.5 text-xs font-semibold text-primary bg-primary-muted hover:bg-primary hover:text-white rounded-lg transition-all"
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                      Generate
+                    </button>
+                    <button
+                      onClick={openEditFromPopup}
+                      className="flex-1 py-1.5 text-xs font-semibold text-text-secondary bg-background border border-border hover:border-primary/30 rounded-lg transition-all"
+                    >
+                      Edit
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <select className="input-light w-full text-xs py-1.5" value={genType} onChange={(e) => setGenType(e.target.value)}>
+                      <option value="flashcard">Flashcards</option>
+                      <option value="mcq">Practice MCQs</option>
+                      <option value="quiz">Quiz</option>
+                      <option value="study_guide">Study Guide</option>
+                    </select>
+                    <div className="flex gap-1.5">
+                      {(['Easy', 'Medium', 'Hard'] as const).map((d) => (
+                        <button
+                          key={d}
+                          onClick={() => setGenDiff(d)}
+                          className={`flex-1 rounded-lg border py-1 text-[12px] font-bold transition-all ${
+                            genDiff === d
+                              ? 'border-primary/40 bg-primary-muted text-primary'
+                              : 'border-border bg-background text-text-secondary'
+                          }`}
+                        >
+                          {d}
+                        </button>
+                      ))}
+                    </div>
+                    {parentOfPopupNode && (
+                      <div className="space-y-1">
+                        <p className="text-[11px] font-bold uppercase tracking-wide text-text-muted">Cover</p>
+                        {([
+                          { key: 'concept', label: `Just ${popupNode.concept.name}` },
+                          { key: 'combined', label: `${parentOfPopupNode.name} + ${popupNode.concept.name}` },
+                          { key: 'parent', label: `Just ${parentOfPopupNode.name}` },
+                        ] as const).map(({ key, label }) => (
+                          <label key={key} className="flex items-start gap-1.5 text-[12px] text-text-secondary cursor-pointer">
+                            <input
+                              type="radio"
+                              name="kg-gen-target"
+                              className="mt-0.5"
+                              checked={genTarget === key}
+                              onChange={() => setGenTarget(key)}
+                            />
+                            <span className={genTarget === key ? 'font-semibold text-text-primary' : ''}>{label}</span>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                    {genMsg && <p className="text-[12px] text-text-muted">{genMsg}</p>}
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => { setGenOpen(false); setGenTarget('concept'); }}
+                        className="flex-1 py-1.5 text-[12px] font-semibold text-text-secondary bg-background border border-border rounded-lg"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={handleGenerateFromGraph}
+                        disabled={genBusy}
+                        className="flex-1 flex items-center justify-center gap-1.5 py-1.5 text-[12px] font-semibold text-white bg-primary hover:bg-primary-hover rounded-lg transition-all disabled:opacity-50"
+                      >
+                        {genBusy ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+                        {genBusy ? 'Generating' : 'Create'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             )}
           </div>
         )}
@@ -665,14 +1138,17 @@ const KnowledgeGraphInner: React.FC = () => {
                     />
                   </div>
                   <div className="flex gap-2">
-                    <button type="submit" disabled={updatingNode}
-                      className="flex-1 py-2 btn-primary justify-center text-xs">
-                      <Save className="w-3.5 h-3.5" />
-                      {updatingNode ? 'Saving...' : 'Save Changes'}
+                    <button type="submit" disabled={updatingNode || deletingNode}
+                      className="flex-1 py-2 btn-primary justify-center text-xs disabled:opacity-60 disabled:cursor-not-allowed">
+                      <Save className={`w-3.5 h-3.5 ${updatingNode ? 'animate-pulse' : ''}`} />
+                      {updatingNode ? 'Saving…' : 'Save Changes'}
                     </button>
-                    <button type="button" onClick={handleDeleteNode}
-                      className="p-2 border border-rose-200 hover:border-rose-400 hover:bg-rose-50 text-rose-400 rounded-lg transition-all">
-                      <Trash2 className="w-4 h-4" />
+                    <button type="button" onClick={handleDeleteNode} disabled={updatingNode || deletingNode}
+                      title="Delete this concept"
+                      className="p-2 border border-rose-200 hover:border-rose-400 hover:bg-rose-50 text-rose-400 rounded-lg transition-all disabled:opacity-60 disabled:cursor-not-allowed">
+                      {deletingNode
+                        ? <RefreshCw className="w-4 h-4 animate-spin" />
+                        : <Trash2 className="w-4 h-4" />}
                     </button>
                   </div>
                 </form>
@@ -680,16 +1156,170 @@ const KnowledgeGraphInner: React.FC = () => {
                 /* Student: Read-Only View */
                 <div className="space-y-4">
                   <div>
-                    <span className={`inline-block text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${
+                    <span className={`inline-block text-[11px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${
                       selectedNode.difficulty.toLowerCase() === 'easy'   ? 'badge-easy' :
                       selectedNode.difficulty.toLowerCase() === 'hard'   ? 'badge-hard' : 'badge-medium'
                     }`}>{selectedNode.difficulty}</span>
                     <h4 className="text-base font-bold text-text-primary mt-2">{selectedNode.name}</h4>
                   </div>
                   <div>
-                    <h5 className="text-[10px] text-text-muted uppercase tracking-wider font-bold mb-1">Description</h5>
+                    <h5 className="text-[11px] text-text-muted uppercase tracking-wider font-bold mb-1">Description</h5>
                     <p className="text-xs text-text-secondary leading-relaxed">{selectedNode.description}</p>
                   </div>
+                </div>
+              )}
+
+              {/* Detailed Material - the long-form field distinct from the short
+                  description above, generated from the course's own uploaded
+                  content. AI actions are teacher-only and always go through
+                  coordinator approval before this text actually changes. */}
+              <div className="border-t border-border pt-4">
+                <h5 className="text-[11px] text-text-muted uppercase tracking-wider font-bold mb-1">
+                  Detailed Material
+                </h5>
+                {selectedNode.material && selectedNode.material.trim() ? (
+                  <p className="text-xs text-text-secondary leading-relaxed whitespace-pre-wrap max-h-64 overflow-y-auto">
+                    {selectedNode.material}
+                  </p>
+                ) : (
+                  <p className="text-xs text-text-muted italic">No detailed material yet.</p>
+                )}
+                {isTeacher && (
+                  <div className="mt-3 space-y-2">
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={handleGenerateMaterial}
+                        disabled={materialBusy}
+                        className="flex-1 py-1.5 btn-secondary justify-center text-[11px] disabled:opacity-60 disabled:cursor-not-allowed"
+                      >
+                        {materialBusy ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+                        {materialBusy ? 'Working…' : 'Generate material'}
+                      </button>
+                      {selectedNode.material && selectedNode.material.trim() && (
+                        <button
+                          type="button"
+                          onClick={() => setMaterialRefineOpen((v) => !v)}
+                          disabled={materialBusy}
+                          className="flex-1 py-1.5 btn-secondary justify-center text-[11px] disabled:opacity-60 disabled:cursor-not-allowed"
+                        >
+                          <Sparkles className="w-3 h-3" />
+                          Refine with AI
+                        </button>
+                      )}
+                    </div>
+                    {materialRefineOpen && (
+                      <form onSubmit={handleEditMaterial} className="space-y-2">
+                        <textarea
+                          rows={2}
+                          placeholder="e.g. add a worked example, simplify the second paragraph…"
+                          className="input-light text-xs resize-none"
+                          value={materialInstruction}
+                          onChange={(e) => setMaterialInstruction(e.target.value)}
+                        />
+                        <button
+                          type="submit"
+                          disabled={materialBusy || !materialInstruction.trim()}
+                          className="w-full py-1.5 btn-primary justify-center text-[11px] disabled:opacity-60 disabled:cursor-not-allowed"
+                        >
+                          {materialBusy ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+                          {materialBusy ? 'Submitting…' : 'Submit refinement'}
+                        </button>
+                      </form>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Course Learning Outcomes this concept addresses - the Concept ->
+                  CLO -> PLO -> GA outcome chain's entry point (see app/outcomes/*
+                  on the backend). CLOs have no creation UI elsewhere in the app,
+                  so auto-extracting from the outline is the only way to get them
+                  onto a subject short of the raw API. */}
+              {clos.length === 0 && isTeacher ? (
+                <div className="border-t border-border pt-4">
+                  <h4 className="text-xs font-bold text-text-secondary mb-2">Course Learning Outcomes</h4>
+                  <p className="text-xs text-text-muted mb-2">
+                    No CLOs defined yet for this subject.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleAutoExtractClos}
+                    disabled={autoExtractingClos}
+                    className="w-full py-1.5 btn-secondary justify-center text-[11px] disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    {autoExtractingClos ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+                    {autoExtractingClos ? 'Extracting…' : 'Auto-extract CLOs from outline'}
+                  </button>
+                  {cloExtractMsg && <p className="text-[11px] text-text-muted mt-1.5">{cloExtractMsg}</p>}
+                </div>
+              ) : clos.length > 0 && (
+                <div className="border-t border-border pt-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <h4 className="text-xs font-bold text-text-secondary">
+                      Addresses CLOs ({(conceptCloMap[selectedNode.id] || []).length})
+                    </h4>
+                    {isTeacher && (
+                      <button
+                        type="button"
+                        onClick={handleAutoExtractClos}
+                        disabled={autoExtractingClos}
+                        title="Re-scan the outline for any new CLOs and tag untagged concepts"
+                        className="text-text-muted hover:text-primary disabled:opacity-60"
+                      >
+                        {autoExtractingClos ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+                      </button>
+                    )}
+                  </div>
+                  {cloExtractMsg && <p className="text-[11px] text-text-muted mb-2">{cloExtractMsg}</p>}
+                  {isTeacher ? (
+                    <div className="space-y-1.5">
+                      {clos.map((clo) => {
+                        const checked = (conceptCloMap[selectedNode.id] || []).includes(clo.id);
+                        return (
+                          <label key={clo.id} className="flex items-start gap-2 text-xs text-text-secondary cursor-pointer">
+                            <input
+                              type="checkbox"
+                              className="mt-0.5"
+                              checked={checked}
+                              disabled={savingConceptClos}
+                              onChange={async (e) => {
+                                const current = conceptCloMap[selectedNode.id] || [];
+                                const next = e.target.checked
+                                  ? [...current, clo.id]
+                                  : current.filter((id) => id !== clo.id);
+                                setSavingConceptClos(true);
+                                try {
+                                  if (catalogId) {
+                                    await outcomesService.setConceptCLOs(catalogId, selectedNode.id, selectedNode.name, next);
+                                  }
+                                  setConceptCloMap((prev) => ({ ...prev, [selectedNode.id]: next }));
+                                } catch (err) {
+                                  setError(apiErrorMessage(err, 'Could not update this concept\'s CLO links.'));
+                                } finally {
+                                  setSavingConceptClos(false);
+                                }
+                              }}
+                            />
+                            <span><span className="font-bold">{clo.code}</span> — {clo.title}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  ) : (conceptCloMap[selectedNode.id] || []).length === 0 ? (
+                    <p className="text-xs text-text-muted italic">No learning outcomes linked yet.</p>
+                  ) : (
+                    <div className="flex flex-wrap gap-1.5">
+                      {(conceptCloMap[selectedNode.id] || []).map((cloId) => {
+                        const clo = clos.find((c) => c.id === cloId);
+                        return clo ? (
+                          <span key={cloId} className="text-[11px] font-semibold rounded-full px-2 py-0.5 border text-primary bg-primary-muted border-primary/20">
+                            {clo.code}
+                          </span>
+                        ) : null;
+                      })}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -714,10 +1344,13 @@ const KnowledgeGraphInner: React.FC = () => {
                         {isTeacher && (
                           <button
                             onClick={() => handleDeleteRelationship(prereq.sourceId, prereq.targetId)}
-                            className="p-1 hover:bg-rose-50 text-text-muted hover:text-rose-500 rounded transition-all shrink-0 ml-2"
+                            disabled={removingLinkId === `${prereq.sourceId}->${prereq.targetId}`}
+                            className="p-1 hover:bg-rose-50 text-text-muted hover:text-rose-500 rounded transition-all shrink-0 ml-2 disabled:opacity-50"
                             title="Remove prerequisite"
                           >
-                            <Trash2 className="w-3 h-3" />
+                            {removingLinkId === `${prereq.sourceId}->${prereq.targetId}`
+                              ? <RefreshCw className="w-3 h-3 animate-spin" />
+                              : <Trash2 className="w-3 h-3" />}
                           </button>
                         )}
                       </div>
@@ -761,8 +1394,12 @@ const KnowledgeGraphInner: React.FC = () => {
                 <textarea required rows={3} placeholder="Describe what students learn..." className="input-light resize-none text-xs" value={newDesc} onChange={e => setNewDesc(e.target.value)} />
               </div>
               <div className="flex justify-end gap-2 pt-2">
-                <button type="button" onClick={() => setShowNodeModal(false)} className="btn-ghost text-xs">Cancel</button>
-                <button type="submit" className="btn-primary text-xs"><Plus className="w-3.5 h-3.5" /> Create Concept</button>
+                <button type="button" onClick={() => setShowNodeModal(false)} disabled={creatingNode} className="btn-ghost text-xs disabled:opacity-60">Cancel</button>
+                <button type="submit" disabled={creatingNode} className="btn-primary text-xs disabled:opacity-60 disabled:cursor-not-allowed">
+                  {creatingNode
+                    ? <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Submitting…</>
+                    : <><Plus className="w-3.5 h-3.5" /> Create Concept</>}
+                </button>
               </div>
             </form>
           </div>
@@ -805,8 +1442,12 @@ const KnowledgeGraphInner: React.FC = () => {
                 </select>
               </div>
               <div className="flex justify-end gap-2 pt-2">
-                <button type="button" onClick={() => setShowEdgeModal(false)} className="btn-ghost text-xs">Cancel</button>
-                <button type="submit" className="btn-primary text-xs"><LinkIcon className="w-3.5 h-3.5" /> Establish Link</button>
+                <button type="button" onClick={() => setShowEdgeModal(false)} disabled={creatingEdge} className="btn-ghost text-xs disabled:opacity-60">Cancel</button>
+                <button type="submit" disabled={creatingEdge} className="btn-primary text-xs disabled:opacity-60 disabled:cursor-not-allowed">
+                  {creatingEdge
+                    ? <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Submitting…</>
+                    : <><LinkIcon className="w-3.5 h-3.5" /> Establish Link</>}
+                </button>
               </div>
             </form>
           </div>

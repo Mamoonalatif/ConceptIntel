@@ -1,8 +1,9 @@
+import threading
 from typing import List
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from app.database.connection import get_db
+from app.database.connection import get_db, SessionLocal
 from app.database.models import Announcement, Course, User
 from app.announcements.schemas import AnnouncementCreate, AnnouncementUpdate, AnnouncementResponse
 from app.auth.routes import get_current_user, get_current_teacher
@@ -31,6 +32,40 @@ def _get_course_or_404(db: Session, course_id: int) -> Course:
     if not course:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
     return course
+
+
+def _notify_announcement_posted_background(course_id: int, announcement_id: int) -> None:
+    """Runs off the request thread - see the call site in create_announcement
+    for why. Split into two short-lived DB sessions around the LLM call rather
+    than one held open across it - see the equivalent function in
+    app/assignments/routes.py for why that matters for the whole app's
+    connection pool, not just this one endpoint."""
+    bg_db = SessionLocal()
+    try:
+        course = bg_db.query(Course).filter(Course.id == course_id).first()
+        announcement = bg_db.query(Announcement).filter(Announcement.id == announcement_id).first()
+        if not course or not announcement:
+            return
+        course_name, content = course.name, announcement.content
+    finally:
+        bg_db.close()
+
+    try:
+        summary = generate_posting_summary("announcement", course_name, content)
+        bg_db = SessionLocal()
+        try:
+            notify_course_students(
+                bg_db, course_id, NotificationType.ANNOUNCEMENT_POSTED,
+                title=f"New announcement in {course_name}",
+                message=summary,
+                link=f"/course/{course_id}",
+            )
+        finally:
+            bg_db.close()
+    except Exception as e:
+        print(f"Warning: failed to create announcement notifications: {str(e)}")
+    finally:
+        bg_db.close()
 
 
 @router.get("/{course_id}/announcements", response_model=List[AnnouncementResponse])
@@ -69,16 +104,8 @@ def create_announcement(
     db.commit()
     db.refresh(announcement)
 
-    try:
-        summary = generate_posting_summary("announcement", course.name, payload.content)
-        notify_course_students(
-            db, course_id, NotificationType.ANNOUNCEMENT_POSTED,
-            title=f"New announcement in {course.name}",
-            message=summary,
-            link=f"/course/{course_id}",
-        )
-    except Exception as e:
-        print(f"Warning: failed to create announcement notifications: {str(e)}")
+    # Backgrounded - see _notify_announcement_posted_background docstring.
+    threading.Thread(target=_notify_announcement_posted_background, args=(course_id, announcement.id), daemon=True).start()
 
     return _to_response(announcement)
 

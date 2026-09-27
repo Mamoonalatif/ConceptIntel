@@ -1,5 +1,5 @@
 """Shared "is this user actually in this course" check - Google-Classroom-style
-scoping: viewing a course's content/knowledge graph is not just gated by role, it's
+scoping: viewing a course's content/concept graph is not just gated by role, it's
 gated by actually being the teacher who owns it, a student enrolled in it, or an
 oversight role (admin/coordinator). Without this, any two logged-in users could
 view/search/download each other's course material just by guessing course IDs.

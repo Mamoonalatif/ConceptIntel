@@ -1,12 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Bell, CheckCheck, Trash2, Info, CheckCircle2, AlertTriangle, XCircle, Inbox,
+  Bell, CheckCheck, Trash2, Info, CheckCircle2, AlertTriangle, XCircle,
 } from 'lucide-react';
 import { notificationService } from '../services/api';
 import type { NotificationItem } from '../services/api';
 import { useAutoRefresh } from '../hooks/useAutoRefresh';
 import { timeAgo } from '../lib/time';
+import { EmptyStateIllustration } from './illustrations';
 
 const PRIORITY_STYLES: Record<string, { icon: React.ElementType; className: string }> = {
   info: { icon: Info, className: 'text-blue-600 bg-blue-50 dark:text-blue-400 dark:bg-blue-500/10' },
@@ -171,7 +172,7 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({ open: contro
       >
         <Bell className="w-4 h-4" />
         {unreadCount > 0 && (
-          <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 flex items-center justify-center text-[10px] font-bold text-white bg-rose-500 rounded-full shadow-sm">
+          <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 flex items-center justify-center text-[11px] font-bold text-white bg-rose-500 rounded-full shadow-sm">
             {unreadCount > 99 ? '99+' : unreadCount}
           </span>
         )}
@@ -186,7 +187,7 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({ open: contro
                 <button
                   onClick={handleMarkAllRead}
                   title="Mark all as read"
-                  className="flex items-center gap-1 text-[11px] font-semibold text-primary hover:bg-primary-muted px-2 py-1 rounded-lg transition-all"
+                  className="flex items-center gap-1 text-[12px] font-semibold text-primary hover:bg-primary-muted px-2 py-1 rounded-lg transition-all"
                 >
                   <CheckCheck className="w-3.5 h-3.5" /> Mark all read
                 </button>
@@ -195,7 +196,7 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({ open: contro
                 <button
                   onClick={handleClearRead}
                   title="Clear read notifications"
-                  className="flex items-center gap-1 text-[11px] font-semibold text-text-muted hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 px-2 py-1 rounded-lg transition-all"
+                  className="flex items-center gap-1 text-[12px] font-semibold text-text-muted hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 px-2 py-1 rounded-lg transition-all"
                 >
                   <Trash2 className="w-3.5 h-3.5" /> Clear
                 </button>
@@ -208,7 +209,7 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({ open: contro
               <div className="p-8 text-center text-sm text-text-muted">Loading...</div>
             ) : items.length === 0 ? (
               <div className="p-8 flex flex-col items-center gap-2 text-center text-sm text-text-muted">
-                <Inbox className="w-8 h-8 text-text-muted/50" />
+                <EmptyStateIllustration className="w-16 h-16" />
                 No notifications yet.
               </div>
             ) : (
@@ -234,7 +235,7 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({ open: contro
                         {!item.is_read && <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />}
                       </div>
                       <p className="text-xs text-text-muted mt-0.5 line-clamp-2">{item.message}</p>
-                      <p className="text-[10px] text-text-muted/70 mt-1">{timeAgo(item.created_at)}</p>
+                      <p className="text-[11px] text-text-muted/70 mt-1">{timeAgo(item.created_at)}</p>
                     </div>
                     <button
                       onClick={(e) => handleDelete(e, item.id)}

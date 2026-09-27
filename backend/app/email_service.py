@@ -2,6 +2,7 @@ import logging
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from email.utils import formataddr
 
 from app.config import settings
 
@@ -25,7 +26,11 @@ def send_email(to_email: str, subject: str, html_body: str) -> bool:
 
     message = MIMEMultipart("alternative")
     message["Subject"] = subject
-    message["From"] = settings.SMTP_EMAIL
+    # formataddr renders "ConceptIntel <address@gmail.com>" - without it, message["From"]
+    # was just the raw address, so every notification/reset/credentials email showed up
+    # in a recipient's inbox as coming from a plain personal-looking Gmail address
+    # instead of the app name.
+    message["From"] = formataddr((settings.SMTP_FROM_NAME, settings.SMTP_EMAIL))
     message["To"] = to_email
     message.attach(MIMEText(html_body, "html"))
 
@@ -52,6 +57,20 @@ def send_staff_credentials_email(to_email: str, full_name: str, role_label: str,
       </p>
       <p>Please sign in and change your password as soon as possible.</p>
       <p style="color: #94a3b8; font-size: 12px;">If you weren't expecting this email, you can ignore it.</p>
+    </div>
+    """
+    return send_email(to_email, subject, html_body)
+
+
+def send_password_reset_email(to_email: str, full_name: str, reset_link: str) -> bool:
+    subject = "Reset your ConceptIntel password"
+    html_body = f"""
+    <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+      <h2 style="color: #4f46e5;">Reset your password</h2>
+      <p>Hi {full_name},</p>
+      <p>We received a request to reset your ConceptIntel password. Click below to choose a new one:</p>
+      <p><a href="{reset_link}" style="display: inline-block; background: #4f46e5; color: white; padding: 10px 20px; border-radius: 8px; text-decoration: none;">Reset password</a></p>
+      <p style="color: #94a3b8; font-size: 12px;">This link expires in 30 minutes. If you didn't request this, you can safely ignore this email - your password won't change.</p>
     </div>
     """
     return send_email(to_email, subject, html_body)

@@ -50,7 +50,7 @@ export const Footer: React.FC = () => {
           <div className="col-span-2 sm:col-span-2 space-y-3">
             <h4 className="text-xs font-bold text-text-primary uppercase tracking-widest">Platform</h4>
             <ul className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-              {['Knowledge Graphs', 'AI Content Generation', 'Assignment Evaluation', 'Adaptive Engine', 'Analytics'].map(l => (
+              {['Concept Graphs', 'AI Content Generation', 'Assignment Evaluation', 'Adaptive Engine', 'Analytics'].map(l => (
                 <li key={l}><span className="text-text-secondary">{l}</span></li>
               ))}
             </ul>

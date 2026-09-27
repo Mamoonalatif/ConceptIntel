@@ -82,20 +82,6 @@ def clean_extracted_text(text: str) -> str:
     return text.strip()
 
 
-def chunk_text(text: str, chunk_size: int = 3000, overlap: int = 300) -> list[str]:
-    """Naive char-count chunker - kept only for the legacy direct-write extraction
-    path (knowledge_graph/services.py's trigger_concept_extraction). The reviewed
-    pipeline (content_processing) uses app/rag/chunking.py's token-aware chunker
-    instead, for better chunk boundaries."""
-    chunks = []
-    start = 0
-    while start < len(text):
-        end = start + chunk_size
-        chunks.append(text[start:end])
-        start += chunk_size - overlap
-    return chunks
-
-
 def get_content_type(extension: str) -> str:
     """Returns the MIME content type based on file extension."""
     ext = extension.lower()

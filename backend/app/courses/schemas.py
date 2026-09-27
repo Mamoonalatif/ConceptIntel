@@ -90,6 +90,7 @@ class CourseUpdate(BaseModel):
     end_date: Optional[date] = None
     max_students: Optional[int] = None
     status: Optional[str] = None  # "Draft", "Open", "Closed"
+    theme_color: Optional[str] = None  # one of frontend's fixed palette keys, e.g. "rose", "amber"
 
     @field_validator("description")
     @classmethod
@@ -140,6 +141,7 @@ class CourseResponse(BaseModel):
     start_date: Optional[date] = None
     end_date: Optional[date] = None
     graph_status: str = "Pending"
+    theme_color: Optional[str] = None
 
     class Config:
         from_attributes = True

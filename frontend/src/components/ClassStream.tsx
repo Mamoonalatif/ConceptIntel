@@ -9,6 +9,7 @@ import { useAutoRefresh } from '../hooks/useAutoRefresh';
 import { timeAgo, parseUtc } from '../lib/time';
 import { downloadAuthenticated } from '../lib/download';
 import { EmptyStateIllustration } from './illustrations';
+import { apiErrorMessage } from '../lib/apiError';
 
 interface ClassStreamProps {
   courseId: number;
@@ -55,8 +56,8 @@ export const ClassStream: React.FC<ClassStreamProps> = ({ courseId, isTeacher })
     try {
       const data = await streamService.list(courseId);
       setItems(data);
-    } catch {
-      if (!silent) setError('Failed to load class stream.');
+    } catch (err) {
+      if (!silent) setError(apiErrorMessage(err, 'Could not load the class stream.'));
     } finally {
       if (!silent) setLoading(false);
     }
@@ -113,8 +114,8 @@ export const ClassStream: React.FC<ClassStreamProps> = ({ courseId, isTeacher })
     try {
       await announcementService.remove(courseId, id);
       fetchItems();
-    } catch {
-      setError('Failed to delete announcement.');
+    } catch (err) {
+      setError(apiErrorMessage(err, 'Could not delete this announcement.'));
     }
   };
 
@@ -123,8 +124,8 @@ export const ClassStream: React.FC<ClassStreamProps> = ({ courseId, isTeacher })
     try {
       await materialService.remove(courseId, id);
       fetchItems();
-    } catch {
-      setError('Failed to delete material.');
+    } catch (err) {
+      setError(apiErrorMessage(err, 'Could not delete this material.'));
     }
   };
 
@@ -133,8 +134,8 @@ export const ClassStream: React.FC<ClassStreamProps> = ({ courseId, isTeacher })
     try {
       await meetingService.remove(courseId, id);
       fetchItems();
-    } catch {
-      setError('Failed to delete meeting.');
+    } catch (err) {
+      setError(apiErrorMessage(err, 'Could not delete this meeting.'));
     }
   };
 
@@ -363,7 +364,7 @@ export const ClassStream: React.FC<ClassStreamProps> = ({ courseId, isTeacher })
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${meta.badgeClass}`}>
+                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold border ${meta.badgeClass}`}>
                         <Icon className="w-3 h-3" /> {meta.label}
                       </span>
                       <span className="text-sm font-bold text-text-primary">{item.teacher_name || 'Teacher'}</span>
@@ -427,14 +428,14 @@ export const ClassStream: React.FC<ClassStreamProps> = ({ courseId, isTeacher })
                       {item.post_type === 'assignment' && (
                         <div className="flex flex-wrap items-center gap-2 mt-2">
                           {item.due_date && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold border bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-500/10 dark:text-blue-400 dark:border-blue-500/20">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[12px] font-bold border bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-500/10 dark:text-blue-400 dark:border-blue-500/20">
                               <Clock className="w-3 h-3" /> Due {parseUtc(item.due_date).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
                             </span>
                           )}
                           {item.points !== null && (
-                            <span className="text-[11px] font-bold text-text-muted">{item.points} pts</span>
+                            <span className="text-[12px] font-bold text-text-muted">{item.points} pts</span>
                           )}
-                          <span className="text-[11px] font-semibold text-secondary">See Assignments below to submit/manage.</span>
+                          <span className="text-[12px] font-semibold text-secondary">See Assignments below to submit/manage.</span>
                         </div>
                       )}
 
@@ -443,7 +444,7 @@ export const ClassStream: React.FC<ClassStreamProps> = ({ courseId, isTeacher })
                           {item.attachment_filename && (
                             <button
                               onClick={() => downloadAuthenticated(materialService.downloadAttachmentUrl(courseId, item.id), item.attachment_filename!)}
-                              className="inline-flex items-center gap-1 text-[11px] font-semibold text-primary hover:underline"
+                              className="inline-flex items-center gap-1 text-[12px] font-semibold text-primary hover:underline"
                             >
                               <Download className="w-3 h-3" /> {item.attachment_filename}
                             </button>
@@ -453,7 +454,7 @@ export const ClassStream: React.FC<ClassStreamProps> = ({ courseId, isTeacher })
                               href={item.external_link}
                               target="_blank"
                               rel="noreferrer"
-                              className="inline-flex items-center gap-1 text-[11px] font-semibold text-primary hover:underline"
+                              className="inline-flex items-center gap-1 text-[12px] font-semibold text-primary hover:underline"
                             >
                               <LinkIcon className="w-3 h-3" /> Open link
                             </a>
@@ -464,19 +465,19 @@ export const ClassStream: React.FC<ClassStreamProps> = ({ courseId, isTeacher })
                       {item.post_type === 'meeting' && (
                         <div className="flex flex-wrap items-center gap-2 mt-2">
                           {item.scheduled_at && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold border bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/20">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[12px] font-bold border bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/20">
                               <Clock className="w-3 h-3" /> {parseUtc(item.scheduled_at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
                             </span>
                           )}
                           {item.duration_minutes !== null && (
-                            <span className="text-[11px] font-bold text-text-muted">{item.duration_minutes} min</span>
+                            <span className="text-[12px] font-bold text-text-muted">{item.duration_minutes} min</span>
                           )}
                           {item.meeting_link && (
                             <a
                               href={item.meeting_link}
                               target="_blank"
                               rel="noreferrer"
-                              className="inline-flex items-center gap-1 text-[11px] font-bold text-white bg-emerald-600 hover:bg-emerald-700 px-2.5 py-1 rounded-lg transition-all"
+                              className="inline-flex items-center gap-1 text-[12px] font-bold text-white bg-emerald-600 hover:bg-emerald-700 px-2.5 py-1 rounded-lg transition-all"
                             >
                               <Video className="w-3 h-3" /> Join
                             </a>

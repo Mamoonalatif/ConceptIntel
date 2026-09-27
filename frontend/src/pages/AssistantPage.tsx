@@ -5,7 +5,21 @@ import { EmptyStateIllustration } from '../components/illustrations';
 import { assistantService } from '../services/api';
 import type { ChatMessageItem } from '../services/api';
 import { timeAgo } from '../lib/time';
-import { ArrowLeft, Sparkles, Send, RotateCcw, Loader2 } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
+import { getPrimaryNavItems } from '../lib/roleNav';
+import { Sparkles, Send, RotateCcw, Loader2, Bot, GraduationCap, Presentation, UserCog, Network, Layers, User as UserIcon } from 'lucide-react';
+
+// A literal "who's talking" character per role, in the app's teal theme
+// (same rgb(var(--primary)) badge used everywhere else): a graduate for
+// students, someone presenting at a board for teachers, and a person
+// managing settings for admins.
+const ROLE_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
+  student: GraduationCap,
+  teacher: Presentation,
+  admin: UserCog,
+  course_coordinator: Network,
+  program_coordinator: Layers,
+};
 
 // Client-side placeholder used for the just-sent user message while we wait on
 // the backend's reply - the POST endpoint only returns the assistant's message,
@@ -15,6 +29,7 @@ let tempIdCounter = -1;
 
 const AssistantPage: React.FC = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [messages, setMessages] = useState<ChatMessageItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
@@ -23,9 +38,9 @@ const AssistantPage: React.FC = () => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const navItems: NavItem[] = [
-    { key: 'back', label: 'Back to Dashboard', icon: ArrowLeft, onClick: () => navigate(-1) },
-  ];
+  // Same role-specific top section as the user's own dashboard, so the sidebar
+  // looks identical everywhere instead of collapsing to just the global links.
+  const navItems: NavItem[] = getPrimaryNavItems(user, navigate);
 
   const fetchHistory = async () => {
     setLoading(true);
@@ -136,7 +151,12 @@ const AssistantPage: React.FC = () => {
             </div>
           ) : (
             messages.map((m) => (
-              <div key={m.id} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+              <div key={m.id} className={`flex items-end gap-2 ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                {m.role === 'assistant' && (
+                  <div className="w-8 h-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0 mb-1" title="ConceptIntel Assistant">
+                    <Bot className="w-4 h-4" />
+                  </div>
+                )}
                 <div className={`max-w-[80%] sm:max-w-[70%] rounded-2xl px-4 py-2.5 ${
                   m.role === 'user'
                     ? 'bg-primary text-white rounded-br-sm'
@@ -144,15 +164,26 @@ const AssistantPage: React.FC = () => {
                 }`}
                 >
                   <p className="text-sm whitespace-pre-wrap break-words">{m.content}</p>
-                  <p className={`text-[10px] mt-1 ${m.role === 'user' ? 'text-white/70' : 'text-text-muted'}`}>
+                  <p className={`text-[11px] mt-1 ${m.role === 'user' ? 'text-white/70' : 'text-text-muted'}`}>
                     {timeAgo(m.created_at)}
                   </p>
                 </div>
+                {m.role === 'user' && (() => {
+                  const RoleIcon = (user?.role && ROLE_ICONS[user.role]) || UserIcon;
+                  return (
+                    <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center shrink-0 mb-1" title={user?.role}>
+                      <RoleIcon className="w-4 h-4 text-white" />
+                    </div>
+                  );
+                })()}
               </div>
             ))
           )}
           {sending && (
-            <div className="flex justify-start">
+            <div className="flex items-end gap-2 justify-start">
+              <div className="w-8 h-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0 mb-1" title="ConceptIntel Assistant">
+                <Bot className="w-4 h-4" />
+              </div>
               <div className="max-w-[70%] rounded-2xl rounded-bl-sm px-4 py-2.5 bg-card border border-border flex items-center gap-2 text-text-muted text-sm">
                 <Loader2 className="w-3.5 h-3.5 animate-spin" /> Thinking...
               </div>

@@ -3,31 +3,8 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { courseService, enrollmentService, type CourseLookup } from '../services/api';
 import { CheckCircle2, AlertCircle, Loader2, LogIn } from 'lucide-react';
-
-/* Shared logo mark */
-const LogoMark: React.FC<{ size?: number }> = ({ size = 36 }) => (
-  <svg width={size} height={size} viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <defs>
-      <linearGradient id="jlg1" x1="0%" y1="0%" x2="100%" y2="100%">
-        <stop offset="0%" stopColor="#2563eb" /><stop offset="100%" stopColor="#7c3aed" />
-      </linearGradient>
-      <linearGradient id="jlg2" x1="0%" y1="100%" x2="100%" y2="0%">
-        <stop offset="0%" stopColor="#4f46e5" /><stop offset="100%" stopColor="#06b6d4" />
-      </linearGradient>
-    </defs>
-    <rect width="40" height="40" rx="10" fill="url(#jlg1)" />
-    <circle cx="12" cy="20" r="3.5" fill="white" opacity="0.95" />
-    <circle cx="20" cy="12" r="3.5" fill="white" opacity="0.95" />
-    <circle cx="20" cy="28" r="3.5" fill="white" opacity="0.95" />
-    <circle cx="28" cy="20" r="3.5" fill="white" opacity="0.95" />
-    <circle cx="20" cy="20" r="4.5" fill="white" />
-    <line x1="12" y1="20" x2="15.5" y2="20" stroke="white" strokeWidth="1.5" strokeOpacity="0.6" />
-    <line x1="20" y1="12" x2="20" y2="15.5" stroke="white" strokeWidth="1.5" strokeOpacity="0.6" />
-    <line x1="20" y1="24.5" x2="20" y2="28" stroke="white" strokeWidth="1.5" strokeOpacity="0.6" />
-    <line x1="24.5" y1="20" x2="28" y2="20" stroke="white" strokeWidth="1.5" strokeOpacity="0.6" />
-    <circle cx="20" cy="20" r="2" fill="url(#jlg2)" />
-  </svg>
-);
+import { FoxSpinner } from '../components/FoxSpinner';
+import { FoxMark } from '../components/FoxMark';
 
 /**
  * Public "join by link" landing page (/join/:code) - the destination behind the
@@ -71,7 +48,7 @@ const JoinCourse: React.FC = () => {
   if (isLoading || loadingPreview) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
-        <Loader2 className="w-6 h-6 text-primary animate-spin" />
+        <FoxSpinner className="w-12 h-12" />
       </div>
     );
   }
@@ -81,11 +58,8 @@ const JoinCourse: React.FC = () => {
       <div className="page-bg-decoration" />
       <div className="w-full max-w-md z-10">
         <div className="flex items-center gap-2.5 justify-center mb-8">
-          <LogoMark size={38} />
-          <div className="flex items-baseline gap-0.5">
-            <span className="text-xl font-bold text-text-primary">Concept</span>
-            <span className="text-xl font-bold" style={{ color: 'rgb(var(--primary-light))' }}>Intel</span>
-          </div>
+          <FoxMark className="w-9.5 h-9.5" />
+          <span className="text-xl font-bold gradient-text">ConceptIntel</span>
         </div>
 
         <div className="glass-panel rounded-2xl shadow-card overflow-hidden text-center animate-fade-up">

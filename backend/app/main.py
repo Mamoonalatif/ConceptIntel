@@ -1,5 +1,7 @@
 import uvicorn
 import logging
+import threading
+import time
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
@@ -8,7 +10,7 @@ from app.database.connection import engine
 from app.database import models
 
 # Import routers
-from app.auth.routes import router as auth_router
+from app.auth.routes import router as auth_router, _prewarm_google_certs_cache
 from app.courses.routes import router as courses_router
 from app.enrollment.routes import router as enrollment_router
 from app.upload.routes import router as upload_router
@@ -28,6 +30,18 @@ from app.contact.routes import router as contact_router
 from app.comments.routes import router as comments_router
 from app.analytics.routes import router as analytics_router
 from app.content_processing.routes import router as content_processing_router
+from app.schedule.routes import router as schedule_router
+from app.mastery.routes import router as mastery_router
+from app.content_generation.routes import router as content_generation_router
+from app.gamification.routes import router as gamification_router, catalog_router as gamification_catalog_router
+from app.gamification.game_routes import router as games_router
+from app.study.routes import router as study_router
+from app.question_bank.routes import router as question_bank_router
+from app.exams.routes import router as exams_router
+from app.practice.routes import router as practice_router
+from app.live.routes import router as live_router
+from app.adaptive_engine.routes import router as adaptive_engine_router
+from app.outcomes.routes import router as outcomes_router
 
 logger = logging.getLogger("conceptintel")
 
@@ -59,7 +73,15 @@ except Exception as e:
 
 def seed_course_catalog():
     """Idempotently seed the predefined course catalog (only 3 offerings are ever
-    selectable when creating a course instance). Only inserts if the table is empty."""
+    selectable when creating a course instance). Only inserts if the table is empty.
+
+    PF -> OOP -> (independent) Calculus: Programming Fundamentals is the
+    prerequisite for Object-Oriented Programming (you cannot design classes
+    before you can write a function), and Calculus stands on its own as the
+    third subject - matching a first-year CS semester line-up. A full demo
+    concept graph + CLO/PLO/GA structure for these three lives in
+    scripts/seed_pf_oop_calculus_demo.py, run separately since it needs a live
+    Neo4j connection this startup-time seed does not require."""
     from app.database.connection import SessionLocal
     from app.database.models import CourseCatalog
 
@@ -68,21 +90,21 @@ def seed_course_catalog():
         if db.query(CourseCatalog).count() > 0:
             return
 
-        physics = CourseCatalog(name="Applied Physics", code="PHY101")
-        db.add(physics)
+        pf = CourseCatalog(name="Programming Fundamentals", code="PF101")
+        db.add(pf)
         db.flush()
 
-        # Digital Logic Design requires Applied Physics as a prerequisite.
-        dld = CourseCatalog(name="Digital Logic Design", code="DLD201", prerequisite_catalog_id=physics.id)
-        db.add(dld)
+        # Object-Oriented Programming requires Programming Fundamentals as a prerequisite.
+        oop = CourseCatalog(name="Object-Oriented Programming", code="OOP201", prerequisite_catalog_id=pf.id)
+        db.add(oop)
         db.flush()
 
-        calculus = CourseCatalog(name="Calculus & Analytical Geometry", code="MTH101")
+        calculus = CourseCatalog(name="Calculus", code="MTH101")
         db.add(calculus)
         db.flush()
 
         db.commit()
-        logger.info("Seeded predefined course catalog (Applied Physics, Digital Logic Design, Calculus & Analytical Geometry).")
+        logger.info("Seeded predefined course catalog (Programming Fundamentals, Object-Oriented Programming, Calculus).")
     except Exception as e:
         logger.error(f"WARNING: Could not seed course catalog: {e}")
         db.rollback()
@@ -95,9 +117,21 @@ try:
 except Exception as e:
     logger.error(f"WARNING: Course catalog seeding failed: {e}")
 
+try:
+    from app.database.connection import SessionLocal as _SessionLocal
+    from app.gamification.seed import seed_badges
+    _db = _SessionLocal()
+    try:
+        seed_badges(_db)
+        logger.info("Seeded/verified gamification badge catalog.")
+    finally:
+        _db.close()
+except Exception as e:
+    logger.error(f"WARNING: Badge catalog seeding failed: {e}")
+
 app = FastAPI(
     title="ConceptIntel API",
-    description="Knowledge Graph-Based Concept Intelligence Platform — Air University, Islamabad",
+    description="Concept Graph-Based Concept Intelligence Platform — Air University, Islamabad",
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc"
@@ -133,6 +167,60 @@ app.include_router(contact_router, prefix="/api")
 app.include_router(comments_router, prefix="/api")
 app.include_router(analytics_router, prefix="/api")
 app.include_router(content_processing_router, prefix="/api")
+app.include_router(schedule_router, prefix="/api")
+app.include_router(mastery_router, prefix="/api")
+app.include_router(content_generation_router, prefix="/api")
+app.include_router(gamification_router, prefix="/api")
+app.include_router(gamification_catalog_router, prefix="/api")
+app.include_router(games_router, prefix="/api")
+app.include_router(study_router, prefix="/api")
+app.include_router(question_bank_router, prefix="/api")
+app.include_router(exams_router, prefix="/api")
+app.include_router(practice_router, prefix="/api")
+app.include_router(live_router, prefix="/api")
+app.include_router(adaptive_engine_router, prefix="/api")
+app.include_router(outcomes_router, prefix="/api")
+
+
+def _keep_db_pool_warm():
+    """Pings the database on a fixed interval so pooled connections never sit idle
+    long enough for the hosted Postgres's own connection pooler (Supabase) to drop
+    them server-side. Without this, the connection warmed once at startup (above)
+    goes stale during any real gap between requests - a user reading a page,
+    completing Google's OAuth popup, simply pausing - and pool_pre_ping then pays a
+    full reconnect (observed ~2.7s) synchronously on THAT request. That is what
+    made sign-in (and any other "first request after a pause") feel randomly slow:
+    not the request itself, but a cold reconnect hidden inside it. A cheap
+    heartbeat well under any idle-connection timeout keeps the pool warm instead.
+
+    The first ping used to happen only after the initial `time.sleep(40)` below -
+    which meant every dev-server restart (very frequent with --reload) left a
+    ~40s window, right after boot, where the pool was still genuinely cold. A
+    user signing in during that window (extremely likely right after any code
+    change - it is exactly when a developer re-tests) paid the full reconnect
+    cost on their real request instead of on this background thread. Pinging
+    once immediately, before entering the wait loop, closes that window."""
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+    except Exception as e:
+        logger.warning(f"Initial DB keep-alive ping failed: {e}")
+    while True:
+        time.sleep(40)
+        try:
+            with engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+        except Exception as e:
+            logger.warning(f"DB keep-alive ping failed: {e}")
+
+
+@app.on_event("startup")
+def _start_db_keepalive() -> None:
+    threading.Thread(target=_keep_db_pool_warm, daemon=True).start()
+    # Same cold-start problem, different resource: see _prewarm_google_certs_cache's
+    # own docstring (app/auth/routes.py) for why this also needs to happen at boot
+    # rather than on the first real Google sign-in.
+    threading.Thread(target=_prewarm_google_certs_cache, daemon=True).start()
 
 
 @app.get("/")
@@ -141,7 +229,7 @@ def read_root():
         "name": "ConceptIntel API",
         "status": "healthy",
         "version": "1.0.0",
-        "description": "AI-powered Knowledge Graph Concept Intelligence Platform",
+        "description": "AI-powered Concept Graph Concept Intelligence Platform",
         "docs": "/docs"
     }
 

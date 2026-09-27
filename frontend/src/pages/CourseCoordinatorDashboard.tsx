@@ -4,11 +4,14 @@ import { useAuth } from '../context/AuthContext';
 import { courseCoordinatorService, courseService, graphService } from '../services/api';
 import type { GraphRevision, GraphEditProposal } from '../services/api';
 import { AppShell, type NavItem } from '../components/AppShell';
+import { DiffGraphPreview } from '../components/DiffGraphPreview';
 import { useAutoRefresh } from '../hooks/useAutoRefresh';
+import { apiErrorMessage } from '../lib/apiError';
 import {
   Network, AlertCircle, Pencil, X, Check,
   Sparkles, ThumbsUp, ThumbsDown, RefreshCw, BookOpen,
 } from 'lucide-react';
+import { EmptyStateIllustration } from '../components/illustrations';
 
 interface CourseInstance {
   id: number;
@@ -120,7 +123,7 @@ const CourseCoordinatorDashboard: React.FC = () => {
   const [decidingRevision, setDecidingRevision] = useState(false);
   const [reviewNotes, setReviewNotes] = useState('');
 
-  // Manual node/relationship edits made directly in the Knowledge Graph UI -
+  // Manual node/relationship edits made directly in the Concept Graph UI -
   // each needs its own approval before it reaches Neo4j, same principle as the
   // AI-pipeline revisions above but one edit at a time instead of a bulk diff.
   const [pendingEditProposals, setPendingEditProposals] = useState<GraphEditProposal[]>([]);
@@ -182,7 +185,7 @@ const CourseCoordinatorDashboard: React.FC = () => {
       }
       fetchPendingEditProposals();
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to submit your decision.');
+      setError(apiErrorMessage(err, 'Could not submit your decision.'));
     } finally {
       setDecidingProposalId(null);
     }
@@ -203,7 +206,7 @@ const CourseCoordinatorDashboard: React.FC = () => {
       fetchPendingRevisions();
       fetchCourses();
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to submit your decision.');
+      setError(apiErrorMessage(err, 'Could not submit your decision.'));
     } finally {
       setDecidingRevision(false);
     }
@@ -308,7 +311,7 @@ const CourseCoordinatorDashboard: React.FC = () => {
                 <div key={p.id} className="glass-panel rounded-2xl p-5 border border-border shadow-card flex items-start justify-between gap-4 flex-wrap">
                   <div className="flex-1 min-w-[240px]">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-primary bg-primary-muted px-2 py-0.5 rounded-full">
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-primary bg-primary-muted px-2 py-0.5 rounded-full">
                         {OPERATION_LABELS[p.operation] || p.operation}
                       </span>
                       <p className="font-bold text-text-primary">
@@ -346,12 +349,15 @@ const CourseCoordinatorDashboard: React.FC = () => {
           <p className="text-xs text-text-muted mb-4 max-w-2xl -mt-2">
             Graph status here is informational only - all approve/reject decisions happen in the
             "Pending Graph Revisions" queue above, where you can see the actual proposed concepts
-            before deciding. Use "View Knowledge Graph" to inspect what's currently live.
+            before deciding. Use "View Concept Graph" to inspect what's currently live.
           </p>
           {loading ? (
             <div className="glass-panel rounded-2xl p-8 border border-border text-center text-sm text-text-muted">Loading...</div>
           ) : courses.length === 0 ? (
-            <div className="glass-panel rounded-2xl p-8 border border-border text-center text-sm text-text-muted">No courses created yet.</div>
+            <div className="glass-panel rounded-2xl p-8 border border-border text-center text-sm text-text-muted">
+              <EmptyStateIllustration className="w-20 h-20 mx-auto mb-2" />
+              No courses created yet.
+            </div>
           ) : (
             <div className="space-y-3">
               {courses.map((course) => {
@@ -371,7 +377,7 @@ const CourseCoordinatorDashboard: React.FC = () => {
                           to={`/course/${course.id}/graph`}
                           className="flex items-center gap-1.5 text-xs font-bold text-primary bg-primary-muted border border-primary/20 hover:bg-primary hover:text-white px-3 py-1.5 rounded-lg transition-all"
                         >
-                          <Network className="w-3.5 h-3.5" /> View Knowledge Graph
+                          <Network className="w-3.5 h-3.5" /> View Concept Graph
                         </Link>
                         {!isEditing && (
                           <button onClick={() => startEdit(course)} className="btn-ghost text-xs px-3 py-1.5">
@@ -449,6 +455,8 @@ const CourseCoordinatorDashboard: React.FC = () => {
                 <span>{reviewRevision.diff.new_relationship_count} new prerequisite link(s)</span>
               </div>
 
+              <DiffGraphPreview concepts={reviewRevision.diff.concepts} className="h-72 mb-2" />
+
               {reviewRevision.diff.concepts.map((concept, i) => (
                 <div key={i} className="bg-background border border-border rounded-xl p-4">
                   <div className="flex items-center justify-between gap-2">
@@ -459,8 +467,8 @@ const CourseCoordinatorDashboard: React.FC = () => {
                     }>{concept.difficulty}</span>
                   </div>
                   <p className="text-text-secondary text-xs mt-1.5">{concept.description}</p>
-                  <p className="text-text-muted text-[11px] mt-1.5 italic">{concept.learning_outcomes}</p>
-                  <div className="flex items-center justify-between mt-2 text-[11px] text-text-muted">
+                  <p className="text-text-muted text-[12px] mt-1.5 italic">{concept.learning_outcomes}</p>
+                  <div className="flex items-center justify-between mt-2 text-[12px] text-text-muted">
                     <span>Importance: {concept.importance_score}/10</span>
                     {concept.prerequisites.length > 0 && (
                       <span>Prerequisites: {concept.prerequisites.join(', ')}</span>

@@ -5,7 +5,9 @@ import { useAuth } from '../context/AuthContext';
 import { ChangePasswordModal } from '../components/ChangePasswordModal';
 import { ProfilePhotoEditor } from '../components/ProfilePhotoEditor';
 import { notificationPreferencesService, type NotificationPreferences } from '../services/api';
-import { ArrowLeft, Settings, RefreshCw, AlertCircle, KeyRound, Mail } from 'lucide-react';
+import { getPrimaryNavItems } from '../lib/roleNav';
+import { Settings, RefreshCw, AlertCircle, KeyRound, Mail } from 'lucide-react';
+import { apiErrorMessage } from '../lib/apiError';
 
 /* Accessible pill toggle switch, styled with the app's theme tokens.
    Plain checkbox under the hood (keyboard/screen-reader friendly) with the
@@ -69,7 +71,7 @@ const PREFERENCE_FIELDS: { key: keyof NotificationPreferences; title: string; de
   {
     key: 'content_processing_updates',
     title: 'Content processing',
-    description: 'When uploaded course materials finish processing, or a knowledge graph is approved or rejected.',
+    description: 'When uploaded course materials finish processing, or a concept graph is approved or rejected.',
   },
   {
     key: 'system_updates',
@@ -94,8 +96,8 @@ const SettingsPage: React.FC = () => {
       try {
         const data = await notificationPreferencesService.get();
         if (!cancelled) setPrefs(data);
-      } catch {
-        if (!cancelled) setError('Could not load your notification preferences. Please try again.');
+      } catch (err) {
+        if (!cancelled) setError(apiErrorMessage(err, 'Could not load your notification preferences.'));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -123,9 +125,9 @@ const SettingsPage: React.FC = () => {
     }
   };
 
-  const navItems: NavItem[] = [
-    { key: 'back', label: 'Back to Dashboard', icon: ArrowLeft, onClick: () => navigate(-1) },
-  ];
+  // Same role-specific top section as the user's own dashboard, so the sidebar
+  // looks identical everywhere instead of collapsing to just the global links.
+  const navItems: NavItem[] = getPrimaryNavItems(user, navigate);
 
   return (
     <AppShell roleLabel="Settings" logoIcon={Settings} navItems={navItems}>

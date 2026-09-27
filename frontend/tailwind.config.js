@@ -38,11 +38,35 @@ export default {
           muted:     "rgb(var(--text-muted) / <alpha-value>)",
         },
       },
+      // ── Type scale ──
+      // Overrides Tailwind's defaults, which this app had been using unchanged.
+      // The problem that motivated this: 56% of every text-size utility in src/ was
+      // 12px or smaller, and headings (text-base, 16px) sat only 2px above body
+      // (text-sm, 14px). The result read as one flat wall of small grey text with no
+      // hierarchy - "flat and cramped" is a typography problem here, not a colour one.
+      //
+      // Two things change. The floor lifts (12 -> 13, 14 -> 15) so body copy is
+      // comfortable, and the GAPS widen as the scale climbs (17 -> 19 -> 22 -> 28) so a
+      // heading actually reads as a heading. Line-heights are set explicitly and run
+      // looser than Tailwind's defaults, which is most of the "cramped" feeling.
+      //
+      // App-wide by design: every existing className picks it up with no edits.
+      fontSize: {
+        xs:   ['0.8125rem', { lineHeight: '1.15rem' }],   // 13px  (was 12)
+        sm:   ['0.9375rem', { lineHeight: '1.4rem'  }],   // 15px  (was 14)
+        base: ['1.0625rem', { lineHeight: '1.65rem' }],   // 17px  (was 16)
+        lg:   ['1.1875rem', { lineHeight: '1.8rem'  }],   // 19px  (was 18)
+        xl:   ['1.375rem',  { lineHeight: '1.9rem'  }],   // 22px  (was 20)
+        '2xl':['1.75rem',   { lineHeight: '2.2rem'  }],   // 28px  (was 24)
+        '3xl':['2.125rem',  { lineHeight: '2.5rem'  }],   // 34px  (was 30)
+        '4xl':['2.5rem',    { lineHeight: '2.9rem'  }],   // 40px  (was 36)
+        '5xl':['3.25rem',   { lineHeight: '1.1'     }],   // 52px  (was 48)
+      },
       fontFamily: {
-        // Inter first: a neutral, highly-legible UI typeface (same family used by most
-        // professional education/productivity dashboards) - 'Outfit' kept only as a
-        // fallback, not the primary voice of the app anymore.
-        sans: ['Inter', 'Outfit', 'system-ui', 'sans-serif'],
+        // Duolingo-style pairing: 'Nunito' (rounded, friendly) for body/UI text,
+        // 'Baloo 2' (chunky, bubbly) reserved for headings via `font-display`.
+        sans: ['Nunito', 'system-ui', 'sans-serif'],
+        display: ['Baloo 2', 'Nunito', 'system-ui', 'sans-serif'],
       },
       backdropBlur: {
         xs: '2px',

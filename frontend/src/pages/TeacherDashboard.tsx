@@ -3,7 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { courseService } from '../services/api';
 import { AppShell, type NavItem } from '../components/AppShell';
+import { TodayTeachingWidget } from '../components/TodayTeachingWidget';
 import { EmptyStateIllustration } from '../components/illustrations';
+import { COURSE_THEME_PALETTE, getCourseBannerClass } from '../lib/courseTheme';
 import { useAutoRefresh } from '../hooks/useAutoRefresh';
 import {
   Plus, BookOpen, Hash, Users, ArrowRight, ShieldCheck,
@@ -26,6 +28,7 @@ interface Course {
   enrollment_end: string | null;
   start_date: string | null;
   end_date: string | null;
+  theme_color: string | null;
 }
 
 interface CatalogEntry {
@@ -39,18 +42,6 @@ const DESCRIPTION_MIN_WORDS = 5;
 const DESCRIPTION_MAX_WORDS = 250;
 const wordCount = (text: string) => (text.trim() ? text.trim().split(/\s+/).length : 0);
 const todayStr = () => new Date().toISOString().slice(0, 10);
-
-// Classroom-style banner palette — cycles through the app's existing brand
-// colors plus a few standard Tailwind accents, picked by course id so each
-// card keeps a stable color across renders.
-const BANNER_GRADIENTS = [
-  'from-primary to-primary-hover',
-  'from-secondary to-secondary-hover',
-  'from-rose-500 to-rose-600',
-  'from-amber-500 to-amber-600',
-  'from-emerald-600 to-emerald-700',
-];
-const getBannerGradient = (id: number) => BANNER_GRADIENTS[Math.abs(id) % BANNER_GRADIENTS.length];
 
 const TeacherDashboard: React.FC = () => {
   const { user } = useAuth();
@@ -196,6 +187,15 @@ const TeacherDashboard: React.FC = () => {
     });
   };
 
+  const handleSetThemeColor = (courseId: number, themeColor: string) => {
+    // Optimistic - recolors instantly on click, not after the network round trip.
+    const previous = courses.find((c) => c.id === courseId)?.theme_color ?? null;
+    setCourses((prev) => prev.map((c) => (c.id === courseId ? { ...c, theme_color: themeColor } : c)));
+    courseService.update(courseId, { theme_color: themeColor }).catch(() => {
+      setCourses((prev) => prev.map((c) => (c.id === courseId ? { ...c, theme_color: previous } : c)));
+    });
+  };
+
   const navItems: NavItem[] = [
     { key: 'courses', label: 'My Courses', icon: BookOpen, active: true },
     // Coordinator authority is additive on top of the teacher role - if this
@@ -235,7 +235,7 @@ const TeacherDashboard: React.FC = () => {
                 {user?.full_name} <Star className="w-5 h-5 text-amber-400" />
               </h2>
               <p className="text-text-secondary text-sm mt-2">
-                Manage courses, build knowledge graphs, and track student progress.
+                Manage courses, build concept graphs, and track student progress.
               </p>
             </div>
           </div>
@@ -261,7 +261,7 @@ const TeacherDashboard: React.FC = () => {
                 <Network className="w-5 h-5 text-secondary" />
               </div>
               <div>
-                <p className="text-xs text-text-muted font-medium uppercase tracking-wider">Knowledge Graphs</p>
+                <p className="text-xs text-text-muted font-medium uppercase tracking-wider">Concept Graphs</p>
                 <p className="text-2xl font-extrabold text-text-primary">{courses.length}</p>
               </div>
             </div>
@@ -309,6 +309,7 @@ const TeacherDashboard: React.FC = () => {
           </div>
         ) : (
           <div>
+            <TodayTeachingWidget role="teacher" courses={courses.map((c) => ({ id: c.id, name: c.name }))} />
             <div className="flex items-center justify-between mb-5">
               <h3 className="text-base font-bold text-text-primary flex items-center gap-2">
                 <GraduationCap className="w-4 h-4 text-primary" />
@@ -329,13 +330,13 @@ const TeacherDashboard: React.FC = () => {
                     onClick={() => navigate(`/course/${course.id}`)}
                   >
                     {/* Classroom-style banner */}
-                    <div className={`relative h-28 px-5 pt-4 pb-8 bg-gradient-to-br ${getBannerGradient(course.id)}`}>
+                    <div className={`relative h-28 px-5 pt-4 pb-8 bg-gradient-to-br ${getCourseBannerClass(course)}`}>
                       <div className="flex items-center justify-between">
-                        <span className="bg-white/20 backdrop-blur-sm text-white text-[11px] font-bold px-2.5 py-1 rounded-lg flex items-center gap-1">
+                        <span className="bg-white/20 backdrop-blur-sm text-white text-[12px] font-bold px-2.5 py-1 rounded-lg flex items-center gap-1">
                           <Hash className="w-3 h-3" />
                           {course.code || 'NO-CODE'}
                         </span>
-                        <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full ${
+                        <span className={`text-[12px] font-bold px-2.5 py-1 rounded-full ${
                           course.status.toLowerCase() === 'open'
                             ? 'bg-white/90 text-emerald-700'
                             : 'bg-white/90 text-amber-700'
@@ -347,6 +348,23 @@ const TeacherDashboard: React.FC = () => {
                         {course.name}
                       </h3>
                       <p className="text-white/80 text-xs mt-0.5">{course.semester}</p>
+
+                      {/* Theme color picker - Classroom lets you customize a class's banner color */}
+                      <div
+                        className="absolute top-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity bg-black/20 backdrop-blur-sm rounded-full px-1.5 py-1"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        {Object.keys(COURSE_THEME_PALETTE).map((key) => (
+                          <button
+                            key={key}
+                            onClick={() => handleSetThemeColor(course.id, key)}
+                            className={`w-3.5 h-3.5 rounded-full bg-gradient-to-br ${COURSE_THEME_PALETTE[key]} ${
+                              course.theme_color === key ? 'ring-2 ring-white' : ''
+                            }`}
+                            title={key}
+                          />
+                        ))}
+                      </div>
 
                       {/* Overlapping avatar */}
                       <div className="absolute -bottom-5 right-4 w-11 h-11 rounded-full bg-surface p-0.5 shadow-md">
@@ -373,7 +391,7 @@ const TeacherDashboard: React.FC = () => {
 
                       <div className="border-t border-border pt-3.5 flex items-center justify-between gap-2">
                         <div>
-                          <p className="text-[10px] text-text-muted uppercase tracking-wider font-medium">Join Code</p>
+                          <p className="text-[11px] text-text-muted uppercase tracking-wider font-medium">Join Code</p>
                           <p className="text-sm font-mono font-extrabold text-text-primary tracking-widest bg-background border border-border px-2 py-0.5 rounded-lg mt-0.5 select-all">
                             {course.enrollment_code}
                           </p>

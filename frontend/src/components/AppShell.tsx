@@ -1,12 +1,13 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { ThemeToggle } from './ThemeToggle';
 import { NotificationBell } from './NotificationBell';
 import { ChangePasswordModal } from './ChangePasswordModal';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { KeyRound, LogOut, Menu, X, CalendarDays, Sparkles, Settings, Bell, User, ChevronDown, BarChart3, type LucideIcon } from 'lucide-react';
+import { KeyRound, LogOut, Menu, X, CalendarDays, Sparkles, Settings, Bell, User, ChevronDown, BarChart3, Wand2, BookOpen, Network, LibraryBig, type LucideIcon } from 'lucide-react';
+import { courseService, enrollmentService } from '../services/api';
 import { Avatar } from './Avatar';
-import logo from '../assets/logo.png';
+import { FoxMark } from '../components/FoxMark';
 
 export interface NavItem {
   key: string;
@@ -19,6 +20,12 @@ export interface NavItem {
   badge?: React.ReactNode;
   /** Renders as a smaller, indented row (used for per-course links under a section). */
   nested?: boolean;
+  /**
+   * Indent level. 1 = a course under "My Courses"/"My Classes"; 2 = a section
+   * within the course you are currently looking at. Omitted (or 0) is a top-level
+   * item. `nested: true` is treated as depth 1 for backwards compatibility.
+   */
+  depth?: 0 | 1 | 2;
 }
 
 interface AppShellProps {
@@ -64,6 +71,10 @@ export const AppShell: React.FC<AppShellProps> = ({ roleLabel, navItems, childre
   // Global nav items available to every role, appended below the page's own
   // role-specific navItems - Calendar/Assistant/Settings aren't dashboard
   // sections, they're app-wide destinations (their own routes).
+  // Content Studio is deliberately NOT here. It is always scoped to one course, so a
+  // global entry would land you on whichever course happened to be first and make you
+  // re-pick - the per-course link nested under the active course (below) is the only
+  // way in that already knows which course you mean.
   const globalNavItems: NavItem[] = [
     { key: 'calendar', label: 'Calendar', icon: CalendarDays, active: location.pathname === '/calendar', onClick: () => navigate('/calendar') },
     { key: 'analytics', label: 'Analytics', icon: BarChart3, active: location.pathname === '/analytics', onClick: () => navigate('/analytics') },
@@ -71,25 +82,159 @@ export const AppShell: React.FC<AppShellProps> = ({ roleLabel, navItems, childre
     { key: 'settings', label: 'Settings', icon: Settings, active: location.pathname === '/settings', onClick: () => navigate('/settings') },
   ];
 
+  // ── Per-course sidebar navigation ──
+  // Fetched here rather than in each page's getPrimaryNavItems() so every screen
+  // shows the same course list without 15 call sites having to load it. Purely a
+  // convenience layer: a failure leaves the sidebar exactly as it was.
+  const [myCourses, setMyCourses] = useState<{ id: number; name: string }[]>([]);
+
+  useEffect(() => {
+    if (!user) { setMyCourses([]); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        // Two endpoints, two shapes: getTeacherCourses() returns courses, while
+        // getMyCourses() returns enrollments with the course nested under `course`.
+        const list =
+          user.role === 'teacher'
+            ? ((await courseService.getTeacherCourses()) || []).map((c: any) => ({ id: c.id, name: c.name }))
+            : user.role === 'student'
+            ? ((await enrollmentService.getMyCourses()) || [])
+                .map((e: any) => e.course)
+                .filter(Boolean)
+                .map((c: any) => ({ id: c.id, name: c.name }))
+            : [];
+        if (!cancelled) {
+          const seen = new Set<number>();
+          const deduped = list.filter((c: any) => c.id && c.name && !seen.has(c.id) && seen.add(c.id));
+          setMyCourses(deduped);
+        }
+      } catch {
+        // Sidebar courses are additive - never let this break the shell.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [user?.id, user?.role]);
+
+  // Which course the user is currently looking at, from either /course/:id[/graph]
+  // or /content-studio?course=:id. Drives which course expands its sub-sections.
+  const activeCourseId = useMemo(() => {
+    const m = location.pathname.match(/^\/course\/(\d+)/);
+    if (m) return parseInt(m[1], 10);
+    if (location.pathname === '/content-studio') {
+      const q = parseInt(new URLSearchParams(location.search).get('course') || '', 10);
+      return Number.isFinite(q) ? q : null;
+    }
+    return null;
+  }, [location.pathname, location.search]);
+
+  // The studio's open tab, so Content Studio and Content Library can highlight
+  // separately even though they are the same route. Absent means the page's own
+  // default, which is Generate for anyone who can author and the library otherwise.
+  const studioTab = useMemo(() => {
+    if (location.pathname !== '/content-studio') return null;
+    return new URLSearchParams(location.search).get('tab')
+      || (user?.role === 'student' ? 'library' : 'generate');
+  }, [location.pathname, location.search, user?.role]);
+
+  // Splice the course list in directly beneath the role's own "My Courses" /
+  // "My Classes" entry, and expand the active course into its sections.
+  const expandedNavItems = useMemo<NavItem[]>(() => {
+    const anchorKey = user?.role === 'teacher' ? 'courses' : 'classes';
+    const idx = navItems.findIndex((i) => i.key === anchorKey);
+    if (idx === -1 || myCourses.length === 0) return navItems;
+
+    const children: NavItem[] = [];
+    for (const c of myCourses) {
+      const isActive = c.id === activeCourseId;
+      children.push({
+        key: `course-${c.id}`,
+        label: c.name,
+        icon: BookOpen,
+        depth: 1,
+        active: isActive && location.pathname === `/course/${c.id}`,
+        onClick: () => navigate(`/course/${c.id}`),
+      });
+      if (!isActive) continue;
+      // Three destinations, not two. The library used to be a tab you could only
+      // reach by opening the studio first and then noticing it - which made the
+      // place all the finished material lives the hardest thing in the course to
+      // find. They are separate jobs (map the course, make material, use material)
+      // so they get separate rows.
+      children.push({
+        key: `course-${c.id}-graph`,
+        label: 'Concept Graph',
+        icon: Network,
+        depth: 2,
+        active: location.pathname === `/course/${c.id}/graph`,
+        onClick: () => navigate(`/course/${c.id}/graph`),
+      });
+      // Authoring only. The studio's Generate surface renders nothing for a student,
+      // so a row that took them to a blank page would be worse than no row - they
+      // reach the study modes from the library's own tab strip.
+      if (user?.role !== 'student') {
+        children.push({
+          key: `course-${c.id}-studio`,
+          label: 'Content Studio',
+          icon: Wand2,
+          depth: 2,
+          active: studioTab !== null && studioTab !== 'library',
+          onClick: () => navigate(`/content-studio?course=${c.id}&tab=generate`),
+        });
+      }
+      children.push({
+        key: `course-${c.id}-library`,
+        label: 'Content Library',
+        icon: LibraryBig,
+        depth: 2,
+        active: studioTab === 'library',
+        onClick: () => navigate(`/content-studio?course=${c.id}&tab=library`),
+      });
+    }
+
+    const out = [...navItems];
+    out.splice(idx + 1, 0, ...children);
+    return out;
+  }, [navItems, myCourses, activeCourseId, location.pathname, studioTab, user?.role, navigate]);
+
   const renderNavItem = (item: NavItem) => {
     const Icon = item.icon;
-    // Every item sits in one flat list (no indented sub-list, no colored side
-    // bar) - the active tab is marked by a short underline directly beneath
-    // its own label text (not a line spanning the full row width).
-    const baseClasses = `w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold transition-all text-left ${
-      item.active ? 'text-primary font-bold' : 'text-text-secondary hover:text-text-primary'
-    }`;
+    const depth = item.depth ?? (item.nested ? 1 : 0);
 
-    const content = (
-      <>
-        <Icon className="w-4.5 h-4.5 shrink-0" />
-        <span className={`truncate ${item.active ? 'underline decoration-2 decoration-primary underline-offset-4' : ''}`}>
-          {item.label}
-        </span>
-        <span className="flex-1" />
-        {item.badge}
-      </>
-    );
+    // Selection is a filled row plus a left accent bar, which is what a vertical nav
+    // is read as: one row out of a column is currently the page. The previous
+    // treatment underlined the label text, which reads as a hyperlink rather than a
+    // selected row, and left the row itself looking untouched.
+    //
+    // Nesting is carried by indent, type size and a guide line down the left. The
+    // guide is drawn as a pseudo-element deliberately overhanging the row by the
+    // exact size of the list gap (space-y-1 = 4px, so 2px at each end), because a
+    // plain border-l on each row renders as a column of dashes with a gap between
+    // every pair - it looks broken rather than like a tree.
+    const guide =
+      "before:content-[''] before:absolute before:left-0 before:-top-0.5 before:-bottom-0.5 before:w-px";
+
+    const depthClasses =
+      depth === 0
+        ? 'px-3 py-2.5 text-sm'
+        : depth === 1
+        ? `ml-3 pl-3.5 pr-3 py-2 text-[13px] ${guide} ${item.active ? 'before:bg-primary/50' : 'before:bg-border'}`
+        : `ml-7 pl-3.5 pr-3 py-1.5 text-xs ${guide} ${item.active ? 'before:bg-primary/50' : 'before:bg-border'}`;
+
+    const stateClasses = item.active
+      ? depth === 0
+        ? 'bg-primary-muted text-primary font-bold'
+        : 'bg-primary-muted/70 text-primary font-bold'
+      : 'text-text-secondary hover:text-text-primary hover:bg-background';
+
+    // Rounded on the right only for nested rows, so the fill does not cut across the
+    // guide line it is sitting against.
+    const radius = depth === 0 ? 'rounded-lg' : 'rounded-r-lg';
+
+    const baseClasses =
+      `relative w-full flex items-center gap-2.5 font-semibold transition-all text-left ${radius} ${depthClasses} ${stateClasses}`;
+
+    const iconSize = depth === 0 ? 'w-4.5 h-4.5' : depth === 1 ? 'w-4 h-4' : 'w-3.5 h-3.5';
 
     return (
       <button
@@ -100,8 +245,17 @@ export const AppShell: React.FC<AppShellProps> = ({ roleLabel, navItems, childre
         }}
         className={baseClasses}
         title={item.label}
+        aria-current={item.active ? 'page' : undefined}
       >
-        {content}
+        {/* The accent bar. Only on top-level rows: at depth 1 and 2 it would sit on
+            top of the guide line and read as a rendering glitch. */}
+        {item.active && depth === 0 && (
+          <span className="absolute left-0 top-1.5 bottom-1.5 w-1 rounded-full bg-primary" />
+        )}
+        <Icon className={`${iconSize} shrink-0 ${item.active ? '' : 'opacity-70'}`} />
+        <span className="truncate">{item.label}</span>
+        <span className="flex-1" />
+        {item.badge}
       </button>
     );
   };
@@ -110,10 +264,10 @@ export const AppShell: React.FC<AppShellProps> = ({ roleLabel, navItems, childre
     <>
       {/* Logo — same mark used on the public landing page, for one consistent brand image everywhere. */}
       <div className="flex items-center gap-3 px-5 py-5 border-b border-border shrink-0">
-        <img src={logo} alt="ConceptIntel" width={36} height={36} className="w-9 h-9 object-contain shrink-0" />
+        <FoxMark className="w-9 h-9 shrink-0" />
         <div className="min-w-0">
           <h1 className="text-base font-bold gradient-text leading-tight truncate">ConceptIntel</h1>
-          <p className="text-[10px] text-text-muted truncate">{roleLabel}</p>
+          <p className="text-[11px] text-text-muted truncate">{roleLabel}</p>
         </div>
         <button
           onClick={() => setMobileOpen(false)}
@@ -127,7 +281,7 @@ export const AppShell: React.FC<AppShellProps> = ({ roleLabel, navItems, childre
           Sidebar is nav-only now - account/notification controls live in the
           top bar instead (see topBar below), not mixed into the nav list. */}
       <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
-        {navItems.map(renderNavItem)}
+        {expandedNavItems.map(renderNavItem)}
         <div className="pt-3 mt-3 border-t border-border space-y-1">
           {globalNavItems.map(renderNavItem)}
         </div>

@@ -5,6 +5,7 @@ import { ChangePasswordModal } from '../components/ChangePasswordModal';
 import { Avatar } from '../components/Avatar';
 import { StudyIllustration, TeachIllustration } from '../components/illustrations';
 import { authService } from '../services/api';
+import { getPrimaryNavItems } from '../lib/roleNav';
 import {
   User,
   Mail,
@@ -16,7 +17,6 @@ import {
   Database,
   KeyRound,
   Check,
-  ArrowLeft,
   Camera,
   Trash2,
   Loader2,
@@ -27,10 +27,10 @@ const ROLE_META: Record<string, { label: string; icon: React.FC<{ className?: st
   student: {
     label: 'Student',
     icon: GraduationCap,
-    desc: 'Access enrolled courses, explore interactive knowledge graphs, and track your own learning progress.',
+    desc: 'Access enrolled courses, explore interactive concept graphs, and track your own learning progress.',
     capabilities: [
       'Access enrolled course materials',
-      'Explore interactive knowledge graphs',
+      'Explore interactive concept graphs',
       'Complete adaptive quizzes & flashcards',
       'View AI-generated assignment feedback',
     ],
@@ -88,7 +88,7 @@ const InfoRow: React.FC<{ label: string; value: string; icon: React.FC<{ classNa
       <Icon className="w-4 h-4 text-primary dark:text-primary-light" />
     </div>
     <div className="min-w-0">
-      <p className="text-[10px] font-bold text-text-muted uppercase tracking-wider">{label}</p>
+      <p className="text-[11px] font-bold text-text-muted uppercase tracking-wider">{label}</p>
       <p className="text-sm font-semibold text-text-primary truncate">{value}</p>
     </div>
   </div>
@@ -140,19 +140,10 @@ const ProfilePage: React.FC = () => {
   // role (teacher, both coordinators, admin) gets the "teaching" one.
   const Illustration = role === 'student' ? StudyIllustration : TeachIllustration;
 
-  const defaultDashboard = () => {
-    if (role === 'admin') return '/admin';
-    if (role === 'teacher') return '/teacher';
-    return '/student';
-  };
-
+  // Same role-specific top section as the user's own dashboard, so the sidebar
+  // looks identical everywhere, plus "My Profile" as this page's own item.
   const navItems: NavItem[] = [
-    {
-      key: 'back',
-      label: 'Back to Dashboard',
-      icon: ArrowLeft,
-      onClick: () => navigate(defaultDashboard()),
-    },
+    ...getPrimaryNavItems(user, navigate),
     {
       key: 'profile',
       label: 'My Profile',

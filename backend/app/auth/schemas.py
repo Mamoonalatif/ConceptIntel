@@ -69,6 +69,20 @@ class GoogleAuthRequest(BaseModel):
     id_token: str
 
 
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def check_new_password(cls, v: str) -> str:
+        return validate_password_strength(v)
+
+
 class UserResponse(BaseModel):
     id: int
     email: str
@@ -142,9 +156,26 @@ class StaffAuthoritiesUpdate(BaseModel):
 
 class Token(BaseModel):
     access_token: str
+    refresh_token: str
     token_type: str
     role: str
     full_name: str
+    # The full profile, so the frontend can populate its session from this one
+    # response instead of a separate GET /auth/me round trip right after - that
+    # second sequential request (each paying full network + remote-DB latency) was
+    # adding a full extra leg to every login, most visible on Google sign-in where
+    # it lands on top of the token-verification call. Optional only so older
+    # callers/tests that construct a Token without it don't break.
+    user: Optional[UserResponse] = None
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+
+class RefreshResponse(BaseModel):
+    access_token: str
+    token_type: str
 
 
 class TokenData(BaseModel):

@@ -149,7 +149,7 @@ const EnrollmentCodeForm: React.FC<EnrollmentCodeFormProps> = ({ onEnrolled, onC
               Course found: {preview.name}{preview.code ? ` (${preview.code})` : ''}
             </p>
           ) : interacted ? (
-            <p className="text-[11px] text-text-muted mt-1.5">
+            <p className="text-[12px] text-text-muted mt-1.5">
               Codes are {CODE_LENGTH} characters — letters and numbers only.
             </p>
           ) : null}

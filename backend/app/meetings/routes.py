@@ -1,9 +1,10 @@
+import threading
 from datetime import datetime
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.database.connection import get_db
+from app.database.connection import get_db, SessionLocal
 from app.database.models import Meeting, Course, User
 from app.meetings.schemas import MeetingCreate, MeetingUpdate, MeetingResponse
 from app.auth.routes import get_current_user, get_current_teacher
@@ -36,6 +37,40 @@ def _get_course_or_404(db: Session, course_id: int) -> Course:
     if not course:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
     return course
+
+
+def _notify_meeting_posted_background(course_id: int, meeting_id: int) -> None:
+    """Runs off the request thread - see the call site in create_meeting for
+    why. Split into two short-lived DB sessions around the LLM call rather
+    than one held open across it - see the equivalent function in
+    app/assignments/routes.py for why that matters for the whole app's
+    connection pool, not just this one endpoint."""
+    bg_db = SessionLocal()
+    try:
+        course = bg_db.query(Course).filter(Course.id == course_id).first()
+        meeting = bg_db.query(Meeting).filter(Meeting.id == meeting_id).first()
+        if not course or not meeting:
+            return
+        when_str = meeting.scheduled_at.strftime('%b %d, %Y %I:%M %p')
+        content = f"Scheduled in {course.name} for {when_str}. {meeting.description or ''}".strip()
+        title = meeting.title
+    finally:
+        bg_db.close()
+
+    try:
+        summary = generate_posting_summary("meeting", title, content)
+        bg_db = SessionLocal()
+        try:
+            notify_course_students(
+                bg_db, course_id, NotificationType.MEETING_POSTED,
+                title=f"New meeting: {title}",
+                message=summary,
+                link=f"/course/{course_id}",
+            )
+        finally:
+            bg_db.close()
+    except Exception as e:
+        print(f"Warning: failed to create meeting notifications: {str(e)}")
 
 
 @router.get("/{course_id}/meetings", response_model=List[MeetingResponse])
@@ -77,18 +112,8 @@ def create_meeting(
     db.commit()
     db.refresh(meeting)
 
-    try:
-        when_str = payload.scheduled_at.strftime('%b %d, %Y %I:%M %p')
-        content = f"Scheduled in {course.name} for {when_str}. {payload.description or ''}".strip()
-        summary = generate_posting_summary("meeting", payload.title, content)
-        notify_course_students(
-            db, course_id, NotificationType.MEETING_POSTED,
-            title=f"New meeting: {payload.title}",
-            message=summary,
-            link=f"/course/{course_id}",
-        )
-    except Exception as e:
-        print(f"Warning: failed to create meeting notifications: {str(e)}")
+    # Backgrounded - see _notify_meeting_posted_background docstring.
+    threading.Thread(target=_notify_meeting_posted_background, args=(course_id, meeting.id), daemon=True).start()
 
     return _to_response(meeting)
 

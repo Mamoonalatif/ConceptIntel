@@ -1,19 +1,23 @@
 import re
-import json
+import time
 import logging
 from typing import List, Dict, Any, Optional
 from neo4j import GraphDatabase
-from openai import OpenAI
 
 from app.config import settings
-from app.upload.services import chunk_text
-from app.observability import trace_ai_call
 import os
 import certifi
 
 os.environ["SSL_CERT_FILE"] = certifi.where()
 
 logger = logging.getLogger("conceptintel.graph")
+
+# How long to wait before retrying a failed Neo4j connection. Long enough that a
+# genuinely-down database doesn't add a connection attempt's latency to every
+# single request; short enough that the app notices within a reasonable window
+# once Neo4j (an Aura free-tier instance in this deployment, which pauses itself
+# after inactivity) comes back online.
+NEO4J_RECONNECT_COOLDOWN_SECONDS = 30
 
 
 def build_node_id(catalog_id: int, name: str) -> str:
@@ -27,33 +31,70 @@ class Neo4jService:
     All Concept nodes/relationships are keyed by `catalog_id` (CourseCatalog.id), not
     by an individual Course section's id - this is what makes the graph shared across
     every teacher/section teaching the same catalog course, per the scope doc's
-    "shared knowledge graph" requirement. Callers (routes.py) are responsible for
+    "shared concept graph" requirement. Callers (routes.py) are responsible for
     resolving a Course.id to its catalog_id before calling into this service.
     """
 
     def __init__(self):
         self.driver = None
+        self._last_connect_attempt = 0.0
+        self._connect()
+
+    def _connect(self) -> None:
+        """(Re)attempts the connection. Safe to call more than once - records the
+        attempt time regardless of outcome so _ensure_connected() below can rate-
+        limit retries."""
+        self._last_connect_attempt = time.monotonic()
         try:
-            self.driver = GraphDatabase.driver(
+            driver = GraphDatabase.driver(
                 settings.NEO4J_URI,
                 auth=(settings.NEO4J_USERNAME, settings.NEO4J_PASSWORD)
             )
-            self.driver.verify_connectivity()
+            driver.verify_connectivity()
+            # Only published after connectivity is confirmed. Assigning self.driver
+            # first (as this previously did) left a live-looking driver behind when
+            # verify_connectivity() raised, so every `if not self.driver` guard in
+            # this class silently never fired: instead of degrading to the mock
+            # graph / empty result the guards promise, each call reached
+            # driver.session() and raised ServiceUnavailable out of the request.
+            self.driver = driver
             logger.info("Successfully connected to Neo4j database")
         except Exception as e:
             logger.error(f"Failed to connect to Neo4j database: {str(e)}")
+            self.driver = None
+
+    def _ensure_connected(self) -> None:
+        """This service is a module-level singleton, constructed once when the app
+        starts - so __init__ only ever gets ONE chance to connect. If Neo4j (an
+        Aura free-tier instance in this deployment) happened to be paused at that
+        moment, self.driver stayed None for the rest of the process's life, and
+        every graph call silently fell back to get_mock_graph_data()/an empty
+        result FOREVER, even after Neo4j came back online and a fresh connection
+        would have succeeded - confirmed live: a course's Concept Graph page kept
+        showing an unrelated placeholder graph long after the Aura instance had
+        actually resumed, because this service never got a second chance to
+        connect. Called at the top of every query so a resumed database is
+        noticed within NEO4J_RECONNECT_COOLDOWN_SECONDS instead of requiring a
+        manual backend restart."""
+        if self.driver is not None:
+            return
+        if time.monotonic() - self._last_connect_attempt < NEO4J_RECONNECT_COOLDOWN_SECONDS:
+            return
+        self._connect()
 
     def close(self):
         if self.driver:
             self.driver.close()
 
     def get_session(self):
+        self._ensure_connected()
         if not self.driver:
             raise ConnectionError("Neo4j database connection is not available.")
         return self.driver.session()
 
     def query(self, query_str: str, parameters: Dict[str, Any] = None):
         """Execute a general Cypher query."""
+        self._ensure_connected()
         if not self.driver:
             logger.warning("Neo4j not connected. Mocking query execution.")
             return []
@@ -62,7 +103,7 @@ class Neo4jService:
             return [record.data() for record in result]
 
     def create_concept_node(self, catalog_id: int, name: str, description: str, difficulty: str,
-                            importance_score: int = 5, learning_outcomes: str = ""):
+                            importance_score: int = 5, learning_outcomes: str = "", material: str = ""):
         """Merge/Create a Concept node in the graph with extended properties."""
         query = """
         MERGE (c:Concept {catalog_id: $catalog_id, name: $name})
@@ -70,11 +111,13 @@ class Neo4jService:
                       c.difficulty = $difficulty,
                       c.importance_score = $importance_score,
                       c.learning_outcomes = $learning_outcomes,
+                      c.material = $material,
                       c.id = $node_id
         ON MATCH SET  c.description = $description,
                       c.difficulty = $difficulty,
                       c.importance_score = $importance_score,
-                      c.learning_outcomes = $learning_outcomes
+                      c.learning_outcomes = $learning_outcomes,
+                      c.material = $material
         RETURN c
         """
         node_id = build_node_id(catalog_id, name)
@@ -85,6 +128,7 @@ class Neo4jService:
             "difficulty": difficulty,
             "importance_score": importance_score,
             "learning_outcomes": learning_outcomes,
+            "material": material,
             "node_id": node_id
         }
         self.query(query, params)
@@ -104,8 +148,73 @@ class Neo4jService:
         }
         self.query(query, params)
 
+    # ── Bulk writes ──────────────────────────────────────────────────────────
+    # Same Cypher as the two single-item methods above, but driven by UNWIND over
+    # a parameter list so a whole approved revision is 2 statements instead of one
+    # per concept and one per link.
+    #
+    # This is not a micro-optimisation. Neo4j here is Aura (neo4j+s://, hosted
+    # region), and each self.query() opens its own session - measured at ~284ms
+    # per round trip from this machine. A 79-concept / 117-link revision therefore
+    # took 196 x 284ms = ~56 SECONDS, well past the frontend's 20s HTTP timeout,
+    # so the coordinator saw "Failed to submit your decision" on a merge that was
+    # actually still running and went on to succeed. Batched, the same merge is
+    # two round trips.
+
+    def create_concept_nodes_bulk(self, catalog_id: int, concepts: List[Dict[str, Any]]):
+        """Merge many Concept nodes in a single statement. `concepts` items need
+        name/description/difficulty/importance_score/learning_outcomes."""
+        if not concepts:
+            return
+        query = """
+        UNWIND $rows AS row
+        MERGE (c:Concept {catalog_id: $catalog_id, name: row.name})
+        ON CREATE SET c.description = row.description,
+                      c.difficulty = row.difficulty,
+                      c.importance_score = row.importance_score,
+                      c.learning_outcomes = row.learning_outcomes,
+                      c.material = row.material,
+                      c.id = row.node_id
+        ON MATCH SET  c.description = row.description,
+                      c.difficulty = row.difficulty,
+                      c.importance_score = row.importance_score,
+                      c.learning_outcomes = row.learning_outcomes
+        """
+        rows = [
+            {
+                "name": c["name"].strip(),
+                "description": (c.get("description") or "").strip(),
+                "difficulty": c.get("difficulty", "Medium"),
+                "importance_score": c.get("importance_score", 5),
+                "learning_outcomes": c.get("learning_outcomes") or "",
+                "material": c.get("material") or "",
+                "node_id": build_node_id(catalog_id, c["name"]),
+            }
+            for c in concepts
+        ]
+        self.query(query, {"catalog_id": catalog_id, "rows": rows})
+
+    def create_prerequisite_relationships_bulk(self, catalog_id: int, pairs: List[Dict[str, str]]):
+        """Create many PREREQUISITE relationships in a single statement. `pairs`
+        items need source_name/target_name. A pair naming a concept that doesn't
+        exist is skipped by the MATCH, exactly as the single-item version is."""
+        if not pairs:
+            return
+        query = """
+        UNWIND $rows AS row
+        MATCH (src:Concept {catalog_id: $catalog_id, name: row.source_name})
+        MATCH (tgt:Concept {catalog_id: $catalog_id, name: row.target_name})
+        MERGE (src)-[:PREREQUISITE]->(tgt)
+        """
+        rows = [
+            {"source_name": p["source_name"].strip(), "target_name": p["target_name"].strip()}
+            for p in pairs
+        ]
+        self.query(query, {"catalog_id": catalog_id, "rows": rows})
+
     def get_catalog_graph(self, catalog_id: int) -> Dict[str, List[Dict[str, Any]]]:
         """Fetch all concept nodes and their relationships shared by a catalog course."""
+        self._ensure_connected()
         if not self.driver:
             return get_mock_graph_data(catalog_id)
 
@@ -114,7 +223,8 @@ class Neo4jService:
         RETURN c.id AS id, c.name AS name, c.description AS description,
                c.difficulty AS difficulty, c.catalog_id AS catalog_id,
                c.importance_score AS importance_score,
-               c.learning_outcomes AS learning_outcomes
+               c.learning_outcomes AS learning_outcomes,
+               c.material AS material
         """
         nodes_res = self.query(node_query, {"catalog_id": catalog_id})
 
@@ -131,6 +241,7 @@ class Neo4jService:
 
     def get_graph_stats(self, catalog_id: int) -> Dict[str, Any]:
         """Return analytics stats for a catalog course's shared graph."""
+        self._ensure_connected()
         if not self.driver:
             return {"node_count": 0, "edge_count": 0, "easy_count": 0, "medium_count": 0, "hard_count": 0}
 
@@ -161,12 +272,14 @@ class Neo4jService:
 
     def search_concepts(self, catalog_id: int, query: str) -> List[Dict[str, Any]]:
         """Full-text search for concept nodes matching the query."""
+        self._ensure_connected()
         if not self.driver:
             return []
         search_query = """
         MATCH (c:Concept {catalog_id: $catalog_id})
         WHERE toLower(c.name) CONTAINS toLower($q) OR toLower(c.description) CONTAINS toLower($q)
-        RETURN c.id AS id, c.name AS name, c.difficulty AS difficulty, c.description AS description
+        RETURN c.id AS id, c.name AS name, c.difficulty AS difficulty, c.description AS description,
+               c.material AS material
         ORDER BY c.importance_score DESC
         LIMIT 10
         """
@@ -180,20 +293,39 @@ class Neo4jService:
         """
         self.query(query, {"catalog_id": catalog_id, "node_id": node_id})
 
-    def update_concept_node(self, catalog_id: int, node_id: str, name: str, description: str, difficulty: str):
-        """Update properties of an existing concept node."""
-        query = """
-        MATCH (c:Concept {catalog_id: $catalog_id, id: $node_id})
-        SET c.name = $name, c.description = $description, c.difficulty = $difficulty
-        RETURN c
-        """
-        self.query(query, {
+    def update_concept_node(self, catalog_id: int, node_id: str, name: str, description: str, difficulty: str,
+                            material: Optional[str] = None):
+        """Update properties of an existing concept node. `material` is only SET when
+        explicitly provided, so a plain name/description/difficulty edit proposal never
+        wipes out material that was generated/approved separately."""
+        set_clauses = ["c.name = $name", "c.description = $description", "c.difficulty = $difficulty"]
+        params = {
             "catalog_id": catalog_id,
             "node_id": node_id,
             "name": name,
             "description": description,
-            "difficulty": difficulty
-        })
+            "difficulty": difficulty,
+        }
+        if material is not None:
+            set_clauses.append("c.material = $material")
+            params["material"] = material
+        query = f"""
+        MATCH (c:Concept {{catalog_id: $catalog_id, id: $node_id}})
+        SET {', '.join(set_clauses)}
+        RETURN c
+        """
+        self.query(query, params)
+
+    def update_concept_material(self, catalog_id: int, node_id: str, material: str):
+        """Narrow, single-purpose setter for the detailed `material` field, used by the
+        AI generate/edit-material approval path so those proposals don't need to carry
+        name/description/difficulty just to update one field."""
+        query = """
+        MATCH (c:Concept {catalog_id: $catalog_id, id: $node_id})
+        SET c.material = $material
+        RETURN c
+        """
+        self.query(query, {"catalog_id": catalog_id, "node_id": node_id, "material": material})
 
     def delete_relationship(self, catalog_id: int, source_id: str, target_id: str):
         """Delete a specific relationship between two nodes."""
@@ -205,6 +337,7 @@ class Neo4jService:
 
     def get_existing_concept_names(self, catalog_id: int) -> List[str]:
         """Return all existing concept names for a catalog course (for deduplication)."""
+        self._ensure_connected()
         if not self.driver:
             return []
         result = self.query(
@@ -212,6 +345,46 @@ class Neo4jService:
             {"catalog_id": catalog_id}
         )
         return [r["name"] for r in result]
+
+    def get_concept_parents(self, catalog_id: int, node_id: str) -> List[Dict[str, Any]]:
+        """Direct prerequisites of a concept - its 'parents' in teaching order.
+
+        Edge direction in this schema is prerequisite -> dependent (see
+        create_prerequisite_relationship), so a parent of X is the SOURCE of an edge
+        pointing at X. Ordered by importance_score so a caller that only wants one
+        parent gets the most foundational.
+
+        Used by content generation's "generate for this concept's parent" action:
+        when a student is failing X, the useful material is often about the thing X
+        depends on, not about X again.
+        """
+        self._ensure_connected()
+        if not self.driver:
+            return []
+        return self.query(
+            """
+            MATCH (parent:Concept {catalog_id: $catalog_id})-[:PREREQUISITE]->(c:Concept {catalog_id: $catalog_id, id: $node_id})
+            RETURN parent.id AS id, parent.name AS name, parent.description AS description,
+                   parent.difficulty AS difficulty, parent.importance_score AS importance_score
+            ORDER BY parent.importance_score DESC, parent.name ASC
+            """,
+            {"catalog_id": catalog_id, "node_id": node_id},
+        )
+
+    def get_concept_children(self, catalog_id: int, node_id: str) -> List[Dict[str, Any]]:
+        """Concepts that list this one as a prerequisite - the dependents."""
+        self._ensure_connected()
+        if not self.driver:
+            return []
+        return self.query(
+            """
+            MATCH (c:Concept {catalog_id: $catalog_id, id: $node_id})-[:PREREQUISITE]->(child:Concept {catalog_id: $catalog_id})
+            RETURN child.id AS id, child.name AS name, child.description AS description,
+                   child.difficulty AS difficulty, child.importance_score AS importance_score
+            ORDER BY child.importance_score DESC, child.name ASC
+            """,
+            {"catalog_id": catalog_id, "node_id": node_id},
+        )
 
 
 # Initialize global Neo4j service instance
@@ -245,236 +418,6 @@ def _find_existing_match(name: str, existing_names: List[str], threshold: int = 
         if len(norm_new) >= 4 and (norm_ex.startswith(norm_new) or norm_new.startswith(norm_ex)):
             return existing
     return None
-
-
-# ─────────────────────────────────────────────
-#  CONCEPT EXTRACTION PIPELINE (legacy direct-write path)
-#
-#  This is the original OpenAI-based path: it extracts concepts and writes them
-#  straight into Neo4j with no review step. It's kept as a fast "manual/quick build"
-#  option (POST /graph/build/{course_id}) for local testing or a solo teacher who
-#  is also the course coordinator. The reviewed path (OCR -> Kimi -> diff -> teacher
-#  review -> coordinator approval -> merge) lives in
-#  app/content_processing/pipeline_service.py + app/knowledge_graph/revision_service.py.
-# ─────────────────────────────────────────────
-
-def trigger_concept_extraction(catalog_id: int, text: str, course_name: Optional[str] = None, course_code: Optional[str] = None):
-    """
-    Processes document text: chunks it and uses Kimi to extract concepts, writing
-    directly into the shared catalog graph (no review step).
-    """
-    if not text.strip():
-        logger.warning(f"Empty text for catalog {catalog_id}. Skipping extraction.")
-        return
-
-    chunks = chunk_text(text, chunk_size=3000, overlap=400)
-    logger.info(f"Processing {len(chunks)} chunks for catalog {catalog_id}")
-
-    # Load existing concepts for dedup across all chunks
-    existing_names: List[str] = neo4j_service.get_existing_concept_names(catalog_id)
-    resolved_course_name = course_name or f"Course #{catalog_id}"
-
-    for i, chunk in enumerate(chunks):
-        logger.info(f"Extracting concepts from chunk {i+1}/{len(chunks)} for catalog {catalog_id}...")
-        try:
-            extracted = extract_concepts_from_chunk_ai(chunk, resolved_course_name, course_code, existing_names)
-            save_extracted_concepts_to_graph(catalog_id, extracted, existing_names)
-        except Exception as e:
-            logger.error(f"Failed to extract from chunk {i+1}: {str(e)}")
-
-
-@trace_ai_call("concept-extraction-legacy")
-def extract_concepts_from_chunk_ai(
-    chunk: str,
-    course_name: str,
-    course_code: Optional[str] = None,
-    existing_concept_names: Optional[List[str]] = None,
-) -> Dict[str, Any]:
-    """
-    Calls Kimi K2 (via OpenRouter - same provider as the reviewed content_processing
-    pipeline, no OpenAI dependency) with the same course-scoped, concept-only prompt
-    used by the reviewed pipeline (see content_processing/kimi_service.py) - kept in
-    sync so both extraction paths produce equally clean, in-scope concepts.
-    """
-    if not settings.OPENROUTER_API_KEY or settings.OPENROUTER_API_KEY.startswith("your_"):
-        logger.warning("OPENROUTER_API_KEY not configured. Using offline fallback parser.")
-        return get_offline_mock_extraction(chunk)
-
-    try:
-        client = OpenAI(api_key=settings.OPENROUTER_API_KEY, base_url=settings.OPENROUTER_BASE_URL)
-
-        course_code_suffix = f" ({course_code})" if course_code else ""
-        existing_concepts_block = ""
-        if existing_concept_names:
-            names_list = "\n".join(f"- {n}" for n in existing_concept_names[:150])
-            existing_concepts_block = (
-                f"\nConcepts that already exist in this course's graph - do NOT re-propose "
-                f"these as new, only reference them as prerequisites if relevant:\n{names_list}\n"
-            )
-
-        system_prompt = f"""You are a senior academic curriculum architect and learning engineer.
-
-You are extracting concepts for the course: "{course_name}"{course_code_suffix}.
-Only extract concepts that are core subject matter for THIS specific course/subject -
-you are told the course name precisely so you have a scope to judge against.
-
-Do NOT extract:
-- Course/document metadata (course title, code, instructor name, semester, dates,
-  university name)
-- Structural or administrative text (section headers like "Introduction"/"Summary",
-  page/slide numbers, grading policy, office hours, references/citations)
-- Passing mentions of other subjects that are not part of THIS course's own curriculum
-- Generic filler nouns that aren't actual teachable subject knowledge (e.g. "Example",
-  "Note", "Figure")
-
-A valid concept must be something a student would need to learn and be tested on as
-part of "{course_name}" specifically. If you can't write a genuine 1-2 sentence
-academic explanation of why it belongs in this course, it isn't a concept.
-
-IMPORTANT RULES:
-1. Avoid near-duplicate concepts - if two concepts are closely related (e.g., "Machine Learning" and "ML Basics"), merge them into the more descriptive one.
-2. Each concept must be a complete, learnable unit of knowledge.
-3. Prerequisites must ONLY reference other concepts extracted in this same response, OR one of the "already existing concepts" listed below.
-4. Assign importance_score from 1 (minor) to 10 (foundational/critical) based on how central the concept is.
-{existing_concepts_block}
-Respond ONLY with valid JSON in this exact format:
-{{
-  "concepts": [
-    {{
-      "name": "Concept Name",
-      "description": "Precise 1-2 sentence explanation of what this concept covers",
-      "difficulty": "Easy|Medium|Hard",
-      "importance_score": 7,
-      "learning_outcomes": "After studying this, students will be able to...",
-      "prerequisites": ["Prerequisite Concept Name 1"]
-    }}
-  ]
-}}"""
-
-        response = client.chat.completions.create(
-            model=settings.KIMI_MODEL,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"Analyze this educational content and extract concepts:\n\n{chunk}"}
-            ],
-            response_format={"type": "json_object"},
-            temperature=0.15,   # Lower temp → more consistent, less hallucination
-            max_tokens=2000
-        )
-
-        data = json.loads(response.choices[0].message.content)
-        return data
-
-    except Exception as e:
-        logger.error(f"Kimi API call failed: {str(e)}. Falling back to offline extraction.")
-        return get_offline_mock_extraction(chunk)
-
-
-def save_extracted_concepts_to_graph(
-    catalog_id: int,
-    extraction_result: Dict[str, Any],
-    existing_names: List[str]
-):
-    """
-    Stores concepts and prerequisite links into Neo4j with deduplication.
-    Updates `existing_names` list in-place so subsequent chunks benefit too.
-    """
-    concepts = extraction_result.get("concepts", [])
-    if not concepts:
-        return
-
-    # Phase 1: Create concept nodes (with dedup)
-    name_mapping: Dict[str, str] = {}   # Maps extracted name → canonical stored name
-
-    for concept in concepts:
-        raw_name = concept.get("name", "").strip()
-        if not raw_name:
-            continue
-
-        # Check if a close-enough name already exists
-        matched = _find_existing_match(raw_name, existing_names)
-        if matched:
-            logger.debug(f"Dedup: '{raw_name}' → merged into existing '{matched}'")
-            name_mapping[raw_name] = matched
-            continue
-
-        # New concept — store it
-        canonical_name = raw_name
-        name_mapping[raw_name] = canonical_name
-
-        neo4j_service.create_concept_node(
-            catalog_id=catalog_id,
-            name=canonical_name,
-            description=concept.get("description", "")[:500],
-            difficulty=concept.get("difficulty", "Medium"),
-            importance_score=concept.get("importance_score", 5),
-            learning_outcomes=concept.get("learning_outcomes", "")[:300],
-        )
-        existing_names.append(canonical_name)
-
-    # Phase 2: Create prerequisite relationships
-    for concept in concepts:
-        raw_name = concept.get("name", "").strip()
-        target_canonical = name_mapping.get(raw_name)
-        if not target_canonical:
-            continue
-
-        for prereq_raw in concept.get("prerequisites", []):
-            prereq_canonical = name_mapping.get(prereq_raw)
-            if not prereq_canonical:
-                # Try to find a close match in all known names
-                prereq_canonical = _find_existing_match(prereq_raw, existing_names)
-            if prereq_canonical and prereq_canonical != target_canonical:
-                neo4j_service.create_prerequisite_relationship(
-                    catalog_id, prereq_canonical, target_canonical
-                )
-
-
-# ─────────────────────────────────────────────
-#  OFFLINE FALLBACK EXTRACTION
-# ─────────────────────────────────────────────
-
-def get_offline_mock_extraction(chunk: str) -> Dict[str, Any]:
-    """
-    Generates structured mock concepts from text using regex pattern matching.
-    Used when OpenAI API is unavailable.
-    """
-    # Find capitalized multi-word phrases (likely academic terms)
-    words = re.findall(r'\b[A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*\b', chunk)
-    blacklist = {
-        "The", "A", "An", "And", "Or", "But", "This", "For", "With", "By",
-        "To", "From", "In", "On", "At", "Of", "Is", "Are", "Was", "Were",
-        "That", "These", "Those", "Which", "When", "Where", "Figure", "Table",
-        "Section", "Chapter", "Example", "Note", "Summary", "Introduction"
-    }
-    keywords = list(dict.fromkeys([w for w in words if w not in blacklist and len(w) > 5]))[:8]
-
-    if not keywords:
-        keywords = ["Core Principles", "Fundamental Concepts", "Advanced Theory", "Practical Methods"]
-
-    concepts = []
-    for i, kw in enumerate(keywords):
-        # Pull a sentence from the chunk mentioning this keyword
-        sentence = f"Core concept covering the details and application of {kw} within the course curriculum."
-        for line in chunk.split("."):
-            if kw in line and len(line.strip()) > 20:
-                sentence = line.strip() + "."
-                break
-
-        difficulty = "Easy" if i == 0 else "Hard" if i >= len(keywords) - 2 else "Medium"
-        importance = max(1, 10 - i)
-        prerequisites = [keywords[i - 1]] if i > 0 else []
-
-        concepts.append({
-            "name": kw,
-            "description": sentence[:300],
-            "difficulty": difficulty,
-            "importance_score": importance,
-            "learning_outcomes": f"Students will understand and apply {kw} in relevant contexts.",
-            "prerequisites": prerequisites
-        })
-
-    return {"concepts": concepts}
 
 
 # ─────────────────────────────────────────────

@@ -1,30 +1,48 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import {
-  courseService, uploadService, enrollmentService, graphService, contentProcessingService,
+  courseService, uploadService, enrollmentService, contentProcessingService,
   type ContentSearchResult,
 } from '../services/api';
 import type { GraphBuildJob, GraphRevision } from '../services/api';
 import { useAutoRefresh } from '../hooks/useAutoRefresh';
 import { ClassStream } from '../components/ClassStream';
 import { Assignments } from '../components/Assignments';
+import { ContentGeneration } from '../components/ContentGeneration';
+import { Gamification } from '../components/Gamification';
+import { RevisionPlanCard } from '../components/RevisionPlan';
+import { OutcomeAttainment } from '../components/OutcomeAttainment';
+import { DiffGraphPreview } from '../components/DiffGraphPreview';
+import { GraphSubmissionLog } from '../components/GraphSubmissionLog';
+import { COURSE_THEME_PALETTE, getCourseBannerClass } from '../lib/courseTheme';
+import { getPrimaryNavItems } from '../lib/roleNav';
 import { AppShell, type NavItem } from '../components/AppShell';
+import { apiErrorMessage } from '../lib/apiError';
 import {
-  ArrowLeft, BookOpen, Upload, FileText, Trash2, RefreshCw,
+  BookOpen, Upload, FileText, Trash2, RefreshCw,
   Users, CheckCircle2, AlertTriangle, Play, Network, Copy, Download,
-  Zap, TrendingUp, Clock, Search, Sparkles, X, ThumbsUp, ThumbsDown
+  TrendingUp, Clock, Search, Sparkles, X, ThumbsUp, ThumbsDown, Link as LinkIcon,
+  MessageSquare, ClipboardList, Trophy, CalendarDays, type LucideIcon
 } from 'lucide-react';
+import { EmptyStateIllustration } from '../components/illustrations';
+import { FoxSpinner } from '../components/FoxSpinner';
 
-// Mirrors App.tsx's defaultDashboardFor - a user's base role (teacher/student/admin)
-// determines their landing dashboard. Program/Course Coordinator are additive
-// authorities on top of a teacher account, not separate role values - see
-// App.tsx's hasAuthority/requiredAuthority for the actual gating logic.
-const defaultDashboardFor = (role: string) => {
-  if (role === 'admin') return '/admin';
-  if (role === 'teacher') return '/teacher';
-  return '/student';
-};
+// The course page's sections. Declared once, outside the component, so the tab bar
+// and the panel conditions can never drift apart. teacherOnly sections are filtered
+// out for students rather than rendered empty - a student has no upload pipeline,
+// no coordinator submission log and no class roster to look at.
+type SectionKey = 'stream' | 'classwork' | 'study' | 'materials' | 'graph' | 'progress' | 'people';
+
+const ALL_SECTIONS: { key: SectionKey; label: string; icon: LucideIcon; teacherOnly?: boolean }[] = [
+  { key: 'stream', label: 'Stream', icon: MessageSquare },
+  { key: 'classwork', label: 'Classwork', icon: ClipboardList },
+  { key: 'study', label: 'Study material', icon: Sparkles },
+  { key: 'materials', label: 'Files & search', icon: FileText },
+  { key: 'graph', label: 'Concept graph', icon: Network, teacherOnly: true },
+  { key: 'progress', label: 'Progress', icon: Trophy },
+  { key: 'people', label: 'People', icon: Users, teacherOnly: true },
+];
 
 // Pipeline stages that mean "still running" - keep polling while in one of these.
 const NON_TERMINAL_JOB_STATUSES = [
@@ -39,7 +57,7 @@ const JOB_STATUS_LABELS: Record<string, string> = {
   Diffing: 'Comparing against existing graph',
   AwaitingTeacherReview: 'Awaiting your review',
   AwaitingCoordinatorApproval: 'Awaiting coordinator approval',
-  Merged: 'Merged into knowledge graph',
+  Merged: 'Merged into concept graph',
   Rejected: 'Rejected',
   Failed: 'Failed',
 };
@@ -54,6 +72,8 @@ interface Course {
   status: string;
   teacher_id: number;
   prerequisite_course_id: number | null;
+  theme_color?: string | null;
+  catalog_id?: number | null;
 }
 
 interface UploadedFile {
@@ -62,6 +82,9 @@ interface UploadedFile {
   file_type: string;
   file_size: number;
   status: string;
+  material_kind?: string;
+  rag_status?: string;
+  rag_error?: string | null;
   created_at: string;
 }
 
@@ -73,20 +96,11 @@ interface EnrolledStudent {
   progress: number;
 }
 
-// Classroom-style banner palette — matches the accent cycling used on the
-// dashboard course cards, keyed by course id so the color stays stable.
-const BANNER_GRADIENTS = [
-  'from-primary to-primary-hover',
-  'from-secondary to-secondary-hover',
-  'from-rose-500 to-rose-600',
-  'from-amber-500 to-amber-600',
-  'from-emerald-600 to-emerald-700',
-];
-const getBannerGradient = (id: number) => BANNER_GRADIENTS[Math.abs(id) % BANNER_GRADIENTS.length];
 
 const CourseDetail: React.FC = () => {
   const { courseId } = useParams<{ courseId: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { user } = useAuth();
 
   const idNum = parseInt(courseId || '0');
@@ -97,7 +111,9 @@ const CourseDetail: React.FC = () => {
   const [myProgress, setMyProgress] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
-  const [rebuilding, setRebuilding] = useState(false);
+  // Which kind of document the next upload is. Chosen explicitly rather than inferred
+  // from the filename - see the upload card for why the distinction matters.
+  const [uploadKind, setUploadKind] = useState<'material' | 'outline'>('material');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
@@ -116,6 +132,25 @@ const CourseDetail: React.FC = () => {
 
   const isTeacher = user?.role === 'teacher';
   const latestJob = pipelineJobs[0] || null;
+
+  // Which section of the course is on screen. Everything below used to render at
+  // once; each of these is a distinct task, so only one is mounted at a time.
+  // Initial value honors a ?tab= link (e.g. "View in Classwork" after creating an
+  // assignment from a generated draft), falling back to the stream as before.
+  const initialTab = searchParams.get('tab') as SectionKey | null;
+  const validInitialTab: SectionKey = ALL_SECTIONS.some((s) => s.key === initialTab) ? (initialTab as SectionKey) : 'stream';
+  const [activeSection, setActiveSection] = useState<SectionKey>(validInitialTab);
+
+  const sections = React.useMemo(
+    () => ALL_SECTIONS.filter((s) => (s.teacherOnly ? isTeacher : true)),
+    [isTeacher]
+  );
+
+  // If a role change (or landing via a link) leaves the active section invisible,
+  // fall back to the stream rather than rendering an empty page.
+  useEffect(() => {
+    if (!sections.some((s) => s.key === activeSection)) setActiveSection('stream');
+  }, [sections, activeSection]);
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -186,11 +221,15 @@ const CourseDetail: React.FC = () => {
     setError('');
     setSuccess('');
     try {
-      await uploadService.uploadFile(idNum, selectedFile);
-      setSuccess(`"${selectedFile.name}" uploaded. AI processing started.`);
+      await uploadService.uploadFile(idNum, selectedFile, uploadKind);
+      setSuccess(
+        uploadKind === 'outline'
+          ? `"${selectedFile.name}" uploaded as the course outline. It won't be indexed for search - it's used to scope concept extraction.`
+          : `"${selectedFile.name}" uploaded as course material. AI processing started.`
+      );
       fetchData();
-    } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to upload file');
+    } catch (err) {
+      setError(apiErrorMessage(err, 'Could not upload this file.'));
     } finally {
       setUploading(false);
     }
@@ -219,8 +258,8 @@ const CourseDetail: React.FC = () => {
       await uploadService.deleteFile(fileId);
       setSuccess('Document deleted successfully.');
       setFiles(files.filter(f => f.id !== fileId));
-    } catch {
-      setError('Failed to delete file.');
+    } catch (err) {
+      setError(apiErrorMessage(err, 'Could not delete this document.'));
     }
   };
 
@@ -229,22 +268,8 @@ const CourseDetail: React.FC = () => {
       await uploadService.reprocessFile(fileId);
       setSuccess('Re-triggered text extraction & concept mining.');
       fetchData();
-    } catch {
-      setError('Failed to reprocess file.');
-    }
-  };
-
-  const handleRebuildGraph = async () => {
-    setRebuilding(true);
-    setError('');
-    setSuccess('');
-    try {
-      await graphService.buildGraph(idNum);
-      setSuccess('Knowledge graph rebuilt successfully from uploaded content!');
-    } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to rebuild graph.');
-    } finally {
-      setRebuilding(false);
+    } catch (err) {
+      setError(apiErrorMessage(err, 'Could not restart processing for this file.'));
     }
   };
 
@@ -286,7 +311,7 @@ const CourseDetail: React.FC = () => {
       setSuccess(
         action === 'confirm'
           ? 'Sent to the course coordinator for final approval.'
-          : 'Revision rejected - it will not be added to the knowledge graph.'
+          : 'Revision rejected - it will not be added to the concept graph.'
       );
       setReviewRevision(null);
       setReviewNotes('');
@@ -307,26 +332,30 @@ const CourseDetail: React.FC = () => {
     }
   };
 
+  const handleCopyJoinLink = () => {
+    if (course?.enrollment_code) {
+      navigator.clipboard.writeText(`${window.location.origin}/join/${course.enrollment_code}`);
+      setSuccess('Join link copied!');
+      setTimeout(() => setSuccess(''), 3000);
+    }
+  };
+
   const completedFiles = files.filter(f => f.status === 'Completed').length;
   const avgProgress = students.length
     ? Math.round(students.reduce((sum, s) => sum + s.progress, 0) / students.length)
     : 0;
 
-  const backNavItems: NavItem[] = [
-    {
-      key: 'back',
-      label: 'Back to Dashboard',
-      icon: ArrowLeft,
-      onClick: () => navigate(defaultDashboardFor(user?.role || 'student')),
-    },
-  ];
+  // AppShell already renders Calendar/Analytics/AI Assistant/Settings globally -
+  // this page has no unique nav items of its own, and no "back" link needed.
+  // Same role-specific top section as the user's own dashboard, so the sidebar
+  // looks identical everywhere instead of collapsing to just the global links.
+  const backNavItems: NavItem[] = getPrimaryNavItems(user, navigate);
 
   if (loading) {
     return (
       <AppShell roleLabel="Course" logoIcon={BookOpen} navItems={backNavItems}>
         <div className="flex flex-col items-center justify-center gap-4 py-24">
-          <RefreshCw className="w-10 h-10 text-primary animate-spin" />
-          <p className="text-text-secondary text-sm">Loading course details...</p>
+          <FoxSpinner className="w-12 h-12" label="Loading course details..." />
         </div>
       </AppShell>
     );
@@ -362,10 +391,35 @@ const CourseDetail: React.FC = () => {
 
         {/* Course Hero Banner */}
         <div className="rounded-2xl overflow-hidden border border-border shadow-card mb-6 animate-fade-up bg-surface">
-          <div className={`relative px-6 sm:px-8 pt-8 pb-12 bg-gradient-to-br ${getBannerGradient(course.id)}`}>
-            <span className="inline-block bg-white/20 backdrop-blur-sm text-white text-xs font-bold px-2.5 py-0.5 rounded-lg uppercase tracking-wider">
-              {course.code || 'NO-CODE'}
-            </span>
+          <div className={`relative px-6 sm:px-8 pt-8 pb-12 bg-gradient-to-br ${getCourseBannerClass(course)}`}>
+            <div className="flex items-center justify-between">
+              <span className="inline-block bg-white/20 backdrop-blur-sm text-white text-xs font-bold px-2.5 py-0.5 rounded-lg uppercase tracking-wider">
+                {course.code || 'NO-CODE'}
+              </span>
+              {isTeacher && (
+                <div className="flex items-center gap-1.5 bg-black/20 backdrop-blur-sm rounded-full px-2 py-1.5">
+                  {Object.keys(COURSE_THEME_PALETTE).map((key) => (
+                    <button
+                      key={key}
+                      onClick={() => {
+                        // Optimistic - the banner recolors the instant you click,
+                        // not after the network round trip. Reverts only if the
+                        // save actually fails.
+                        const previousColor = course.theme_color;
+                        setCourse((prev) => (prev ? { ...prev, theme_color: key } : prev));
+                        courseService.update(course.id, { theme_color: key }).catch(() => {
+                          setCourse((prev) => (prev ? { ...prev, theme_color: previousColor } : prev));
+                        });
+                      }}
+                      className={`w-4 h-4 rounded-full bg-gradient-to-br ${COURSE_THEME_PALETTE[key]} ${
+                        course.theme_color === key ? 'ring-2 ring-white' : ''
+                      }`}
+                      title={`Set theme: ${key}`}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
             <h2 className="text-2xl md:text-3xl font-extrabold text-white mt-2 drop-shadow-sm">{course.name}</h2>
             <div className="flex items-center gap-4 mt-2 text-sm text-white/85">
               <span className="flex items-center gap-1"><Clock className="w-3.5 h-3.5" />{course.semester}</span>
@@ -389,16 +443,28 @@ const CourseDetail: React.FC = () => {
                   <button onClick={handleCopyCode} className="p-1 hover:bg-primary-muted rounded text-text-muted hover:text-primary transition-all" title="Copy Code">
                     <Copy className="w-3.5 h-3.5" />
                   </button>
+                  <button onClick={handleCopyJoinLink} className="flex items-center gap-1 px-2 py-1 hover:bg-primary-muted rounded text-text-muted hover:text-primary transition-all text-xs font-semibold" title="Copy join link">
+                    <LinkIcon className="w-3.5 h-3.5" /> Join link
+                  </button>
                 </div>
               )}
               <Link
-                to={`/course/${course.id}/graph`}
-                id="explore-graph-btn"
-                className="btn-primary"
+                to={`/course/${course.id}/schedule`}
+                className="btn-secondary"
               >
-                <Network className="w-4 h-4" />
-                Knowledge Graph
+                <CalendarDays className="w-4 h-4" />
+                Schedule
               </Link>
+              {isTeacher && (
+                <Link
+                  to={`/course/${course.id}/graph`}
+                  id="explore-graph-btn"
+                  className="btn-primary"
+                >
+                  <Network className="w-4 h-4" />
+                  Concept Graph
+                </Link>
+              )}
             </div>
 
             {/* Quick Stats Row */}
@@ -425,17 +491,51 @@ const CourseDetail: React.FC = () => {
           </div>
         </div>
 
-        {/* Content Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Left: Stream + Upload + Files */}
-          <div className="lg:col-span-2 space-y-6">
+        {/* ── Section tabs ──
+            This page used to stack a dozen unrelated cards - stream, classwork,
+            generated material, uploads, the AI pipeline, files, search, gamification,
+            roster - into one scrolling column. Each of those is a separate job, so
+            each now gets its own section and the page only renders the active one. */}
+        <div className="flex flex-wrap gap-2 mb-6 animate-fade-up">
+          {sections.map(({ key, label, icon: SectionIcon }) => (
+            <button
+              key={key}
+              onClick={() => setActiveSection(key)}
+              className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition-all border ${
+                activeSection === key
+                  ? 'border-primary/40 bg-primary-muted text-primary'
+                  : 'border-border bg-surface text-text-secondary hover:text-text-primary'
+              }`}
+            >
+              <SectionIcon className="w-4 h-4" />
+              {label}
+            </button>
+          ))}
+        </div>
 
+        {activeSection === 'stream' && (
+          <div className="space-y-6">
             {/* Class Stream - Google Classroom-style announcements feed */}
             <ClassStream courseId={idNum} isTeacher={isTeacher} />
+          </div>
+        )}
 
+        {activeSection === 'classwork' && (
+          <div className="space-y-6">
             {/* Assignments (Classwork) - due dates, attachments, submissions */}
-            <Assignments courseId={idNum} isTeacher={isTeacher} />
+            <Assignments courseId={idNum} isTeacher={isTeacher} catalogId={course?.catalog_id ?? null} />
+          </div>
+        )}
 
+        {activeSection === 'study' && (
+          <div className="space-y-6">
+            {/* Content Generation - AI flashcards/MCQs/quizzes/study guides from KG concepts */}
+            <ContentGeneration courseId={idNum} isTeacher={isTeacher} catalogId={course?.catalog_id ?? null} />
+          </div>
+        )}
+
+        {activeSection === 'materials' && (
+          <div className="space-y-6">
             {/* Upload (Teacher only) */}
             {isTeacher && (
               <div className="bg-surface rounded-2xl p-6 border border-border animate-fade-up">
@@ -444,19 +544,48 @@ const CourseDetail: React.FC = () => {
                     <Upload className="w-4.5 h-4.5 text-primary" />
                     Upload Course Materials
                   </h3>
-                  <button
-                    id="rebuild-graph-btn"
-                    onClick={handleRebuildGraph}
-                    disabled={rebuilding || completedFiles === 0}
-                    className="flex items-center gap-1.5 px-3.5 py-1.5 bg-primary-muted border border-primary/20 text-primary hover:bg-primary/10 font-semibold rounded-lg text-xs transition-all disabled:opacity-50"
-                    title="Extract concepts from all completed files"
-                  >
-                    {rebuilding ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
-                    Rebuild Graph
-                  </button>
+                  {/* The "Rebuild Graph" button that used to sit here bypassed
+                      coordinator approval and wrote straight into the shared graph.
+                      Removed - use "Generate (AI + Review)" below, which routes
+                      through review and approval. */}
                 </div>
                 <p className="text-text-secondary text-sm mb-4">
-                  Upload PDFs, slides, or documents. The AI will automatically extract concept nodes and prerequisite relationships.
+                  Upload PDFs, slides, or documents, then use <span className="font-semibold">Generate (AI + Review)</span> below
+                  to extract concepts for review and coordinator approval.
+                </p>
+
+                {/* Course material and the course outline are handled completely
+                    differently downstream, so they are chosen up front rather than
+                    guessed at from the filename. Material is chunked and embedded for
+                    retrieval; the outline is never embedded and is passed to concept
+                    extraction as scope context. Uploading an outline as material is
+                    what previously put "Credit Hours", "Code PHY" and "Halliday" into
+                    the concept graph as if they were course concepts. */}
+                <div className="flex gap-2 mb-3">
+                  {([
+                    { key: 'material', label: 'Course material', hint: 'Slides, notes, chapters' },
+                    { key: 'outline', label: 'Course outline', hint: 'Syllabus / topic list' },
+                  ] as const).map(({ key, label, hint }) => (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => setUploadKind(key)}
+                      className={`flex-1 text-left rounded-xl border p-3 transition-all ${
+                        uploadKind === key
+                          ? 'border-primary/40 bg-primary-muted'
+                          : 'border-border bg-background hover:border-primary/20'
+                      }`}
+                    >
+                      <span className="block text-xs font-bold text-text-primary">{label}</span>
+                      <span className="block text-[12px] text-text-muted mt-0.5">{hint}</span>
+                    </button>
+                  ))}
+                </div>
+
+                <p className="text-[12px] text-text-muted mb-3">
+                  {uploadKind === 'material'
+                    ? 'Indexed for semantic search and used to ground generated study material and grading.'
+                    : 'Not indexed for search. Used to keep extracted concepts inside the syllabus scope and consistently named.'}
                 </p>
 
                 <div className="border-2 border-dashed border-border rounded-xl p-8 text-center bg-background hover:border-primary/40 hover:bg-primary-muted/30 transition-all relative">
@@ -477,7 +606,9 @@ const CourseDetail: React.FC = () => {
                       </div>
                     )}
                     <p className="text-sm font-semibold text-text-primary mt-1">
-                      {uploading ? 'Uploading...' : 'Click to browse or drag & drop'}
+                      {uploading
+                        ? 'Uploading...'
+                        : `Click to browse or drag & drop — uploading as ${uploadKind === 'material' ? 'course material' : 'course outline'}`}
                     </p>
                     <p className="text-xs text-text-muted">PDF, PPT/PPTX, DOCX, TXT — up to 25MB</p>
                   </div>
@@ -485,61 +616,10 @@ const CourseDetail: React.FC = () => {
               </div>
             )}
 
-            {/* Reviewed AI Pipeline (Teacher only) */}
-            {isTeacher && (
-              <div className="bg-surface rounded-2xl p-6 border border-border animate-fade-up">
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-base font-bold text-text-primary flex items-center gap-2">
-                    <Sparkles className="w-4.5 h-4.5 text-primary" />
-                    AI-Reviewed Knowledge Graph
-                  </h3>
-                  <button
-                    onClick={handleTriggerPipeline}
-                    disabled={triggeringPipeline || completedFiles === 0 || (!!latestJob && NON_TERMINAL_JOB_STATUSES.includes(latestJob.status))}
-                    className="btn-primary text-xs px-3.5 py-1.5"
-                    title="Runs OCR'd text through Kimi AI, then requires your review and coordinator approval before anything changes the graph"
-                  >
-                    {triggeringPipeline ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
-                    Generate (AI + Review)
-                  </button>
-                </div>
-                <p className="text-text-secondary text-sm mb-4">
-                  Structures your uploaded material into concepts via AI, diffs it against the course's shared graph,
-                  and requires your confirmation and the course coordinator's approval before anything is merged.
-                </p>
 
-                {latestJob ? (
-                  <div className="bg-background border border-border rounded-xl p-4 flex items-center justify-between">
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold text-text-primary flex items-center gap-2">
-                        {NON_TERMINAL_JOB_STATUSES.includes(latestJob.status) && latestJob.status !== 'AwaitingTeacherReview' && (
-                          <RefreshCw className="w-3.5 h-3.5 animate-spin text-primary shrink-0" />
-                        )}
-                        {JOB_STATUS_LABELS[latestJob.status] || latestJob.status}
-                      </p>
-                      {latestJob.error_message && (
-                        <p className="text-xs text-red-600 mt-1 truncate" title={latestJob.error_message}>{latestJob.error_message}</p>
-                      )}
-                    </div>
-                    {latestJob.status === 'AwaitingTeacherReview' && (
-                      <button
-                        onClick={() => handleOpenReview(latestJob.id)}
-                        disabled={loadingRevision}
-                        className="shrink-0 flex items-center gap-1.5 px-3.5 py-1.5 bg-primary text-white font-semibold rounded-lg text-xs hover:bg-primary-hover transition-all disabled:opacity-50"
-                      >
-                        {loadingRevision ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : null}
-                        Review Proposed Concepts
-                      </button>
-                    )}
-                  </div>
-                ) : (
-                  <p className="text-text-muted text-xs text-center py-4">No AI review runs yet for this course.</p>
-                )}
-              </div>
-            )}
 
             {/* Files Table — teacher only. Students never see the raw
-                upload/processing pipeline used to build the knowledge graph;
+                upload/processing pipeline used to build the concept graph;
                 they only get the Content Search panel below. */}
             {isTeacher && (
             <div className="bg-surface rounded-2xl p-6 border border-border animate-fade-up">
@@ -550,7 +630,7 @@ const CourseDetail: React.FC = () => {
 
               {files.length === 0 ? (
                 <div className="text-center py-12 text-text-muted text-sm border-2 border-dashed border-border rounded-xl">
-                  <FileText className="w-10 h-10 mx-auto mb-2 text-text-muted/50" />
+                  <EmptyStateIllustration className="w-24 h-24 mx-auto mb-2" />
                   No materials uploaded yet.
                 </div>
               ) : (
@@ -584,6 +664,18 @@ const CourseDetail: React.FC = () => {
                               {file.status === 'Processing' && <RefreshCw className="w-3 h-3 animate-spin" />}
                               {file.status}
                             </span>
+                            {file.status === 'Completed' && file.material_kind !== 'outline' && file.rag_status && file.rag_status !== 'Completed' && (
+                              <span
+                                title={file.rag_status === 'Failed' ? (file.rag_error || 'Search indexing failed.') : 'Search indexing is still in progress.'}
+                                className={`ml-1.5 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold ${
+                                  file.rag_status === 'Failed'
+                                    ? 'bg-red-50 text-red-600 border border-red-200 dark:bg-red-500/10 dark:text-red-400 dark:border-red-500/30'
+                                    : 'bg-card text-text-secondary border border-border'
+                                }`}
+                              >
+                                {file.rag_status === 'Failed' ? 'Not searchable' : 'Indexing…'}
+                              </span>
+                            )}
                           </td>
                           <td className="py-3.5 px-3 text-right space-x-1">
                             <a
@@ -672,7 +764,7 @@ const CourseDetail: React.FC = () => {
                       <div key={i} className="bg-background rounded-xl p-4 border border-border">
                         <div className="flex items-center justify-between gap-2 mb-1.5">
                           <span className="text-xs font-semibold text-primary">{r.citation}</span>
-                          <span className="text-[10px] font-bold text-text-muted uppercase tracking-wider">
+                          <span className="text-[11px] font-bold text-text-muted uppercase tracking-wider">
                             {(r.score * 100).toFixed(0)}% match
                           </span>
                         </div>
@@ -684,27 +776,110 @@ const CourseDetail: React.FC = () => {
               )}
             </div>
           </div>
+        )}
 
-          {/* Right: Sidebar cards */}
+        {activeSection === 'graph' && isTeacher && (
           <div className="space-y-6">
-            {/* Graph Info */}
-            <div className="bg-surface rounded-2xl p-6 border border-border animate-fade-up">
-              <h3 className="text-base font-bold text-text-primary mb-3 flex items-center gap-2">
-                <Network className="w-4.5 h-4.5 text-primary" />
-                Knowledge Graph
-              </h3>
-              <p className="text-text-secondary text-sm leading-relaxed mb-4">
-                Upload course materials and the AI will automatically extract concept nodes and prerequisite relationships into an interactive graph.
-              </p>
-              <Link
-                to={`/course/${course.id}/graph`}
-                className="flex items-center justify-center gap-2 w-full py-2.5 bg-primary-muted border border-primary/20 text-primary font-semibold rounded-xl text-sm hover:bg-primary hover:text-white transition-all"
-              >
-                <Network className="w-4 h-4" />
-                Explore Graph
-              </Link>
-            </div>
+        {/* Graph Info - teacher/coordinator only. Students work with the
+            concept graph indirectly (generated study materials, the
+            Adaptive Engine's revision plan, mastery tracking) rather than
+            viewing/interacting with the raw graph itself. */}
+        {isTeacher && (
+          <div className="bg-surface rounded-2xl p-6 border border-border animate-fade-up">
+            <h3 className="text-base font-bold text-text-primary mb-3 flex items-center gap-2">
+              <Network className="w-4.5 h-4.5 text-primary" />
+              Concept Graph
+            </h3>
+            <p className="text-text-secondary text-sm leading-relaxed mb-4">
+              Upload course materials and the AI will automatically extract concept nodes and prerequisite relationships into an interactive graph.
+            </p>
+            <Link
+              to={`/course/${course.id}/graph`}
+              className="flex items-center justify-center gap-2 w-full py-2.5 bg-primary-muted border border-primary/20 text-primary font-semibold rounded-xl text-sm hover:bg-primary hover:text-white transition-all"
+            >
+              <Network className="w-4 h-4" />
+              Explore Graph
+            </Link>
+          </div>
+        )}
 
+        {/* Reviewed AI Pipeline (Teacher only) */}
+        {isTeacher && (
+          <div className="bg-surface rounded-2xl p-6 border border-border animate-fade-up">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-base font-bold text-text-primary flex items-center gap-2">
+                <Sparkles className="w-4.5 h-4.5 text-primary" />
+                AI-Reviewed Concept Graph
+              </h3>
+              <button
+                onClick={handleTriggerPipeline}
+                disabled={triggeringPipeline || completedFiles === 0 || (!!latestJob && NON_TERMINAL_JOB_STATUSES.includes(latestJob.status))}
+                className="btn-primary text-xs px-3.5 py-1.5"
+                title="Runs OCR'd text through Kimi AI, then requires your review and coordinator approval before anything changes the graph"
+              >
+                {triggeringPipeline ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                Generate (AI + Review)
+              </button>
+            </div>
+            <p className="text-text-secondary text-sm mb-4">
+              Structures your uploaded material into concepts via AI, diffs it against the course's shared graph,
+              and requires your confirmation and the course coordinator's approval before anything is merged.
+            </p>
+
+            {latestJob ? (
+              <div className="bg-background border border-border rounded-xl p-4 flex items-center justify-between">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-text-primary flex items-center gap-2">
+                    {NON_TERMINAL_JOB_STATUSES.includes(latestJob.status) && latestJob.status !== 'AwaitingTeacherReview' && (
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin text-primary shrink-0" />
+                    )}
+                    {JOB_STATUS_LABELS[latestJob.status] || latestJob.status}
+                  </p>
+                  {latestJob.error_message && (
+                    <p className="text-xs text-red-600 mt-1 truncate" title={latestJob.error_message}>{latestJob.error_message}</p>
+                  )}
+                </div>
+                {latestJob.status === 'AwaitingTeacherReview' && (
+                  <button
+                    onClick={() => handleOpenReview(latestJob.id)}
+                    disabled={loadingRevision}
+                    className="shrink-0 flex items-center gap-1.5 px-3.5 py-1.5 bg-primary text-white font-semibold rounded-lg text-xs hover:bg-primary-hover transition-all disabled:opacity-50"
+                  >
+                    {loadingRevision ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : null}
+                    Review Proposed Concepts
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="text-text-muted text-xs text-center py-4">
+                <EmptyStateIllustration className="w-14 h-14 mx-auto mb-1" />
+                No AI review runs yet for this course.
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Teacher's own audit trail of draft graphs / manual edits sent for
+            approval, including the coordinator's decision and notes. */}
+        {isTeacher && <GraphSubmissionLog courseId={idNum} />}
+          </div>
+        )}
+
+        {activeSection === 'progress' && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+            {/* Gamification - points, streaks, badges, leaderboard */}
+            <Gamification courseId={idNum} isTeacher={isTeacher} />
+
+            {/* Adaptive Engine - personalized revision plan (students only) */}
+            {!isTeacher && <RevisionPlanCard courseId={idNum} />}
+
+            {/* CLO/PLO attainment - the outcome-chain reporting layer (students only) */}
+            {!isTeacher && <OutcomeAttainment courseId={idNum} />}
+          </div>
+        )}
+
+        {activeSection === 'people' && (
+          <div className="space-y-6">
             {/* Students Roster (Teacher only) */}
             {isTeacher && (
               <div className="bg-surface rounded-2xl p-6 border border-border animate-fade-up">
@@ -714,7 +889,10 @@ const CourseDetail: React.FC = () => {
                 </h3>
 
                 {students.length === 0 ? (
-                  <p className="text-text-muted text-sm text-center py-6">No students enrolled yet.</p>
+                  <div className="text-text-muted text-sm text-center py-6">
+                    <EmptyStateIllustration className="w-16 h-16 mx-auto mb-1.5" />
+                    No students enrolled yet.
+                  </div>
                 ) : (
                   <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
                     {students.map((student) => (
@@ -724,11 +902,11 @@ const CourseDetail: React.FC = () => {
                       >
                         <div className="truncate min-w-0">
                           <p className="text-sm font-semibold text-text-primary truncate">{student.full_name}</p>
-                          <p className="text-[11px] text-text-muted truncate">{student.email}</p>
+                          <p className="text-[12px] text-text-muted truncate">{student.email}</p>
                         </div>
                         <div className="text-right shrink-0 ml-2">
                           <p className="text-xs font-bold text-secondary">{student.progress.toFixed(0)}%</p>
-                          <p className="text-[10px] text-text-muted">{student.status}</p>
+                          <p className="text-[11px] text-text-muted">{student.status}</p>
                         </div>
                       </div>
                     ))}
@@ -737,7 +915,7 @@ const CourseDetail: React.FC = () => {
               </div>
             )}
           </div>
-        </div>
+        )}
 
       {/* Teacher review modal: confirm or reject the AI-proposed diff before it goes
           to the course coordinator for final approval. */}
@@ -761,6 +939,8 @@ const CourseDetail: React.FC = () => {
                 <span>{reviewRevision.diff.new_relationship_count} new prerequisite link(s)</span>
               </div>
 
+              <DiffGraphPreview concepts={reviewRevision.diff.concepts} className="h-72 mb-2" />
+
               {reviewRevision.diff.concepts.map((concept, i) => (
                 <div key={i} className="bg-background border border-border rounded-xl p-4">
                   <div className="flex items-center justify-between gap-2">
@@ -771,8 +951,8 @@ const CourseDetail: React.FC = () => {
                     }>{concept.difficulty}</span>
                   </div>
                   <p className="text-text-secondary text-xs mt-1.5">{concept.description}</p>
-                  <p className="text-text-muted text-[11px] mt-1.5 italic">{concept.learning_outcomes}</p>
-                  <div className="flex items-center justify-between mt-2 text-[11px] text-text-muted">
+                  <p className="text-text-muted text-[12px] mt-1.5 italic">{concept.learning_outcomes}</p>
+                  <div className="flex items-center justify-between mt-2 text-[12px] text-text-muted">
                     <span>Importance: {concept.importance_score}/10</span>
                     {concept.prerequisites.length > 0 && (
                       <span>Prerequisites: {concept.prerequisites.join(', ')}</span>

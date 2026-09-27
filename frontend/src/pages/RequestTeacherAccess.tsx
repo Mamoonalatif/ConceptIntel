@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { authService } from '../services/api';
 import { AuthVisualPanel } from '../components/AuthVisualPanel';
 import { TeacherAccessIllustration } from '../components/illustrations';
-import logo from '../assets/logo.png';
+import { FoxMark } from '../components/FoxMark';
 import { Mail, User, MessageSquare, AlertCircle, Loader2, CheckCircle2, ArrowLeft } from 'lucide-react';
 
 const FULL_NAME_PATTERN = /^[A-Za-z]+(?: [A-Za-z]+)*$/;
@@ -71,7 +71,7 @@ const RequestTeacherAccess: React.FC = () => {
 
             {/* Mobile Logo */}
             <div className="flex lg:hidden items-center gap-2 justify-center mb-6">
-              <img src={logo} alt="ConceptIntel" width={36} height={36} className="w-9 h-9 object-contain" />
+              <FoxMark className="w-9 h-9" />
               <div className="flex items-baseline gap-0.5">
                 <span className="text-xl font-bold text-text-primary">Concept</span>
                 <span className="text-xl font-bold text-primary">Intel</span>

@@ -1,23 +1,29 @@
 import csv
+import hashlib
 import io
+import secrets
+import threading
+import time
 import uuid
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Optional, Set
 from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
 from fastapi.responses import StreamingResponse
 from fastapi.security import OAuth2PasswordBearer
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token as google_id_token
 from app.config import settings
-from app.email_service import send_staff_credentials_email
-from app.database.connection import get_db
+from app.email_service import send_staff_credentials_email, send_password_reset_email
+from app.database.connection import get_db, SessionLocal
 from app.database.models import (
     User, TeacherRequest, Program, Course, CourseCatalog,
     ProgramCoordinatorAssignment, CourseCoordinatorAssignment,
     Assignment, AssignmentSubmission, Announcement, Material, Meeting,
-    Comment, ChatMessage, NotificationPreference,
+    Comment, ChatMessage, NotificationPreference, PasswordResetToken,
 )
 from app.courses.services import delete_course_cascade
 from app.auth.schemas import (
@@ -25,23 +31,71 @@ from app.auth.schemas import (
     AdminCreateTeacher, TeacherCredentialsResponse,
     TeacherRequestCreate, TeacherRequestResponse,
     UserStatusUpdate, UserAdminUpdate, GoogleAuthRequest, StaffRoleUpdate, ChangePasswordRequest,
-    StaffMemberResponse, StaffAuthoritiesUpdate,
+    StaffMemberResponse, StaffAuthoritiesUpdate, ForgotPasswordRequest, ResetPasswordRequest,
+    RefreshRequest, RefreshResponse,
 )
-from app.auth.utils import hash_password, verify_password, create_access_token, decode_access_token, generate_temporary_password
+from app.auth.utils import (
+    hash_password, verify_password, create_access_token, create_refresh_token,
+    decode_access_token, generate_temporary_password,
+)
 from app.supabase_auth import (
     is_supabase_auth_configured, create_supabase_user, verify_supabase_password,
-    get_or_create_supabase_user_by_email, update_supabase_user_password,
+    get_or_create_supabase_user_by_email, update_supabase_user_password, find_supabase_user_by_email,
 )
 from app.notifications.service import create_notification, notify_admins
 from app.notifications.types import NotificationType
-from app.email_service import send_notification_email
 from app.upload.services import store_file, download_stored_file, delete_stored_file, get_content_type
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 
-_google_request_session = google_requests.Request()
+class _CachedGoogleCertsRequest:
+    """Wraps google.auth.transport.requests.Request() and caches its GET
+    responses in-process for CACHE_SECONDS. google_id_token.verify_oauth2_token
+    fetches Google's public signing certs over the network on every single call
+    with no caching of its own - Google's certs endpoint rotates keys roughly
+    daily, so re-fetching them on every login was adding a full network round
+    trip (observed several seconds) to every Google sign-in for no benefit.
+    Only ever used for that one certs URL in this app, so blanket-caching every
+    GET this object makes is safe."""
+    CACHE_SECONDS = 3600
+
+    def __init__(self):
+        self._inner = google_requests.Request()
+        self._cache: dict = {}  # url -> (expires_at, response)
+
+    def __call__(self, url, method="GET", body=None, headers=None, **kwargs):
+        if method.upper() != "GET" or body is not None:
+            return self._inner(url, method=method, body=body, headers=headers, **kwargs)
+        cached = self._cache.get(url)
+        if cached and cached[0] > time.monotonic():
+            return cached[1]
+        response = self._inner(url, method=method, body=body, headers=headers, **kwargs)
+        self._cache[url] = (time.monotonic() + self.CACHE_SECONDS, response)
+        return response
+
+
+_google_request_session = _CachedGoogleCertsRequest()
+
+
+def _prewarm_google_certs_cache() -> None:
+    """Fetches Google's OAuth certs once, eagerly, so the cache above is already
+    warm before any real user signs in. Without this, the FIRST Google sign-in
+    after every server start/reload (in dev, that is every code change) pays a
+    real network round trip to googleapis.com fetching certs - synchronously,
+    inside that user's login request - stacking on top of the same "first
+    request after a restart" cold-start cost the DB keep-alive ping above exists
+    to avoid. Runs in a background thread from the startup event so it never
+    delays the app becoming ready to serve requests; best-effort, since a failure
+    here just means the first real login fetches certs itself instead."""
+    if not settings.GOOGLE_CLIENT_ID:
+        return
+    try:
+        _google_request_session(google_id_token._GOOGLE_OAUTH2_CERTS_URL)
+    except Exception as e:
+        print(f"Warning: could not prewarm Google OAuth certs cache: {e}")
+
 
 def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
     """FastAPI dependency to retrieve the currently logged-in user from the JWT."""
@@ -112,12 +166,13 @@ class ProgramScope:
 
 @dataclass
 class CourseScope:
-    """Wraps a Course Coordinator (or admin) request with the set of Course ids they
-    may act on. course_ids is None for an admin - meaning unrestricted/every course -
-    and a (possibly empty) set for a course_coordinator, resolved from
-    CourseCoordinatorAssignment."""
+    """Wraps a Course Coordinator (or admin) request with the set of catalog
+    SUBJECT ids they may act on (not specific course sections - see
+    CourseCoordinatorAssignment for why). catalog_ids is None for an admin -
+    meaning unrestricted/every subject - and a (possibly empty) set otherwise,
+    resolved from CourseCoordinatorAssignment."""
     user: User
-    course_ids: Optional[Set[int]]
+    catalog_ids: Optional[Set[int]]
 
 
 def resolve_program_ids(db: Session, user: User) -> Optional[Set[int]]:
@@ -131,15 +186,26 @@ def resolve_program_ids(db: Session, user: User) -> Optional[Set[int]]:
     return {row[0] for row in rows}
 
 
-def resolve_course_ids(db: Session, user: User) -> Optional[Set[int]]:
-    """None means unrestricted (admin). Otherwise the set of Course ids this user is
-    assigned to via CourseCoordinatorAssignment (possibly empty)."""
+def resolve_catalog_ids(db: Session, user: User) -> Optional[Set[int]]:
+    """None means unrestricted (admin). Otherwise the set of catalog SUBJECT ids
+    this user is scoped to as Course Coordinator - the union of directly-assigned
+    catalog rows (current model, assign_course_coordinator) and any legacy
+    section-level rows (change_staff_role's older exclusive-role path, which
+    predates catalog-based scoping and still records a course_id instead)."""
     if user.role.lower() == "admin":
         return None
-    rows = db.query(CourseCoordinatorAssignment.course_id).filter(
-        CourseCoordinatorAssignment.user_id == user.id
-    ).all()
-    return {row[0] for row in rows}
+    direct = {
+        row[0] for row in db.query(CourseCoordinatorAssignment.catalog_id)
+        .filter(CourseCoordinatorAssignment.user_id == user.id, CourseCoordinatorAssignment.catalog_id.isnot(None))
+        .all()
+    }
+    via_legacy_course = {
+        row[0] for row in db.query(Course.catalog_id)
+        .join(CourseCoordinatorAssignment, CourseCoordinatorAssignment.course_id == Course.id)
+        .filter(CourseCoordinatorAssignment.user_id == user.id, Course.catalog_id.isnot(None))
+        .all()
+    }
+    return direct | via_legacy_course
 
 
 def _is_program_coordinator(user: User) -> bool:
@@ -176,15 +242,15 @@ def get_current_program_coordinator(
 def get_current_course_coordinator(
     current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
 ) -> CourseScope:
-    """Course Coordinator duties: approve/reject a course's knowledge graph, update
-    course info. Admin retains this power too - admin gets course_ids=None
+    """Course Coordinator duties: approve/reject a course's concept graph, update
+    course info. Admin retains this power too - admin gets catalog_ids=None
     (unrestricted)."""
     if current_user.role.lower() != "admin" and not _is_course_coordinator(current_user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Operation forbidden: Course Coordinator authority required."
         )
-    return CourseScope(user=current_user, course_ids=resolve_course_ids(db, current_user))
+    return CourseScope(user=current_user, catalog_ids=resolve_catalog_ids(db, current_user))
 
 
 def get_current_course_manager(current_user: User = Depends(get_current_user)) -> User:
@@ -290,13 +356,33 @@ def login(credentials: UserLogin, db: Session = Depends(get_db)):
         "user_id": user.id
     }
     access_token = create_access_token(token_data)
+    refresh_token = create_refresh_token(token_data)
 
     return {
         "access_token": access_token,
+        "refresh_token": refresh_token,
         "token_type": "bearer",
         "role": user.role,
-        "full_name": user.full_name
+        "full_name": user.full_name,
+        "user": UserResponse.model_validate(user),
     }
+
+
+def _link_supabase_user_background(user_id: int, email: str, full_name: str) -> None:
+    """Runs off the request thread with its own DB session (the request's `db` is
+    closed as soon as the response is sent, well before this would otherwise still
+    be running) - see the call site in google_login for why this is backgrounded."""
+    bg_db = SessionLocal()
+    try:
+        supabase_uid = get_or_create_supabase_user_by_email(email, full_name)
+        user = bg_db.query(User).filter(User.id == user_id).first()
+        if user:
+            user.supabase_uid = supabase_uid
+            bg_db.commit()
+    except Exception as e:
+        print(f"Warning: failed to link Supabase auth user for {email}: {e}")
+    finally:
+        bg_db.close()
 
 
 @router.post("/google", response_model=Token)
@@ -331,7 +417,14 @@ def google_login(payload: GoogleAuthRequest, db: Session = Depends(get_db)):
     google_sub = claims["sub"]
     full_name = claims.get("name") or email.split("@")[0]
 
-    user = db.query(User).filter(User.email == email).first()
+    # Case-insensitive lookup: Google's ID token returns the account's email in
+    # whatever case it was originally registered with there, which does not
+    # necessarily match the case an admin typed in when provisioning a
+    # teacher/coordinator account locally (email delivery is case-insensitive,
+    # so people don't treat case as meaningful). An exact-case match here would
+    # silently miss the existing staff account and fall through to creating a
+    # brand new "student" account for the same person instead.
+    user = db.query(User).filter(func.lower(User.email) == email.lower()).first()
     if user is None:
         user = User(
             email=email,
@@ -358,12 +451,19 @@ def google_login(payload: GoogleAuthRequest, db: Session = Depends(get_db)):
     # password is set here, Google's own ID token is the credential. Best-effort:
     # a failure here shouldn't block sign-in, since our own JWT is still what
     # authorizes every subsequent request.
+    #
+    # This used to run synchronously, right here, before the JWT was returned -
+    # up to two blocking HTTP round-trips to Supabase's Admin API (each with a 15s
+    # timeout: find_supabase_user_by_email, then create_user if not found), on the
+    # critical path of every Google sign-in for an account not yet linked. That is
+    # exactly "why Google sign-in is slow": the user had already been authenticated
+    # by Google's own id_token a moment earlier, but sat waiting on a side-effect
+    # that only exists for internal identity-consistency bookkeeping. Dispatched to
+    # a background thread instead (same pattern as the staff-credentials email
+    # below) - the response returns the instant our own JWT is minted, and this
+    # finishes linking a second or two later, invisibly.
     if is_supabase_auth_configured() and not user.supabase_uid:
-        try:
-            user.supabase_uid = get_or_create_supabase_user_by_email(email, full_name)
-            db.commit()
-        except Exception as e:
-            print(f"Warning: failed to link Supabase auth user for {email}: {e}")
+        threading.Thread(target=_link_supabase_user_background, args=(user.id, email, full_name), daemon=True).start()
 
     if not user.is_active:
         raise HTTPException(
@@ -373,18 +473,47 @@ def google_login(payload: GoogleAuthRequest, db: Session = Depends(get_db)):
 
     token_data = {"sub": user.email, "role": user.role, "user_id": user.id}
     access_token = create_access_token(token_data)
+    refresh_token = create_refresh_token(token_data)
 
     return {
         "access_token": access_token,
+        "refresh_token": refresh_token,
         "token_type": "bearer",
         "role": user.role,
         "full_name": user.full_name,
+        "user": UserResponse.model_validate(user),
     }
 
 
 @router.get("/me", response_model=UserResponse)
 def read_current_user(current_user: User = Depends(get_current_user)):
     return current_user
+
+
+@router.post("/refresh", response_model=RefreshResponse)
+def refresh_access_token(payload: RefreshRequest, db: Session = Depends(get_db)):
+    """Exchanges a refresh token (issued alongside the access token at login) for a
+    fresh access token, so a session can outlive ACCESS_TOKEN_EXPIRE_MINUTES without
+    the user having to type their password in again. The refresh token itself is
+    NOT rotated - it stays valid until its own REFRESH_TOKEN_EXPIRE_DAYS expiry."""
+    decoded = decode_access_token(payload.refresh_token)
+    if decoded is None or decoded.get("type") != "refresh":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired refresh token. Please sign in again.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    user = db.query(User).filter(User.id == decoded.get("user_id")).first()
+    if user is None or not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired refresh token. Please sign in again.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    access_token = create_access_token({"sub": user.email, "role": user.role, "user_id": user.id})
+    return {"access_token": access_token, "token_type": "bearer"}
 
 
 @router.post("/change-password")
@@ -415,6 +544,81 @@ def change_password(
         db.commit()
 
     return {"message": "Password updated successfully."}
+
+
+RESET_TOKEN_TTL = timedelta(minutes=30)
+
+
+def _hash_reset_token(raw_token: str) -> str:
+    return hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+
+
+@router.post("/forgot-password")
+def forgot_password(payload: ForgotPasswordRequest, db: Session = Depends(get_db)):
+    """Requests a password-reset link. Always returns the same generic message
+    regardless of whether the email exists - a distinct "no account found" response
+    would let anyone enumerate registered emails one guess at a time."""
+    generic_response = {
+        "message": "If an account exists for that email, a password reset link has been sent."
+    }
+    user = db.query(User).filter(func.lower(User.email) == payload.email.lower()).first()
+    if not user or not user.is_active:
+        return generic_response
+
+    raw_token = secrets.token_urlsafe(32)
+    db.add(PasswordResetToken(
+        user_id=user.id,
+        token_hash=_hash_reset_token(raw_token),
+        expires_at=datetime.utcnow() + RESET_TOKEN_TTL,
+    ))
+    db.commit()
+
+    frontend_url = (settings.FRONTEND_URL or "http://localhost:5173").rstrip("/")
+    reset_link = f"{frontend_url}/reset-password?token={raw_token}"
+    if not send_password_reset_email(user.email, user.full_name, reset_link):
+        print(f"Warning: password reset requested for {user.email} but email delivery is not configured/failed.")
+
+    return generic_response
+
+
+@router.post("/reset-password")
+def reset_password(payload: ResetPasswordRequest, db: Session = Depends(get_db)):
+    """Completes a "forgot password" reset. The token is single-use (marked used_at
+    on success) and time-limited (RESET_TOKEN_TTL) - both checked here rather than
+    relying on the caller to have requested a fresh one."""
+    token_hash = _hash_reset_token(payload.token)
+    reset_token = (
+        db.query(PasswordResetToken)
+        .filter(PasswordResetToken.token_hash == token_hash)
+        .order_by(PasswordResetToken.id.desc())
+        .first()
+    )
+    if (
+        not reset_token
+        or reset_token.used_at is not None
+        or reset_token.expires_at < datetime.utcnow()
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This reset link is invalid or has expired. Request a new one.",
+        )
+
+    user = db.query(User).filter(User.id == reset_token.user_id).first()
+    if not user or not user.is_active:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This reset link is invalid or has expired.")
+
+    if user.supabase_uid:
+        try:
+            update_supabase_user_password(user.supabase_uid, payload.new_password)
+        except Exception as e:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"Could not update password: {str(e)}")
+    else:
+        user.hashed_password = hash_password(payload.new_password)
+
+    reset_token.used_at = datetime.utcnow()
+    db.commit()
+
+    return {"message": "Password reset successfully. You can now sign in with your new password."}
 
 
 # --- Avatar / profile photo upload ---
@@ -541,20 +745,17 @@ def submit_teacher_request(request_in: TeacherRequestCreate, db: Session = Depen
     db.refresh(new_request)
 
     try:
+        # notify_admins already sends each admin an email in a background thread
+        # (see notifications/service.py notify_many -> _dispatch_email_async) - a
+        # second, synchronous send_notification_email loop used to run here too,
+        # blocking this request on Gmail SMTP once per admin (measured ~14s with
+        # just 2-3 admins) for emails that were about to be sent anyway.
         notify_admins(
             db, NotificationType.TEACHER_REQUEST_SUBMITTED,
             title="New teacher access request",
             message=f"{new_request.full_name} ({new_request.email}) requested a teacher account.",
             link="/admin",
         )
-        admins = db.query(User).filter(User.role == "admin").all()
-        for admin in admins:
-            send_notification_email(
-                admin.email, admin.full_name,
-                title="New teacher access request",
-                message=f"{new_request.full_name} ({new_request.email}) requested a teacher account on ConceptIntel.",
-                link="/admin",
-            )
     except Exception as e:
         print(f"Warning: failed to notify admins of teacher request: {str(e)}")
 
@@ -581,10 +782,26 @@ def _create_staff_account(db: Session, email: str, full_name: str, role: str) ->
         try:
             supabase_uid = create_supabase_user(email, temp_password)
         except Exception as e:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"Could not create account (auth service error): {str(e)}"
-            )
+            # Supabase Auth can already have a user for this email with no
+            # matching row in our own `users` table - e.g. after a data reset
+            # that only wiped this app's Postgres tables (Supabase Auth is a
+            # separate store, untouched by that). Rather than failing outright,
+            # reuse that orphaned Supabase account and reset its password so
+            # provisioning still succeeds instead of requiring manual cleanup.
+            if "email_exists" in str(e):
+                supabase_uid = find_supabase_user_by_email(email)
+                if supabase_uid:
+                    update_supabase_user_password(supabase_uid, temp_password)
+                else:
+                    raise HTTPException(
+                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                        detail=f"Could not create account (auth service error): {str(e)}"
+                    )
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail=f"Could not create account (auth service error): {str(e)}"
+                )
 
     new_user = User(
         email=email,
@@ -597,10 +814,19 @@ def _create_staff_account(db: Session, email: str, full_name: str, role: str) ->
     db.commit()
     db.refresh(new_user)
 
-    # Best-effort email delivery - the temporary password is still returned in the
-    # response either way, so the admin can relay it manually if email isn't
-    # configured or delivery fails (see app/email_service.py).
-    send_staff_credentials_email(new_user.email, new_user.full_name, role.replace("_", " ").title(), temp_password)
+    # Best-effort email delivery, genuinely so: the temporary password is still
+    # returned in the response either way, so the admin can relay it manually if
+    # email isn't configured or delivery fails. This used to call
+    # send_staff_credentials_email directly and synchronously with no try/except -
+    # a slow/failed SMTP send (Gmail SMTP can hang) would raise past this point and
+    # fail the whole request with a 500, even though the account had already been
+    # fully created and committed a moment earlier. Dispatched in a background
+    # thread instead, same pattern as notifications/service.py's email dispatch.
+    threading.Thread(
+        target=send_staff_credentials_email,
+        args=(new_user.email, new_user.full_name, role.replace("_", " ").title(), temp_password),
+        daemon=True,
+    ).start()
 
     return TeacherCredentialsResponse(
         id=new_user.id,
@@ -921,9 +1147,19 @@ def list_all_users(
     db: Session = Depends(get_db),
     current_admin: User = Depends(get_current_admin)
 ):
-    """Retrieve all users. Filter by role, search (name/email substring), and active status."""
+    """Retrieve all users. Filter by role, search (name/email substring), and active
+    status. "program_coordinator"/"course_coordinator" match both the legacy
+    exclusive role AND additive-flag teachers (is_program_coordinator/
+    is_course_coordinator) - without this, filtering by either only ever found
+    old-model accounts and showed "no users" for every teacher promoted via the
+    newer flag-based Manage Staff Roles panel."""
+    from sqlalchemy import or_
     query = db.query(User)
-    if role:
+    if role == "program_coordinator":
+        query = query.filter(or_(User.role == "program_coordinator", User.is_program_coordinator.is_(True)))
+    elif role == "course_coordinator":
+        query = query.filter(or_(User.role == "course_coordinator", User.is_course_coordinator.is_(True)))
+    elif role:
         query = query.filter(User.role == role.lower())
     if search:
         q = f"%{search.lower()}%"

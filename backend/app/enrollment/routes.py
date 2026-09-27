@@ -156,13 +156,17 @@ def drop_course(
             detail="Enrollment record not found"
         )
         
-    # Check permissions: must be the student enrolled OR the teacher of the course
-    course = db.query(Course).filter(Course.id == enrollment.course_id).first()
-    if enrollment.student_id != current_user.id and course.teacher_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You do not have permission to drop this course."
-        )
+    # Check permissions: must be the student enrolled OR the teacher of the course.
+    # The student branch short-circuits before touching `course` - a student
+    # dropping their own enrollment must still work even if the course itself was
+    # since deleted, which would otherwise leave `course` None here.
+    if enrollment.student_id != current_user.id:
+        course = db.query(Course).filter(Course.id == enrollment.course_id).first()
+        if not course or course.teacher_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You do not have permission to drop this course."
+            )
         
     # Instead of deleting, we change status to Dropped
     enrollment.status = "Dropped"

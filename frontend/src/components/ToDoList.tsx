@@ -6,6 +6,7 @@ import type { TodoItem } from '../services/api';
 import { useAutoRefresh } from '../hooks/useAutoRefresh';
 import { parseUtc } from '../lib/time';
 import { EmptyStateIllustration } from './illustrations';
+import { apiErrorMessage } from '../lib/apiError';
 
 type SortKey = 'due_date' | 'course';
 type FilterKey = 'all' | 'upcoming' | 'missing' | 'done';
@@ -42,8 +43,8 @@ export const ToDoList: React.FC = () => {
       const data = await studentService.getTodo(sort, filter === 'all' ? undefined : filter);
       setItems(data);
       if (!silent) setError('');
-    } catch {
-      if (!silent) setError('Failed to load your to-do list.');
+    } catch (err) {
+      if (!silent) setError(apiErrorMessage(err, 'Could not load your to-do list.'));
     } finally {
       if (!silent) setLoading(false);
     }
@@ -131,7 +132,7 @@ export const ToDoList: React.FC = () => {
                   {item.points !== null && (
                     <span className="text-xs font-bold text-text-muted">{item.points} pts</span>
                   )}
-                  <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold border ${badge.className}`}>
+                  <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[12px] font-bold border ${badge.className}`}>
                     <BadgeIcon className="w-3 h-3" /> {badge.label}
                   </span>
                 </div>

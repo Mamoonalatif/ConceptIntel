@@ -1,5 +1,20 @@
 import React, { useEffect, useState } from 'react';
-import { User as UserIcon } from 'lucide-react';
+
+/** Single-color fox-face silhouette, drawn to match the stroke weight/viewBox
+ *  convention of a lucide icon (24x24, currentColor) so it drops in wherever
+ *  UserIcon used to - the app-wide "no photo yet" placeholder. */
+const FoxFaceIcon: React.FC<{ className?: string }> = ({ className }) => (
+  <svg viewBox="0 0 24 24" fill="none" className={className} xmlns="http://www.w3.org/2000/svg">
+    <path d="M4 3 L9 9 L4.5 9.5 Z" fill="currentColor" />
+    <path d="M20 3 L15 9 L19.5 9.5 Z" fill="currentColor" />
+    <path
+      d="M12 21 C7 21 4.5 17.5 4.5 13.5 C4.5 9.8 7.8 7 12 7 C16.2 7 19.5 9.8 19.5 13.5 C19.5 17.5 17 21 12 21 Z"
+      fill="currentColor"
+    />
+    <path d="M12 13.5 L8.7 19 L12 21 L15.3 19 Z" fill="#fff" opacity="0.9" />
+    <circle cx="12" cy="15.2" r="1" fill="currentColor" opacity="0.7" />
+  </svg>
+);
 
 const API_URL = 'http://localhost:8000/api';
 
@@ -74,7 +89,8 @@ const ICON_SIZE_CLASSES: Record<NonNullable<AvatarProps['size']>, string> = {
 
 /**
  * Shared avatar: shows the user's uploaded profile photo if present, otherwise
- * a plain human icon (not initials) on a flat brand-color fill.
+ * the app's fox mascot face (not initials, not a generic human icon) on a flat
+ * brand-color fill - matches the fox theme used across illustrations app-wide.
  */
 export const Avatar: React.FC<AvatarProps> = ({ userId, hasAvatar = false, version, size = 'sm', className = '' }) => {
   const objectUrl = useAvatarObjectUrl(userId, hasAvatar, version);
@@ -95,7 +111,7 @@ export const Avatar: React.FC<AvatarProps> = ({ userId, hasAvatar = false, versi
     <div
       className={`${sizeClass} rounded-lg bg-primary flex items-center justify-center shrink-0 ${className}`}
     >
-      <UserIcon className={`${iconSizeClass} text-white`} />
+      <FoxFaceIcon className={`${iconSizeClass} text-white`} />
     </div>
   );
 };

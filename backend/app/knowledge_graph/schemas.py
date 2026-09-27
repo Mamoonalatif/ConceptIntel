@@ -11,6 +11,7 @@ class ConceptNode(BaseModel):
     course_id: int
     importance_score: Optional[int] = 5
     learning_outcomes: Optional[str] = ""
+    material: Optional[str] = ""
 
 
 class ConceptNodeCreate(BaseModel):
@@ -19,6 +20,7 @@ class ConceptNodeCreate(BaseModel):
     difficulty: str = "Medium"
     importance_score: Optional[int] = 5
     learning_outcomes: Optional[str] = ""
+    material: Optional[str] = ""
 
 
 class ConceptNodeUpdate(BaseModel):
@@ -27,6 +29,19 @@ class ConceptNodeUpdate(BaseModel):
     difficulty: Optional[str] = None
     importance_score: Optional[int] = None
     learning_outcomes: Optional[str] = None
+    material: Optional[str] = None
+
+
+class MaterialGenerateRequest(BaseModel):
+    """Optional steering instruction for AI-generating a concept's detailed material
+    from the course's uploaded content (e.g. "focus on worked examples")."""
+    instruction: Optional[str] = None
+
+
+class MaterialEditRequest(BaseModel):
+    """A targeted refinement instruction applied to existing material text - not a
+    full regeneration."""
+    instruction: str
 
 
 class GraphEdge(BaseModel):

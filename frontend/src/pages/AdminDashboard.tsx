@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { adminService, programService } from '../services/api';
+import { useLocation } from 'react-router-dom';
+import { adminService, programService, programCoordinatorService } from '../services/api';
 import { AppShell, type NavItem } from '../components/AppShell';
 import { useAutoRefresh } from '../hooks/useAutoRefresh';
 import {
@@ -7,6 +8,7 @@ import {
   ClipboardList, UserPlus, AlertCircle, Users, BookOpen, Trash2,
   Download, Edit, Search, GraduationCap, X
 } from 'lucide-react';
+import { EmptyStateIllustration } from '../components/illustrations';
 
 type AdminSection = 'users' | 'create-teacher' | 'staff-roles' | 'programs' | 'requests' | 'logs';
 
@@ -46,6 +48,9 @@ interface UserAccount {
   is_active: boolean;
   is_program_coordinator?: boolean;
   is_course_coordinator?: boolean;
+  // Only ever populated for legacy exclusive-role accounts - see StaffMember above.
+  program_name?: string | null;
+  course_name?: string | null;
 }
 
 interface Program {
@@ -53,6 +58,12 @@ interface Program {
   name: string;
   code?: string | null;
   description?: string | null;
+}
+
+interface CatalogOption {
+  id: number;
+  name: string;
+  code?: string | null;
 }
 
 interface AdminLog {
@@ -79,7 +90,13 @@ const ROLE_LABELS: Record<string, string> = {
 const FULL_NAME_PATTERN = /^[A-Za-z]+(?: [A-Za-z]+)*$/;
 
 const AdminDashboard: React.FC = () => {
-  const [activeSection, setActiveSection] = useState<AdminSection>('users');
+  const location = useLocation();
+  // Arriving from another page's sidebar (see lib/roleNav.ts) passes which
+  // section to land on via router state, so the sidebar's admin links work
+  // the same from anywhere, not just from this dashboard itself.
+  const [activeSection, setActiveSection] = useState<AdminSection>(
+    (location.state as { section?: AdminSection } | null)?.section || 'users'
+  );
 
   const [requests, setRequests] = useState<TeacherRequest[]>([]);
   const [loading, setLoading] = useState(true);
@@ -114,11 +131,25 @@ const AdminDashboard: React.FC = () => {
   const [logsEventFilter, setLogsEventFilter] = useState<string>('');
 
   // Coordinator authority management - additive is_program_coordinator/
-  // is_course_coordinator flags on an existing teacher account (toggled
-  // independently, no scope panel - see adminService.updateStaffAuthorities).
+  // is_course_coordinator flags on an existing teacher account, each one set
+  // via a single combined dropdown (authority + scope in one action - see
+  // handleProgramDropdownChange/handleCourseDropdownChange).
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [staffLoading, setStaffLoading] = useState(true);
-  const [changingAuthorityKey, setChangingAuthorityKey] = useState<string | null>(null);
+
+  // Program Coordinator scope - which program each coordinator is actually
+  // assigned to (single-select, mirroring the Course Coordinator dropdown).
+  const [coordinatorPrograms, setCoordinatorPrograms] = useState<Record<number, Program[]>>({});
+  const [assigningProgramFor, setAssigningProgramFor] = useState<number | null>(null);
+
+  // Course Coordinator scope - which catalog SUBJECT each coordinator is
+  // actually assigned to (exactly one). Scoped to the subject itself (Applied
+  // Physics, Digital Logic Design, Calculus - always all 3 available), not a
+  // live course section, so a coordinator can be assigned before any section
+  // exists yet.
+  const [catalogOptions, setCatalogOptions] = useState<CatalogOption[]>([]);
+  const [coordinatorCourse, setCoordinatorCourse] = useState<Record<number, CatalogOption | null>>({});
+  const [assigningCourseFor, setAssigningCourseFor] = useState<number | null>(null);
 
   // Manage Programs panel
   const [programs, setPrograms] = useState<Program[]>([]);
@@ -201,6 +232,149 @@ const AdminDashboard: React.FC = () => {
   useEffect(() => {
     if (activeSection === 'logs') fetchLogs();
   }, [activeSection, logsEventFilter]);
+
+  // Builds a userId -> assigned-programs map by fetching each program's
+  // coordinator list once (not once per staff member) - cheap at this scale
+  // (a handful of programs) and only runs when the section is actually open.
+  useEffect(() => {
+    // Runs regardless of which section is open (not just staff-roles) so the
+    // "All Students & Users" list can show the same program/course badge info,
+    // and it stays correct immediately after an assignment made elsewhere.
+    if (programs.length === 0) return;
+    (async () => {
+      const byUser: Record<number, Program[]> = {};
+      for (const program of programs) {
+        try {
+          const coordinators = await programService.listCoordinators(program.id);
+          for (const c of coordinators) {
+            (byUser[c.id] ||= []).push(program);
+          }
+        } catch { /* non-critical - leave that program's assignments blank */ }
+      }
+      setCoordinatorPrograms(byUser);
+    })();
+  }, [activeSection, programs]);
+
+  // Mirrors the program-coordinator fetch above, for Course Coordinator scope -
+  // fetches every catalog subject's coordinator list once, then builds a
+  // userId -> subject map (a Course Coordinator is scoped to exactly one
+  // subject, unlike Program Coordinator's additive multi-program scope).
+  useEffect(() => {
+    (async () => {
+      try {
+        const catalog: CatalogOption[] = await programCoordinatorService.listCatalog();
+        setCatalogOptions(catalog);
+
+        const byUser: Record<number, CatalogOption> = {};
+        for (const subject of catalog) {
+          try {
+            const coordinators = await programCoordinatorService.listCourseCoordinators(subject.id);
+            for (const c of coordinators) {
+              byUser[c.id] = subject;
+            }
+          } catch { /* non-critical - leave that subject's assignment blank */ }
+        }
+        setCoordinatorCourse(byUser);
+      } catch { /* non-critical - dropdown just stays empty */ }
+    })();
+  }, [activeSection]);
+
+  // Single dropdown per authority type, combining "grant this authority" and
+  // "scope it to this program/course" into one action - the old checkbox-then-
+  // separate-Assign-button flow left it easy to toggle the authority flag
+  // without ever actually creating the scope assignment underneath it, which
+  // is why "no users" showed up on the Program Coordinator dashboard even
+  // after checking the box. Mutually exclusive with the other dropdown -
+  // picking a program clears any course assignment, and vice versa.
+  const handleProgramDropdownChange = async (userId: number, value: string) => {
+    // Optimistic - the dropdown/badge update the instant you pick a value, not
+    // after every API round trip (remove old scope, flip flags, assign new
+    // scope) finishes. Reverts only if something actually fails.
+    const previousPrograms = coordinatorPrograms[userId] || [];
+    const previousCourse = coordinatorCourse[userId] || null;
+    const previousStaff = staff;
+    const previousUsers = users;
+
+    const programId = value ? parseInt(value) : null;
+    const program = programId ? programs.find((p) => p.id === programId) || null : null;
+
+    setCoordinatorPrograms(prev => ({ ...prev, [userId]: program ? [program] : [] }));
+    setCoordinatorCourse(prev => ({ ...prev, [userId]: value ? null : prev[userId] }));
+    const flagPatch = value
+      ? { is_program_coordinator: true, is_course_coordinator: false }
+      : { is_program_coordinator: false };
+    setStaff(prev => prev.map(s => (s.id === userId ? { ...s, ...flagPatch } : s)));
+    setUsers(prev => prev.map(u => (u.id === userId ? { ...u, ...flagPatch } : u)));
+
+    setAssigningProgramFor(userId);
+    setError('');
+    try {
+      if (previousCourse) {
+        await programCoordinatorService.removeCourseCoordinator(previousCourse.id, userId);
+      }
+      for (const p of previousPrograms) {
+        await programService.removeCoordinator(p.id, userId);
+      }
+      await adminService.updateStaffAuthorities(userId, flagPatch);
+      if (programId) {
+        await programService.assignCoordinator(programId, userId);
+      }
+    } catch (err: any) {
+      // Revert the optimistic update on real failure.
+      setCoordinatorPrograms(prev => ({ ...prev, [userId]: previousPrograms }));
+      setCoordinatorCourse(prev => ({ ...prev, [userId]: previousCourse }));
+      setStaff(previousStaff);
+      setUsers(previousUsers);
+      setError(err.response?.data?.detail || 'Failed to update Program Coordinator assignment.');
+    } finally {
+      setAssigningProgramFor(null);
+    }
+  };
+
+  const handleCourseDropdownChange = async (userId: number, value: string) => {
+    // The dropdown lists catalog SUBJECTS (all 3, always) and assignment targets
+    // the subject directly - no live course section is required to exist first.
+    // Optimistic, same as handleProgramDropdownChange - UI updates instantly,
+    // reverts only on real failure.
+    const previousPrograms = coordinatorPrograms[userId] || [];
+    const previousCourse = coordinatorCourse[userId] || null;
+    const previousStaff = staff;
+    const previousUsers = users;
+
+    const catalogId = value ? parseInt(value) : null;
+    const subject = catalogId ? catalogOptions.find((c) => c.id === catalogId) || null : null;
+
+    setCoordinatorCourse(prev => ({ ...prev, [userId]: subject }));
+    setCoordinatorPrograms(prev => ({ ...prev, [userId]: value ? [] : prev[userId] }));
+    const flagPatch = value
+      ? { is_course_coordinator: true, is_program_coordinator: false }
+      : { is_course_coordinator: false };
+    setStaff(prev => prev.map(s => (s.id === userId ? { ...s, ...flagPatch } : s)));
+    setUsers(prev => prev.map(u => (u.id === userId ? { ...u, ...flagPatch } : u)));
+
+    setAssigningCourseFor(userId);
+    setError('');
+    try {
+      for (const p of previousPrograms) {
+        await programService.removeCoordinator(p.id, userId);
+      }
+      if (previousCourse) {
+        await programCoordinatorService.removeCourseCoordinator(previousCourse.id, userId);
+      }
+      await adminService.updateStaffAuthorities(userId, flagPatch);
+      if (catalogId) {
+        await programCoordinatorService.assignCourseCoordinator(catalogId, userId);
+      }
+    } catch (err: any) {
+      setCoordinatorCourse(prev => ({ ...prev, [userId]: previousCourse }));
+      setCoordinatorPrograms(prev => ({ ...prev, [userId]: previousPrograms }));
+      setStaff(previousStaff);
+      setUsers(previousUsers);
+      setError(err.response?.data?.detail || 'Failed to update Course Coordinator assignment.');
+    } finally {
+      setAssigningCourseFor(null);
+    }
+  };
 
   // Keeps this page live without a manual refresh - polls every 15s and refetches
   // immediately whenever the tab regains focus (e.g. admin switches back after a
@@ -288,25 +462,6 @@ const AdminDashboard: React.FC = () => {
   // scoping still exists, just lives on the Program Coordinator Dashboard's
   // "Course Coordinators" section (CourseCoordinatorAssignment), independent of
   // this flag.
-  const handleToggleAuthority = async (
-    staffId: number,
-    authority: 'is_program_coordinator' | 'is_course_coordinator',
-    value: boolean
-  ) => {
-    setError('');
-    const key = `${staffId}:${authority}`;
-    setChangingAuthorityKey(key);
-    try {
-      const updated = await adminService.updateStaffAuthorities(staffId, { [authority]: value });
-      setStaff(prev => prev.map(s => (s.id === staffId ? { ...s, ...updated } : s)));
-      setUsers(prev => prev.map(u => (u.id === staffId ? { ...u, ...updated } : u)));
-    } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to update coordinator authority');
-    } finally {
-      setChangingAuthorityKey(null);
-    }
-  };
-
   const handleExportCsv = async () => {
     setExportingCsv(true);
     setError('');
@@ -454,7 +609,7 @@ const AdminDashboard: React.FC = () => {
       active: activeSection === 'requests',
       onClick: () => setActiveSection('requests'),
       badge: pendingRequests.length > 0 ? (
-        <span className="bg-primary-muted text-primary border border-primary/20 text-[10px] font-bold px-1.5 py-0.5 rounded-full">
+        <span className="bg-primary-muted text-primary border border-primary/20 text-[11px] font-bold px-1.5 py-0.5 rounded-full">
           {pendingRequests.length}
         </span>
       ) : undefined,
@@ -583,7 +738,7 @@ const AdminDashboard: React.FC = () => {
                       <option value="teacher">Teacher</option>
                       <option value="admin">Admin</option>
                     </select>
-                    <p className="text-[11px] text-text-muted mt-1">
+                    <p className="text-[12px] text-text-muted mt-1">
                       Coordinator authority is granted separately - see "Manage Coordinator Authorities".
                     </p>
                   </div>
@@ -631,9 +786,24 @@ const AdminDashboard: React.FC = () => {
                     </div>
                   </div>
                   <div className="flex items-center gap-2 flex-wrap shrink-0">
-                    <span className="text-xs font-bold px-2.5 py-1 rounded-full border whitespace-nowrap bg-primary-muted text-primary border-primary/20">
-                      {ROLE_LABELS[u.role] || u.role}
-                    </span>
+                    {(() => {
+                      const isLegacy = u.role !== 'teacher' && u.role !== 'student' && u.role !== 'admin';
+                      const assignedProgram = (coordinatorPrograms[u.id] || [])[0];
+                      const assignedCourse = coordinatorCourse[u.id];
+                      let label = ROLE_LABELS[u.role] || u.role;
+                      if (isLegacy && (u.program_name || u.course_name)) {
+                        label += ` · ${u.program_name || u.course_name}`;
+                      } else if (!isLegacy && assignedProgram) {
+                        label = `Program Coordinator · ${assignedProgram.name}`;
+                      } else if (!isLegacy && assignedCourse) {
+                        label = `Course Coordinator · ${assignedCourse.name}`;
+                      }
+                      return (
+                        <span className="text-xs font-bold px-2.5 py-1 rounded-full border whitespace-nowrap bg-primary-muted text-primary border-primary/20">
+                          {label}
+                        </span>
+                      );
+                    })()}
                     {!u.is_active && (
                       <span className="text-xs font-bold px-2.5 py-1 rounded-full border bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-500/10 dark:text-rose-400 dark:border-rose-500/30 whitespace-nowrap">
                         Suspended
@@ -688,7 +858,10 @@ const AdminDashboard: React.FC = () => {
           {logsLoading ? (
             <div className="glass-panel rounded-2xl p-8 border border-border text-center text-sm text-text-muted">Loading logs…</div>
           ) : logs.length === 0 ? (
-            <div className="glass-panel rounded-2xl p-8 border border-border text-center text-sm text-text-muted">No events recorded yet.</div>
+            <div className="glass-panel rounded-2xl p-8 border border-border text-center text-sm text-text-muted">
+              <EmptyStateIllustration className="w-20 h-20 mx-auto mb-2" />
+              No events recorded yet.
+            </div>
           ) : (
             <div className="space-y-2">
               {logs.map((log, i) => {
@@ -712,11 +885,11 @@ const AdminDashboard: React.FC = () => {
                       </p>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border whitespace-nowrap bg-primary-muted text-primary border-primary/20">
+                      <span className="text-[11px] font-bold px-2 py-0.5 rounded-full border whitespace-nowrap bg-primary-muted text-primary border-primary/20">
                         {log.event_type}
                       </span>
                       {log.status && (
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border whitespace-nowrap ${
+                        <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full border whitespace-nowrap ${
                           log.status === 'rejected'
                             ? 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-500/10 dark:text-rose-400 dark:border-rose-500/30'
                             : 'bg-primary-muted text-primary border-primary/20'
@@ -832,6 +1005,7 @@ const AdminDashboard: React.FC = () => {
             </div>
           ) : staff.length === 0 ? (
             <div className="glass-panel rounded-2xl p-8 border border-border text-center text-sm text-text-muted">
+              <EmptyStateIllustration className="w-20 h-20 mx-auto mb-2" />
               No teacher accounts yet. Create one above, then grant coordinator authority here.
             </div>
           ) : (
@@ -847,42 +1021,65 @@ const AdminDashboard: React.FC = () => {
                     </p>
                   </div>
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-xs font-bold px-2.5 py-1 rounded-full border whitespace-nowrap bg-primary-muted text-primary border-primary/20">
-                      {ROLE_LABELS[member.role] || member.role}
-                      {isLegacyExclusiveRole && (member.program_name || member.course_name)
-                        ? ` · ${member.program_name || member.course_name}`
-                        : ''}
-                    </span>
+                    {(() => {
+                      // Legacy exclusive-role accounts (role IS "program_coordinator"/
+                      // "course_coordinator") keep their own role label + scope name.
+                      // Additive accounts (role "teacher" + a flag) show the authority
+                      // title itself - "Program Coordinator"/"Course Coordinator" - not
+                      // "Teacher", whenever a scope is actually assigned; falling back
+                      // to "Teacher" only when neither dropdown has a value.
+                      const assignedProgram = (coordinatorPrograms[member.id] || [])[0];
+                      const assignedCourse = coordinatorCourse[member.id];
+                      let label = ROLE_LABELS[member.role] || member.role;
+                      if (isLegacyExclusiveRole && (member.program_name || member.course_name)) {
+                        label += ` · ${member.program_name || member.course_name}`;
+                      } else if (!isLegacyExclusiveRole && assignedProgram) {
+                        label = `Program Coordinator · ${assignedProgram.name}`;
+                      } else if (!isLegacyExclusiveRole && assignedCourse) {
+                        label = `Course Coordinator · ${assignedCourse.name}`;
+                      }
+                      return (
+                        <span className="text-xs font-bold px-2.5 py-1 rounded-full border whitespace-nowrap bg-primary-muted text-primary border-primary/20">
+                          {label}
+                        </span>
+                      );
+                    })()}
                     {isLegacyExclusiveRole ? (
                       <span className="text-xs text-text-muted italic" title="This account predates the additive-authority model and still holds an exclusive coordinator role. Move it back to Teacher via Edit User to grant additive authorities instead.">
                         Legacy exclusive-role account - authorities not applicable
                       </span>
                     ) : (
                       <>
-                        <label className={`flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 rounded-lg border cursor-pointer transition-all ${
-                          member.is_program_coordinator ? 'bg-primary text-white border-primary' : 'bg-background text-text-muted border-border hover:border-primary/40'
-                        } ${changingAuthorityKey === `${member.id}:is_program_coordinator` ? 'opacity-60' : ''}`}>
-                          <input
-                            type="checkbox"
-                            className="hidden"
-                            checked={member.is_program_coordinator}
-                            disabled={changingAuthorityKey === `${member.id}:is_program_coordinator`}
-                            onChange={(e) => handleToggleAuthority(member.id, 'is_program_coordinator', e.target.checked)}
-                          />
-                          Program Coordinator
-                        </label>
-                        <label className={`flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1.5 rounded-lg border cursor-pointer transition-all ${
-                          member.is_course_coordinator ? 'bg-primary text-white border-primary' : 'bg-background text-text-muted border-border hover:border-primary/40'
-                        } ${changingAuthorityKey === `${member.id}:is_course_coordinator` ? 'opacity-60' : ''}`}>
-                          <input
-                            type="checkbox"
-                            className="hidden"
-                            checked={member.is_course_coordinator}
-                            disabled={changingAuthorityKey === `${member.id}:is_course_coordinator`}
-                            onChange={(e) => handleToggleAuthority(member.id, 'is_course_coordinator', e.target.checked)}
-                          />
-                          Course Coordinator
-                        </label>
+                        <div className="flex flex-col gap-0.5">
+                          <label className="text-[11px] font-semibold text-text-muted">Program Coordinator</label>
+                          <select
+                            className="input-light text-xs py-1"
+                            value={(coordinatorPrograms[member.id] || [])[0]?.id ?? ''}
+                            disabled={assigningProgramFor === member.id || member.is_course_coordinator}
+                            title={member.is_course_coordinator ? 'Already Course Coordinator - set that dropdown to None first.' : undefined}
+                            onChange={(e) => handleProgramDropdownChange(member.id, e.target.value)}
+                          >
+                            <option value="">None</option>
+                            {programs.map((p) => (
+                              <option key={p.id} value={p.id}>{p.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="flex flex-col gap-0.5">
+                          <label className="text-[11px] font-semibold text-text-muted">Course Coordinator</label>
+                          <select
+                            className="input-light text-xs py-1"
+                            value={coordinatorCourse[member.id]?.id ?? ''}
+                            disabled={assigningCourseFor === member.id || member.is_program_coordinator}
+                            title={member.is_program_coordinator ? 'Already Program Coordinator - set that dropdown to None first.' : undefined}
+                            onChange={(e) => handleCourseDropdownChange(member.id, e.target.value)}
+                          >
+                            <option value="">None</option>
+                            {catalogOptions.map((c) => (
+                              <option key={c.id} value={c.id}>{c.name}{c.code ? ` (${c.code})` : ''}</option>
+                            ))}
+                          </select>
+                        </div>
                       </>
                     )}
                   </div>
@@ -948,6 +1145,7 @@ const AdminDashboard: React.FC = () => {
             </div>
           ) : programs.length === 0 ? (
             <div className="glass-panel rounded-2xl p-8 border border-border text-center text-sm text-text-muted">
+              <EmptyStateIllustration className="w-20 h-20 mx-auto mb-2" />
               No programs yet. Create one above.
             </div>
           ) : (
@@ -991,6 +1189,7 @@ const AdminDashboard: React.FC = () => {
             </div>
           ) : requests.length === 0 ? (
             <div className="glass-panel rounded-2xl p-8 border border-border text-center text-sm text-text-muted">
+              <EmptyStateIllustration className="w-20 h-20 mx-auto mb-2" />
               No teacher access requests yet.
             </div>
           ) : (

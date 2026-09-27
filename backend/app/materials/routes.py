@@ -1,3 +1,4 @@
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
@@ -5,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, s
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
-from app.database.connection import get_db
+from app.database.connection import get_db, SessionLocal
 from app.database.models import Material, Course, User
 from app.materials.schemas import MaterialResponse, MaterialUpdate
 from app.auth.routes import get_current_user, get_current_teacher
@@ -29,6 +30,41 @@ def _get_course_or_404(db: Session, course_id: int) -> Course:
     if not course:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
     return course
+
+
+def _notify_material_posted_background(course_id: int, material_id: int) -> None:
+    """Runs off the request thread - see the call site in create_material for
+    why. Split into two short-lived DB sessions around the LLM call rather
+    than one held open across it - see the equivalent function in
+    app/assignments/routes.py for why that matters for the whole app's
+    connection pool, not just this one endpoint."""
+    bg_db = SessionLocal()
+    try:
+        course = bg_db.query(Course).filter(Course.id == course_id).first()
+        material = bg_db.query(Material).filter(Material.id == material_id).first()
+        if not course or not material:
+            return
+        content = f"Posted in {course.name}. {material.description or ''}".strip()
+        title = material.title
+    finally:
+        bg_db.close()
+
+    try:
+        summary = generate_posting_summary("material", title, content)
+        bg_db = SessionLocal()
+        try:
+            notify_course_students(
+                bg_db, course_id, NotificationType.MATERIAL_POSTED,
+                title=f"New material: {title}",
+                message=summary,
+                link=f"/course/{course_id}",
+            )
+        finally:
+            bg_db.close()
+    except Exception as e:
+        print(f"Warning: failed to create material notifications: {str(e)}")
+    finally:
+        bg_db.close()
 
 
 def _read_and_validate_upload(file: UploadFile) -> tuple[bytes, str, str]:
@@ -108,17 +144,8 @@ def create_material(
     db.commit()
     db.refresh(material)
 
-    try:
-        content = f"Posted in {course.name}. {description or ''}".strip()
-        summary = generate_posting_summary("material", title, content)
-        notify_course_students(
-            db, course_id, NotificationType.MATERIAL_POSTED,
-            title=f"New material: {title}",
-            message=summary,
-            link=f"/course/{course_id}",
-        )
-    except Exception as e:
-        print(f"Warning: failed to create material notifications: {str(e)}")
+    # Backgrounded - see _notify_material_posted_background docstring.
+    threading.Thread(target=_notify_material_posted_background, args=(course_id, material.id), daemon=True).start()
 
     return _to_response(material)
 

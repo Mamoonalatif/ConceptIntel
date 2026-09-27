@@ -8,6 +8,8 @@ import { LandingPage } from './pages/LandingPage';
 import { AboutPage } from './pages/AboutPage';
 import Login from './pages/Login';
 import Register from './pages/Register';
+import ForgotPassword from './pages/ForgotPassword';
+import ResetPassword from './pages/ResetPassword';
 import RequestTeacherAccess from './pages/RequestTeacherAccess';
 import TeacherDashboard from './pages/TeacherDashboard';
 import StudentDashboard from './pages/StudentDashboard';
@@ -16,23 +18,21 @@ import ProgramCoordinatorDashboard from './pages/ProgramCoordinatorDashboard';
 import CourseCoordinatorDashboard from './pages/CourseCoordinatorDashboard';
 import CourseDetail from './pages/CourseDetail';
 import KnowledgeGraph from './pages/KnowledgeGraph';
+import CourseSchedule from './pages/CourseSchedule';
 import JoinCourse from './pages/JoinCourse';
 import ProfilePage from './pages/ProfilePage';
 import CalendarPage from './pages/CalendarPage';
 import AssistantPage from './pages/AssistantPage';
 import SettingsPage from './pages/SettingsPage';
 import AnalyticsDashboard from './pages/AnalyticsDashboard';
+import ContentStudioPage from './pages/ContentStudioPage';
+import GamePlayerPage from './pages/GamePlayerPage';
+import ContentViewerPage from './pages/ContentViewerPage';
+import NotFoundPage from './pages/NotFoundPage';
+import { FoxSpinner } from './components/FoxSpinner';
+import { defaultDashboardFor } from './lib/roleNav';
 
 const queryClient = new QueryClient();
-
-// A user's default landing dashboard is always their base role's - teacher stays on
-// /teacher even if they also hold coordinator authority (they navigate to the
-// coordinator panel via a link from there, see TeacherDashboard/CourseCoordinatorDashboard).
-const defaultDashboardFor = (role: string) => {
-  if (role === 'admin') return '/admin';
-  if (role === 'teacher') return '/teacher';
-  return '/student';
-};
 
 type Authority = 'program_coordinator' | 'course_coordinator';
 
@@ -52,10 +52,7 @@ const PrivateRoute: React.FC<{
   if (isLoading) {
     return (
       <div className="min-h-screen bg-background flex flex-col items-center justify-center gap-3">
-        <div className="w-10 h-10 bg-gradient-to-tr from-primary to-secondary rounded-xl flex items-center justify-center shadow-glow">
-          <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-        </div>
-        <p className="text-text-secondary text-xs font-medium">Authenticating session...</p>
+        <FoxSpinner className="w-12 h-12" label="Authenticating session..." />
       </div>
     );
   }
@@ -64,11 +61,24 @@ const PrivateRoute: React.FC<{
     return <Navigate to="/login" replace />;
   }
 
-  if (requiredRole && user && user.role !== requiredRole) {
+  // token is set but the /auth/me fetch it triggered hasn't resolved yet - render
+  // nothing (rather than the protected page with a null user) until it does, so a
+  // requiredRole/requiredAuthority check below never runs against a user that just
+  // hasn't loaded yet. Skipping this used to let the wrong dashboard render for a
+  // moment right after login, before the redirect below caught up.
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-background flex flex-col items-center justify-center gap-3">
+        <FoxSpinner className="w-12 h-12" label="Authenticating session..." />
+      </div>
+    );
+  }
+
+  if (requiredRole && user.role !== requiredRole) {
     return <Navigate to={defaultDashboardFor(user.role)} replace />;
   }
 
-  if (requiredAuthority && user && !hasAuthority(user, requiredAuthority)) {
+  if (requiredAuthority && !hasAuthority(user, requiredAuthority)) {
     return <Navigate to={defaultDashboardFor(user.role)} replace />;
   }
 
@@ -99,6 +109,8 @@ const AppContent: React.FC = () => {
         <Route path="/about" element={<AboutPage />} />
         <Route path="/login" element={<GuestRoute><Login /></GuestRoute>} />
         <Route path="/register" element={<GuestRoute><Register /></GuestRoute>} />
+        <Route path="/forgot-password" element={<GuestRoute><ForgotPassword /></GuestRoute>} />
+        <Route path="/reset-password" element={<GuestRoute><ResetPassword /></GuestRoute>} />
         <Route path="/request-teacher-access" element={<RequestTeacherAccess />} />
         <Route path="/join/:code" element={<JoinCourse />} />
 
@@ -142,6 +154,40 @@ const AppContent: React.FC = () => {
           element={
             <PrivateRoute>
               <AnalyticsDashboard />
+            </PrivateRoute>
+          }
+        />
+        {/* Content Studio - generating/reviewing AI study material and concept games.
+            Open to every signed-in role: it renders as an authoring surface for
+            teachers and a read-only library plus game launcher for students. */}
+        <Route
+          path="/content-studio"
+          element={
+            <PrivateRoute>
+              <ContentStudioPage />
+            </PrivateRoute>
+          }
+        />
+        {/* Full-screen view of one generated item, opened in its own tab from the
+            library. A real route rather than a modal so it can be bookmarked, shared
+            and printed. */}
+        <Route
+          path="/content/:courseId/:contentId"
+          element={
+            <PrivateRoute>
+              <ContentViewerPage />
+            </PrivateRoute>
+          }
+        />
+        {/* Full-screen host for one generated game, opened in its own tab. The
+            untrusted LLM-authored markup is mounted in a sandboxed iframe here rather
+            than being navigated to directly - see GamePlayerPage for why a blob: URL
+            would not be safe. */}
+        <Route
+          path="/game/:gameId"
+          element={
+            <PrivateRoute>
+              <GamePlayerPage />
             </PrivateRoute>
           }
         />
@@ -207,18 +253,28 @@ const AppContent: React.FC = () => {
           } 
         />
 
-        {/* Shared Knowledge Graph Canvas */}
-        <Route 
-          path="/course/:courseId/graph" 
+        {/* Shared Concept Graph Canvas */}
+        <Route
+          path="/course/:courseId/graph"
           element={
             <PrivateRoute>
               <KnowledgeGraph />
             </PrivateRoute>
-          } 
+          }
         />
 
-        {/* Catch-all redirect */}
-        <Route path="*" element={<Navigate to="/" replace />} />
+        {/* Course Schedule/Outline Preview */}
+        <Route
+          path="/course/:courseId/schedule"
+          element={
+            <PrivateRoute>
+              <CourseSchedule />
+            </PrivateRoute>
+          }
+        />
+
+        {/* Catch-all */}
+        <Route path="*" element={<NotFoundPage />} />
       </Routes>
     </Router>
   );
