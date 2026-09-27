@@ -98,9 +98,26 @@ class Neo4jService:
         if not self.driver:
             logger.warning("Neo4j not connected. Mocking query execution.")
             return []
-        with self.get_session() as session:
-            result = session.run(query_str, parameters or {})
-            return [record.data() for record in result]
+        try:
+            with self.get_session() as session:
+                result = session.run(query_str, parameters or {})
+                return [record.data() for record in result]
+        except Exception as e:
+            # _ensure_connected() only helps when self.driver is already None - it
+            # does nothing for a driver that connected fine at some point but has
+            # since gone stale (e.g. this deployment's Neo4j Aura free-tier
+            # instance auto-pausing after sitting idle). Without this, that first
+            # query after a pause raised an uncaught neo4j exception straight out
+            # of every caller as a 500, instead of the graceful mock-data/empty-
+            # result fallback every caller already codes for via `if not
+            # self.driver`. Clearing self.driver here routes this exact failure
+            # into that same fallback immediately, and makes the NEXT call retry
+            # the connection (cooldown already elapsed, since it's timed from the
+            # original successful connect) instead of waiting on a process
+            # restart.
+            logger.error(f"Neo4j query failed ({type(e).__name__}: {e}) - marking connection dead for reconnect.")
+            self.driver = None
+            return []
 
     def create_concept_node(self, catalog_id: int, name: str, description: str, difficulty: str,
                             importance_score: int = 5, learning_outcomes: str = "", material: str = ""):

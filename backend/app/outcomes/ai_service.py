@@ -149,7 +149,11 @@ Respond ONLY with valid JSON in this exact format:
         if not isinstance(m, dict):
             continue
         clo_id = m.get("clo_id")
-        plo_ids = [pid for pid in (m.get("plo_ids") or []) if pid in valid_plo_ids]
+        # Deduplicated (order-preserving) - an unvalidated raw LLM JSON list can
+        # repeat an id, and the caller inserts one join-table row per entry with a
+        # unique (clo_id, plo_id) constraint, so a duplicate here becomes an
+        # IntegrityError two layers away instead of a validation concern here.
+        plo_ids = list(dict.fromkeys(pid for pid in (m.get("plo_ids") or []) if pid in valid_plo_ids))
         if clo_id is not None:
             result[clo_id] = plo_ids
     return result
@@ -194,7 +198,9 @@ Respond ONLY with valid JSON in this exact format:
             if not isinstance(m, dict):
                 continue
             node_id = m.get("node_id")
-            clo_ids = [cid for cid in (m.get("clo_ids") or []) if cid in valid_clo_ids]
+            # Deduplicated for the same reason as suggest_clo_plo_links above - the
+            # caller inserts one ConceptCLOMap row per id under a unique constraint.
+            clo_ids = list(dict.fromkeys(cid for cid in (m.get("clo_ids") or []) if cid in valid_clo_ids))
             if node_id:
                 result[node_id] = clo_ids
     return result

@@ -695,7 +695,10 @@ def create_assignment_from_content(
     assignment = Assignment(
         course_id=course_id, teacher_id=current_teacher.id,
         title=draft["title"], description=draft["instructions"],
-        points=round(draft.get("points") or 0) or None,
+        # `or 0 ... or None` collapsed a genuine 0-point draft to NULL (0 is falsy
+        # in Python, same as missing) - `is not None` distinguishes "really absent"
+        # from "the AI actually drafted 0 points".
+        points=round(draft["points"]) if draft.get("points") is not None else None,
         concept_node_id=item.concept_node_id, concept_name=item.concept_name,
     )
     db.add(assignment)

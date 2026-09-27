@@ -298,7 +298,19 @@ def auto_extract_clos_for_course(db: Session, course_id: int, created_by_id: int
         existing_codes.add(code)
         created.append(clo)
 
-    db.commit()
+    try:
+        db.commit()
+    except Exception as e:
+        # A race between two near-simultaneous triggers for the same catalog (two
+        # sibling-section teachers re-uploading close together, or a double-clicked
+        # manual endpoint) can have both read the same "next free CLO code" snapshot
+        # and both try to insert it - the second commit hits CLO's unique
+        # (catalog_id, code) constraint. Must roll back and return quietly like
+        # every other failure path here, not leave the session in Postgres's
+        # aborted-transaction state for the caller's next query to trip over.
+        logger.warning("Failed to save auto-extracted CLOs for course %s (rolled back): %s", course_id, e)
+        db.rollback()
+        return empty
     for clo in created:
         db.refresh(clo)
         try:
@@ -332,6 +344,14 @@ def auto_extract_clos_for_course(db: Session, course_id: int, created_by_id: int
                 db.commit()
             except RuntimeError as e:
                 logger.warning("CLO->PLO auto-mapping skipped for course %s: %s", course_id, e)
+            except Exception as e:
+                # Same "must never leave an aborted session behind" reasoning as the
+                # CLO-creation commit above - CLOPLOMap's unique (clo_id, plo_id)
+                # constraint can be hit if the AI ever returns a duplicate plo_id
+                # (ai_service.suggest_clo_plo_links dedupes now, but this is the
+                # backstop, not the only line of defense).
+                logger.warning("Failed to save CLO->PLO links for course %s (rolled back): %s", course_id, e)
+                db.rollback()
 
     return {"created": created, "skipped_existing": skipped, "plo_links_created": plo_links_created}
 
@@ -396,5 +416,15 @@ def auto_tag_untagged_concepts(db: Session, catalog_id: int) -> int:
         db.commit()
     except RuntimeError as e:
         logger.warning("Concept->CLO auto-tagging skipped for catalog %s: %s", catalog_id, e)
+    except Exception as e:
+        # ConceptCLOMap's unique (catalog_id, concept_node_id, clo_id) constraint can
+        # be hit the same way as the CLO/PLO commits above. This function is called
+        # automatically right after a graph revision merge (revision_service.py
+        # coordinator_decide) - an uncaught IntegrityError here previously left that
+        # caller's db session in an aborted state, turning the REST of that request
+        # (the revision/job/course status updates that follow) into a 500, even
+        # though the actual graph merge into Neo4j had already succeeded.
+        logger.warning("Concept->CLO auto-tagging failed for catalog %s (rolled back): %s", catalog_id, e)
+        db.rollback()
 
     return concepts_tagged
