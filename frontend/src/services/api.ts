@@ -979,6 +979,9 @@ export interface SubmissionSummary {
   is_late: boolean;
   grade: number | null;
   feedback: string | null;
+  // "Ungraded" | "PendingReview" | "Approved" - grade/feedback above are only
+  // ever populated here once this is "Approved" (see backend _student_facing_submission).
+  grade_status: 'Ungraded' | 'PendingReview' | 'Approved';
 }
 
 export interface AssignmentItem {
@@ -1004,6 +1007,10 @@ export interface RubricCriterionScore {
   max_points: number;
   clo_id: number | null;
   feedback: string;
+  // Set only when the criterion has performance levels and one was picked (by
+  // the AI, or by a teacher's override at approval) - see grading_service.py.
+  level_id?: number | null;
+  level_label?: string | null;
 }
 
 export interface SubmissionItem {
@@ -1020,6 +1027,19 @@ export interface SubmissionItem {
   // Per-criterion breakdown from the assignment's rubric, if one exists and was
   // used for this grading pass. Null when the assignment has no rubric.
   rubric_scores: RubricCriterionScore[] | null;
+  // "Ungraded" | "PendingReview" | "Approved" - teacher-facing, so unlike the
+  // student's SubmissionSummary, grade/feedback here are always the real values
+  // regardless of status (the teacher IS the reviewer the gate exists for).
+  grade_status: 'Ungraded' | 'PendingReview' | 'Approved';
+}
+
+// One performance level of an analytic-rubric criterion (e.g. "Excellent" =
+// 30pts) - matches backend/app/assignments/schemas.py RubricLevelIn/Out.
+export interface RubricLevel {
+  id?: number;
+  label: string;
+  points: number;
+  description: string | null;
 }
 
 // One row of a Rubric, as the teacher edits/saves it - matches
@@ -1032,6 +1052,7 @@ export interface RubricCriterion {
   clo_id: number | null;
   clo_code?: string | null;
   order_index?: number;
+  levels: RubricLevel[];
 }
 
 export interface Rubric {
@@ -1304,12 +1325,34 @@ export const assignmentService = {
     return res.data;
   },
   // Teacher review/approval step - replaces the AI-suggested grade/feedback with
-  // the teacher's own final call.
+  // the teacher's own final call. Immediately Approved, no further gate.
   overrideGrade: async (
     courseId: number, assignmentId: number, submissionId: number, data: { grade: number; feedback: string }
   ): Promise<SubmissionItem> => {
     const res = await api.patch(
       `/courses/${courseId}/assignments/${assignmentId}/submissions/${submissionId}/grade`, data
+    );
+    return res.data;
+  },
+  // Approves a PendingReview AI grade, making it visible to the student and
+  // running its downstream side effects (CLO/PLO attainment, ConceptMastery,
+  // gamification points, notification). criterion_levels lets the teacher
+  // override which level the AI picked for one or more criteria before approving.
+  approveGrade: async (
+    courseId: number, assignmentId: number, submissionId: number,
+    data?: { criterion_levels?: { criterion_id: number; level_id: number }[]; overall_feedback?: string }
+  ): Promise<SubmissionItem> => {
+    const res = await api.post(
+      `/courses/${courseId}/assignments/${assignmentId}/submissions/${submissionId}/grade/approve`, data
+    );
+    return res.data;
+  },
+  // Discards a PendingReview AI grade entirely, resetting the submission back to Ungraded.
+  rejectGrade: async (
+    courseId: number, assignmentId: number, submissionId: number
+  ): Promise<SubmissionItem> => {
+    const res = await api.post(
+      `/courses/${courseId}/assignments/${assignmentId}/submissions/${submissionId}/grade/reject`
     );
     return res.data;
   },

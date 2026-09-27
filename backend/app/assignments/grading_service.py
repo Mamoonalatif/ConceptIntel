@@ -59,11 +59,18 @@ Respond ONLY with valid JSON in this exact format:
 RUBRIC_SYSTEM_PROMPT_SUFFIX = """
 
 You are ALSO given this assignment's grading rubric - a fixed list of criteria the
-teacher defined for every student's submission in this class. For EACH criterion,
-award a points_earned value (0 up to that criterion's max_points) and one short,
-specific sentence of feedback tied to that criterion. overall_grade must be the
-sum of every criterion's points_earned, rescaled to a 0-100 scale against the
-rubric's total possible points.
+teacher defined for every student's submission in this class. For EACH criterion:
+- If it lists performance levels (each with its own level_id and fixed points),
+  pick the id of the ONE level that best matches the submission and return it as
+  "level_id" - do not invent a points_earned value for these, the level you pick
+  IS the score, the same way a human grader circles one cell in a rubric grid
+  rather than writing in their own number.
+- If it has NO levels listed, award a free-form points_earned value instead (0 up
+  to that criterion's max_points).
+Either way, include one short, specific sentence of feedback tied to that
+criterion. overall_grade must be the sum of every criterion's resolved points
+(the chosen level's points, or points_earned for a level-less criterion),
+rescaled to a 0-100 scale against the rubric's total possible points.
 
 Respond ONLY with valid JSON in this exact format:
 {
@@ -73,7 +80,8 @@ Respond ONLY with valid JSON in this exact format:
     {"concept_name": "Newton's Second Law", "score": 90, "feedback": "..."}
   ],
   "criterion_scores": [
-    {"criterion_id": 1, "points_earned": 27, "feedback": "Correctly applied F=ma with consistent units throughout."}
+    {"criterion_id": 1, "level_id": 4, "feedback": "Correctly applied F=ma with consistent units throughout."},
+    {"criterion_id": 2, "points_earned": 12, "feedback": "Diagram present but missing the normal force."}
   ]
 }"""
 
@@ -111,12 +119,16 @@ def grade_submission_text(
     than against their course - marking down a correct answer that uses the
     lecturer's notation, or accepting an approach the course never taught.
 
-    rubric_criteria: [{"id": ..., "title": ..., "description": ..., "max_points": ...}, ...],
-    the assignment's Rubric (see app/database/models.py Rubric/RubricCriterion) -
-    the SAME rubric used for every student's submission in this class. When
-    provided, the response additionally scores each criterion out of its
-    max_points (see RUBRIC_SYSTEM_PROMPT_SUFFIX) and overall_grade is derived from
-    those points rather than a free-floating 0-100 judgment.
+    rubric_criteria: [{"id": ..., "title": ..., "description": ..., "max_points": ...,
+    "levels": [{"id": ..., "label": ..., "points": ..., "description": ...}, ...]}, ...],
+    the assignment's Rubric (see app/database/models.py Rubric/RubricCriterion/
+    RubricLevel) - the SAME rubric used for every student's submission in this
+    class. `levels` may be an empty list for a criterion with no performance
+    grid (older rubrics, or one the teacher built without levels) - it still
+    grades normally via free-form points_earned. When rubric_criteria is
+    provided at all, the response additionally scores each criterion (see
+    RUBRIC_SYSTEM_PROMPT_SUFFIX) and overall_grade is derived from those points
+    rather than a free-floating 0-100 judgment.
     """
     if not submission_text.strip():
         raise ValueError("Submission contains no extractable text - cannot grade an empty document.")
@@ -149,11 +161,18 @@ introduce, and do not treat these excerpts as a model answer.
     system_prompt = SYSTEM_PROMPT
     if rubric_criteria:
         system_prompt = SYSTEM_PROMPT + RUBRIC_SYSTEM_PROMPT_SUFFIX
-        rubric_lines = "\n".join(
-            f"- id={c['id']}: {c['title']} (max {c['max_points']} points) - {c.get('description') or ''}"
-            for c in rubric_criteria
-        )
-        rubric_block = f"\nGrading rubric for this assignment (use these exact criterion ids):\n{rubric_lines}\n"
+        rubric_line_parts = []
+        for c in rubric_criteria:
+            line = f"- id={c['id']}: {c['title']} (max {c['max_points']} points) - {c.get('description') or ''}"
+            levels = c.get("levels") or []
+            if levels:
+                level_line = "; ".join(
+                    f'level_id={lv["id"]} "{lv["label"]}"={lv["points"]}pts: {lv.get("description") or ""}'
+                    for lv in levels
+                )
+                line += f"\n    Levels (pick exactly one level_id): {level_line}"
+            rubric_line_parts.append(line)
+        rubric_block = f"\nGrading rubric for this assignment (use these exact criterion/level ids):\n{chr(10).join(rubric_line_parts)}\n"
 
     user_content = f"""Assignment: {assignment_title}
 Instructions: {assignment_description or 'No additional instructions provided.'}
@@ -210,7 +229,25 @@ Student's submission (extracted text, first 12000 characters):
                 for cs in data["criterion_scores"]:
                     crit = by_id.get(cs.get("criterion_id"))
                     max_pts = crit["max_points"] if crit else 0.0
-                    cs["points_earned"] = max(0.0, min(max_pts, float(cs.get("points_earned", 0))))
+                    levels_by_id = {lv["id"]: lv for lv in (crit.get("levels") or [])} if crit else {}
+                    chosen_level = levels_by_id.get(cs.get("level_id"))
+                    if chosen_level is not None:
+                        # The level IS the score - its points come from the rubric
+                        # row the teacher (or teacher-approved AI draft) defined,
+                        # never from a number the model also happens to emit
+                        # alongside level_id. This is the whole point of levels:
+                        # every point on the rubric is a pre-defined option, not
+                        # something freely generated per submission.
+                        cs["points_earned"] = chosen_level["points"]
+                        cs["level_id"] = chosen_level["id"]
+                        cs["level_label"] = chosen_level["label"]
+                    else:
+                        # No levels on this criterion (or the model didn't pick a
+                        # valid one) - fall back to the original free-form scoring,
+                        # clamped into range same as before levels existed.
+                        cs["points_earned"] = max(0.0, min(max_pts, float(cs.get("points_earned", 0))))
+                        cs["level_id"] = None
+                        cs["level_label"] = None
                     cs["max_points"] = max_pts
                     cs["title"] = crit["title"] if crit else cs.get("title", "")
                     total_earned += cs["points_earned"]
@@ -238,7 +275,8 @@ def format_feedback_text(result: Dict[str, Any]) -> str:
     student sees exactly where they lost/kept marks."""
     lines = [result.get("overall_feedback", "").strip(), ""]
     for c in result.get("criterion_scores", []):
-        lines.append(f"- {c.get('title', 'Criterion')} ({c.get('points_earned', 0)}/{c.get('max_points', 0)}): {c.get('feedback', '')}")
+        level_suffix = f" [{c['level_label']}]" if c.get("level_label") else ""
+        lines.append(f"- {c.get('title', 'Criterion')} ({c.get('points_earned', 0)}/{c.get('max_points', 0)}){level_suffix}: {c.get('feedback', '')}")
     for c in result.get("concept_scores", []):
         lines.append(f"- {c.get('concept_name', 'Unknown concept')} ({round(c.get('score', 0))}/100): {c.get('feedback', '')}")
     return "\n".join(lines).strip()

@@ -75,6 +75,11 @@ export const Assignments: React.FC<AssignmentsProps> = ({ courseId, isTeacher, c
   const [editGradeValue, setEditGradeValue] = useState('');
   const [editFeedbackValue, setEditFeedbackValue] = useState('');
   const [savingGrade, setSavingGrade] = useState(false);
+  const [approvingId, setApprovingId] = useState<number | null>(null);
+  const [rejectingId, setRejectingId] = useState<number | null>(null);
+  // submissionId -> criterionId -> level_id - a teacher's in-progress level
+  // overrides for a PendingReview grade, applied only once Approve is clicked.
+  const [levelOverrides, setLevelOverrides] = useState<Record<number, Record<number, number>>>({});
 
   // ── Rubric (per assignment, shared across every student's submission) ──
   const [clos, setClos] = useState<CLO[]>([]);
@@ -128,11 +133,29 @@ export const Assignments: React.FC<AssignmentsProps> = ({ courseId, isTeacher, c
   };
 
   const addDraftCriterion = () => {
-    setRubricDraft((prev) => [...prev, { title: '', description: '', max_points: 10, clo_id: null }]);
+    setRubricDraft((prev) => [...prev, { title: '', description: '', max_points: 10, clo_id: null, levels: [] }]);
   };
 
   const removeDraftCriterion = (index: number) => {
     setRubricDraft((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const updateDraftLevel = (criterionIndex: number, levelIndex: number, patch: Partial<RubricCriterion['levels'][number]>) => {
+    setRubricDraft((prev) => prev.map((c, i) => (
+      i === criterionIndex ? { ...c, levels: c.levels.map((lv, j) => (j === levelIndex ? { ...lv, ...patch } : lv)) } : c
+    )));
+  };
+
+  const addDraftLevel = (criterionIndex: number) => {
+    setRubricDraft((prev) => prev.map((c, i) => (
+      i === criterionIndex ? { ...c, levels: [...c.levels, { label: '', points: 0, description: null }] } : c
+    )));
+  };
+
+  const removeDraftLevel = (criterionIndex: number, levelIndex: number) => {
+    setRubricDraft((prev) => prev.map((c, i) => (
+      i === criterionIndex ? { ...c, levels: c.levels.filter((_, j) => j !== levelIndex) } : c
+    )));
   };
 
   const saveDraftRubric = async (assignmentId: number) => {
@@ -301,6 +324,49 @@ export const Assignments: React.FC<AssignmentsProps> = ({ courseId, isTeacher, c
       setError(err.response?.data?.detail || 'Failed to save grade.');
     } finally {
       setSavingGrade(false);
+    }
+  };
+
+  const handleApprove = async (assignmentId: number, submissionId: number) => {
+    setApprovingId(submissionId);
+    setError('');
+    try {
+      const overrides = levelOverrides[submissionId];
+      const criterion_levels = overrides && Object.keys(overrides).length > 0
+        ? Object.entries(overrides).map(([criterionId, levelId]) => ({ criterion_id: Number(criterionId), level_id: levelId }))
+        : undefined;
+      const updated = await assignmentService.approveGrade(
+        courseId, assignmentId, submissionId, criterion_levels ? { criterion_levels } : undefined
+      );
+      setSubmissions((prev) => ({
+        ...prev,
+        [assignmentId]: (prev[assignmentId] || []).map((s) => (s.id === submissionId ? updated : s)),
+      }));
+      setLevelOverrides((prev) => {
+        const next = { ...prev };
+        delete next[submissionId];
+        return next;
+      });
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Failed to approve grade.');
+    } finally {
+      setApprovingId(null);
+    }
+  };
+
+  const handleReject = async (assignmentId: number, submissionId: number) => {
+    setRejectingId(submissionId);
+    setError('');
+    try {
+      const updated = await assignmentService.rejectGrade(courseId, assignmentId, submissionId);
+      setSubmissions((prev) => ({
+        ...prev,
+        [assignmentId]: (prev[assignmentId] || []).map((s) => (s.id === submissionId ? updated : s)),
+      }));
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Failed to reject grade.');
+    } finally {
+      setRejectingId(null);
     }
   };
 
@@ -486,6 +552,7 @@ export const Assignments: React.FC<AssignmentsProps> = ({ courseId, isTeacher, c
                                 <CheckCircle2 className="w-3.5 h-3.5" />
                                 Submitted {item.my_submission.is_late ? '(late)' : ''} — {item.my_submission.file_filename}
                                 {item.my_submission.grade !== null && ` · Grade: ${Math.round(item.my_submission.grade)}/100`}
+                                {item.my_submission.grade_status === 'PendingReview' && ' · Grading in review'}
                               </span>
                               <label className="text-xs font-semibold text-primary hover:underline cursor-pointer">
                                 Resubmit
@@ -591,6 +658,30 @@ export const Assignments: React.FC<AssignmentsProps> = ({ courseId, isTeacher, c
                                         </select>
                                       </div>
                                     )}
+                                    <div className="pl-2 border-l-2 border-border space-y-1">
+                                      {c.levels.map((lv, li) => (
+                                        <div key={li} className="flex items-center gap-1.5">
+                                          <input
+                                            className="input-light flex-1 text-[11px] py-0.5"
+                                            placeholder="Level label (e.g. Excellent)"
+                                            value={lv.label}
+                                            onChange={(e) => updateDraftLevel(i, li, { label: e.target.value })}
+                                          />
+                                          <input
+                                            type="number" min="0" max={c.max_points}
+                                            className="input-light w-14 text-[11px] py-0.5"
+                                            value={lv.points}
+                                            onChange={(e) => updateDraftLevel(i, li, { points: parseFloat(e.target.value) || 0 })}
+                                          />
+                                          <button onClick={() => removeDraftLevel(i, li)} className="p-0.5 text-text-muted hover:text-rose-500" title="Remove level">
+                                            <X className="w-3 h-3" />
+                                          </button>
+                                        </div>
+                                      ))}
+                                      <button onClick={() => addDraftLevel(i)} className="flex items-center gap-1 text-[11px] font-semibold text-secondary hover:underline">
+                                        <Plus className="w-3 h-3" /> Add performance level
+                                      </button>
+                                    </div>
                                   </div>
                                 ))}
                                 <div className="flex items-center justify-between">
@@ -644,6 +735,9 @@ export const Assignments: React.FC<AssignmentsProps> = ({ courseId, isTeacher, c
                                   <p className="text-[11px] text-text-muted truncate">
                                     {sub.file_filename} {sub.is_late && <span className="text-rose-500 dark:text-rose-400 font-bold">· LATE</span>}
                                     {sub.grade !== null && <span className="ml-1.5 font-bold text-secondary">· {Math.round(sub.grade)}/100</span>}
+                                    {sub.grade_status === 'PendingReview' && (
+                                      <span className="ml-1.5 font-bold text-amber-600 dark:text-amber-400">· Pending review</span>
+                                    )}
                                   </p>
                                 </div>
                                 <div className="flex items-center gap-1 shrink-0">
@@ -671,6 +765,52 @@ export const Assignments: React.FC<AssignmentsProps> = ({ courseId, isTeacher, c
                               {sub.feedback && editingGradeId !== sub.id && (
                                 <div className="bg-surface border border-border rounded-lg p-2.5 text-[12px] text-text-secondary whitespace-pre-wrap">
                                   {sub.feedback}
+                                </div>
+                              )}
+
+                              {sub.grade_status === 'PendingReview' && editingGradeId !== sub.id && (
+                                <div className="space-y-1.5">
+                                  {sub.rubric_scores?.map((cs) => {
+                                    const criterion = rubrics[item.id]?.criteria.find((c) => c.id === cs.criterion_id);
+                                    if (!criterion || criterion.levels.length === 0) return null;
+                                    const currentLevelId = levelOverrides[sub.id]?.[cs.criterion_id] ?? cs.level_id ?? '';
+                                    return (
+                                      <div key={cs.criterion_id} className="flex items-center justify-between gap-2 text-[11px]">
+                                        <span className="text-text-muted truncate">{cs.title}</span>
+                                        <select
+                                          className="input-light text-[11px] py-0.5 shrink-0"
+                                          value={currentLevelId}
+                                          onChange={(e) => {
+                                            const levelId = Number(e.target.value);
+                                            setLevelOverrides((prev) => ({
+                                              ...prev,
+                                              [sub.id]: { ...(prev[sub.id] || {}), [cs.criterion_id]: levelId },
+                                            }));
+                                          }}
+                                        >
+                                          {criterion.levels.map((lv) => (
+                                            <option key={lv.id} value={lv.id}>{lv.label} ({lv.points}pts)</option>
+                                          ))}
+                                        </select>
+                                      </div>
+                                    );
+                                  })}
+                                  <div className="flex justify-end gap-2">
+                                    <button
+                                      onClick={() => handleReject(item.id, sub.id)}
+                                      disabled={rejectingId === sub.id || approvingId === sub.id}
+                                      className="btn-ghost text-[12px] px-2.5 py-1 disabled:opacity-50"
+                                    >
+                                      Reject
+                                    </button>
+                                    <button
+                                      onClick={() => handleApprove(item.id, sub.id)}
+                                      disabled={approvingId === sub.id || rejectingId === sub.id}
+                                      className="btn-primary text-[12px] px-2.5 py-1 disabled:opacity-50"
+                                    >
+                                      {approvingId === sub.id ? 'Approving...' : 'Approve grade'}
+                                    </button>
+                                  </div>
                                 </div>
                               )}
 
@@ -708,7 +848,7 @@ export const Assignments: React.FC<AssignmentsProps> = ({ courseId, isTeacher, c
                                   onClick={() => startEditGrade(sub)}
                                   className="flex items-center gap-1 text-[12px] font-semibold text-text-muted hover:text-secondary"
                                 >
-                                  <Pencil className="w-3 h-3" /> {sub.grade !== null ? 'Edit / approve grade' : 'Enter grade manually'}
+                                  <Pencil className="w-3 h-3" /> {sub.grade !== null ? 'Edit grade manually' : 'Enter grade manually'}
                                 </button>
                               )}
                             </div>

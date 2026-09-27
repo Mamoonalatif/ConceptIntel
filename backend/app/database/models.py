@@ -490,6 +490,13 @@ class AssignmentSubmission(Base):
     # (routes.py) is treated as abandoned (e.g. the process crashed mid-grade)
     # rather than wedging the submission un-gradeable forever.
     grading_locked_at = Column(DateTime, nullable=True)
+    # The full raw AI grading result (overall_feedback, concept_scores,
+    # criterion_scores incl. level_id/level_label) as JSON - the only place
+    # concept_scores survive between grade_submission (computes them) and
+    # approve_grade (needs them to record ConceptMastery evidence, which only
+    # happens on approval, not at grading time). Present only while
+    # grade_status="PendingReview"; cleared back to null on approve or reject.
+    pending_result_json = Column(Text, nullable=True)
 
     assignment = relationship("Assignment", back_populates="submissions")
     student = relationship("User")
