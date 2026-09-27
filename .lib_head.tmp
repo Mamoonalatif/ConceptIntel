@@ -1,0 +1,225 @@
+import React, { useEffect, useMemo, useState } from 'react';
+import {
+  Library, Search, Filter, ExternalLink, Download, Printer, FileJson, Trash2,
+  Check, X, Layers, ListChecks, BookOpen, Sparkles, ShieldCheck, ShieldAlert,
+  AlertTriangle, LayoutGrid, List, RefreshCw, Pencil,
+} from 'lucide-react';
+import { contentGenerationService } from '../../services/api';
+import type { GeneratedContentItem } from '../../services/api';
+import { EmptyStateIllustration } from '../illustrations';
+import { downloadContentHtml, downloadContentJson, printContent } from '../../lib/contentExport';
+import { apiErrorMessage } from '../../lib/apiError';
+import { ContentEditor } from './ContentEditor';
+
+interface ContentLibraryProps {
+  courseId: number;
+  canManage: boolean;
+}
+
+const TYPE_META: Record<string, { label: string; icon: React.ElementType; tint: string }> = {
+  flashcard: { label: 'Flashcards', icon: Layers, tint: 'text-sky-600 dark:text-sky-400 bg-sky-50 dark:bg-sky-500/10 border-sky-200 dark:border-sky-500/20' },
+  mcq: { label: 'Practice MCQs', icon: ListChecks, tint: 'text-violet-600 dark:text-violet-400 bg-violet-50 dark:bg-violet-500/10 border-violet-200 dark:border-violet-500/20' },
+  quiz: { label: 'Quiz', icon: ListChecks, tint: 'text-fuchsia-600 dark:text-fuchsia-400 bg-fuchsia-50 dark:bg-fuchsia-500/10 border-fuchsia-200 dark:border-fuchsia-500/20' },
+  study_guide: { label: 'Study Guide', icon: BookOpen, tint: 'text-teal-600 dark:text-teal-400 bg-teal-50 dark:bg-teal-500/10 border-teal-200 dark:border-teal-500/20' },
+};
+
+const STATUS_TINT: Record<string, string> = {
+  Approved: 'text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/10 border-emerald-200 dark:border-emerald-500/20',
+  PendingReview: 'text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-500/10 border-amber-200 dark:border-amber-500/20',
+  Rejected: 'text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-500/10 border-rose-200 dark:border-rose-500/20',
+};
+
+const badgeClassFor = (d: string) => `badge-${(d || 'medium').toLowerCase()}`;
+
+const itemSize = (item: GeneratedContentItem): string => {
+  const p = item.payload || {};
+  if (item.content_type === 'flashcard') return `${(p.cards || []).length} cards`;
+  if (item.content_type === 'study_guide') return `${(p.key_points || []).length} key points`;
+  return `${(p.questions || []).length} questions`;
+};
+
+/**
+ * The library: where generated material is stored and used, as distinct from the
+ * page where it is created.
+ *
+ * Splitting the two matters because they are different jobs done at different times.
+ * Generating is a short, focused act with a composer and a lot of options; using the
+ * result is browsing, filtering, reviewing, exporting and handing out. Cramming both
+ * into one screen meant the composer pushed the library below the fold and the
+ * library's filters cluttered the composer.
+ */
+export const ContentLibrary: React.FC<ContentLibraryProps> = ({ courseId, canManage }) => {
+  const [items, setItems] = useState<GeneratedContentItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [editing, setEditing] = useState<GeneratedContentItem | null>(null);
+
+  const [search, setSearch] = useState('');
+  const [fType, setFType] = useState('');
+  const [fDiff, setFDiff] = useState('');
+  const [fStatus, setFStatus] = useState('');
+  const [fConcept, setFConcept] = useState('');
+  const [view, setView] = useState<'grid' | 'list'>('grid');
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      setItems(await contentGenerationService.list(courseId));
+    } catch (err) {
+      setError(apiErrorMessage(err, 'Could not load the content library.'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [courseId]);
+
+  const concepts = useMemo(
+    () => Array.from(new Set(items.map((i) => i.concept_name).filter(Boolean))).sort(),
+    [items]
+  );
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return items.filter((i) =>
+      (!fType || i.content_type === fType) &&
+      (!fDiff || (i.difficulty || 'Medium') === fDiff) &&
+      (!fStatus || i.status === fStatus) &&
+      (!fConcept || i.concept_name === fConcept) &&
+      (!q || i.title.toLowerCase().includes(q) || (i.concept_name || '').toLowerCase().includes(q))
+    );
+  }, [items, search, fType, fDiff, fStatus, fConcept]);
+
+  const counts = useMemo(() => ({
+    total: items.length,
+    approved: items.filter((i) => i.status === 'Approved').length,
+    pending: items.filter((i) => i.status === 'PendingReview').length,
+    ungrounded: items.filter((i) => !i.grounded_excerpts).length,
+  }), [items]);
+
+  const review = async (item: GeneratedContentItem, approve: boolean) => {
+    try {
+      const updated = await contentGenerationService.review(courseId, item.id, approve);
+      setItems((prev) => prev.map((i) => (i.id === item.id ? updated : i)));
+    } catch (err) {
+      setError(apiErrorMessage(err, 'Could not save your review decision.'));
+    }
+  };
+
+  const remove = async (item: GeneratedContentItem) => {
+    if (!window.confirm(`Delete "${item.title}"? This cannot be undone.`)) return;
+    try {
+      await contentGenerationService.remove(courseId, item.id);
+      setItems((prev) => prev.filter((i) => i.id !== item.id));
+    } catch (err) {
+      setError(apiErrorMessage(err, 'Could not delete this item.'));
+    }
+  };
+
+  const openInNewTab = (item: GeneratedContentItem) =>
+    window.open(`/content/${courseId}/${item.id}`, '_blank', 'noopener,noreferrer');
+
+  if (editing) {
+    return (
+      <ContentEditor
+        courseId={courseId}
+        item={editing}
+        onCancel={() => setEditing(null)}
+        onSaved={(updated) => {
+          setItems((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
+          setEditing(null);
+        }}
+      />
+    );
+  }
+
+  return (
+    <div className="space-y-5">
+      {error && (
+        <div className="bg-red-50 border border-red-200 text-red-600 dark:bg-red-500/10 dark:border-red-500/30 dark:text-red-400 rounded-xl p-4 flex items-start gap-3 text-sm animate-fade-in">
+          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />{error}
+        </div>
+      )}
+
+      {/* ── summary tiles ── */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {[
+          { label: 'Total items', value: counts.total, icon: Library, tint: 'text-primary' },
+          { label: 'Live for students', value: counts.approved, icon: Check, tint: 'text-emerald-500' },
+          { label: 'Awaiting review', value: counts.pending, icon: Sparkles, tint: 'text-amber-500' },
+          { label: 'Ungrounded', value: counts.ungrounded, icon: ShieldAlert, tint: 'text-rose-500' },
+        ].map((s) => (
+          <div key={s.label} className="bg-surface border border-border rounded-2xl p-4 animate-fade-up">
+            <s.icon className={`w-4 h-4 mb-2 ${s.tint}`} />
+            <p className="text-xl font-bold text-text-primary">{s.value}</p>
+            <p className="text-[10px] text-text-muted uppercase tracking-wide">{s.label}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* ── filter bar ── */}
+      <div className="glass-panel rounded-2xl p-4 border border-border shadow-card">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative flex-1 min-w-[200px]">
+            <Search className="w-3.5 h-3.5 text-text-muted absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              className="input-light w-full text-xs pl-9"
+              placeholder="Search by title or concept..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+          <Filter className="w-3.5 h-3.5 text-text-muted" />
+          <select className="input-light text-xs py-1.5" value={fType} onChange={(e) => setFType(e.target.value)}>
+            <option value="">All types</option>
+            {Object.entries(TYPE_META).map(([k, m]) => <option key={k} value={k}>{m.label}</option>)}
+          </select>
+          <select className="input-light text-xs py-1.5" value={fDiff} onChange={(e) => setFDiff(e.target.value)}>
+            <option value="">All levels</option>
+            {['Easy', 'Medium', 'Hard'].map((d) => <option key={d} value={d}>{d}</option>)}
+          </select>
+          {canManage && (
+            <select className="input-light text-xs py-1.5" value={fStatus} onChange={(e) => setFStatus(e.target.value)}>
+              <option value="">Any status</option>
+              <option value="Approved">Approved</option>
+              <option value="PendingReview">Pending review</option>
+              <option value="Rejected">Rejected</option>
+            </select>
+          )}
+          {concepts.length > 1 && (
+            <select className="input-light text-xs py-1.5 max-w-[180px]" value={fConcept} onChange={(e) => setFConcept(e.target.value)}>
+              <option value="">All concepts</option>
+              {concepts.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          )}
+          <div className="flex rounded-lg border border-border overflow-hidden">
+            {([{ key: 'grid', icon: LayoutGrid }, { key: 'list', icon: List }] as const).map(({ key, icon: I }) => (
+              <button
+                key={key}
+                onClick={() => setView(key)}
+                className={`p-1.5 transition-all ${view === key ? 'bg-primary-muted text-primary' : 'bg-surface text-text-muted hover:text-text-primary'}`}
+                aria-label={`${key} view`}
+              >
+                <I className="w-3.5 h-3.5" />
+              </button>
+            ))}
+          </div>
+          <button onClick={load} className="btn-ghost text-xs px-2.5 py-1.5" title="Refresh">
+            <RefreshCw className="w-3.5 h-3.5" />
+          </button>
+        </div>
+        {(search || fType || fDiff || fStatus || fConcept) && (
+          <p className="text-[11px] text-text-muted mt-2">
+            Showing {filtered.length} of {items.length} items.
+            <button
+              onClick={() => { setSearch(''); setFType(''); setFDiff(''); setFStatus(''); setFConcept(''); }}
+              className="ml-2 text-primary font-semibold hover:underline"
+            >
+              Clear filters
+            </button>
+          </p>
+        )}
+      </div>
