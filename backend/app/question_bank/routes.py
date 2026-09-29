@@ -12,8 +12,9 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.auth.routes import get_current_teacher
+from app.core import quota
 from app.database.connection import get_db
-from app.database.models import Course, GeneratedContent, QuestionBankItem, User
+from app.database.models import CLO, Course, GeneratedContent, QuestionBankItem, User
 from app.knowledge_graph.services import neo4j_service
 from app.question_bank import generation as qb_generation
 from app.question_bank import service as qb
@@ -38,11 +39,15 @@ def _get_owned_course(db: Session, course_id: int, teacher: User) -> Course:
     return course
 
 
-def _to_out(item: QuestionBankItem) -> QuestionOut:
+def _to_out(item: QuestionBankItem, db: Session) -> QuestionOut:
     try:
         payload = json.loads(item.payload_json) or {}
     except (json.JSONDecodeError, TypeError):
         payload = {}
+    clo_code = None
+    if item.clo_id:
+        clo = db.query(CLO).filter(CLO.id == item.clo_id).first()
+        clo_code = clo.code if clo else None
     return QuestionOut(
         id=item.id, course_id=item.course_id, question_type=item.question_type,
         question_type_label=qb.TYPE_LABELS.get(item.question_type, item.question_type),
@@ -50,6 +55,7 @@ def _to_out(item: QuestionBankItem) -> QuestionOut:
         difficulty=item.difficulty or "Medium", points=item.points or 1,
         time_limit_seconds=item.time_limit_seconds,
         concept_node_id=item.concept_node_id, concept_name=item.concept_name,
+        clo_id=item.clo_id, clo_code=clo_code,
         source=item.source, status=item.status, created_at=item.created_at,
     )
 
@@ -89,7 +95,7 @@ def list_questions(
         q = q.filter(QuestionBankItem.concept_node_id == concept_node_id)
     if search:
         q = q.filter(QuestionBankItem.prompt.ilike(f"%{search.strip()}%"))
-    return [_to_out(i) for i in q.order_by(QuestionBankItem.created_at.desc()).all()]
+    return [_to_out(i, db) for i in q.order_by(QuestionBankItem.created_at.desc()).all()]
 
 
 @router.post("/{course_id}/question-bank", response_model=QuestionOut, status_code=status.HTTP_201_CREATED)
@@ -105,9 +111,17 @@ def create_question(
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
+    clo_id = None
+    if payload.clo_id:
+        clo_row = db.query(CLO).filter(CLO.id == payload.clo_id, CLO.catalog_id == course.catalog_id).first()
+        if not clo_row:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="CLO not found for this course's subject.")
+        clo_id = clo_row.id
+
     item = QuestionBankItem(
         course_id=course_id, catalog_id=course.catalog_id,
         concept_node_id=payload.concept_node_id, concept_name=payload.concept_name,
+        clo_id=clo_id,
         question_type=payload.question_type, prompt=payload.prompt,
         payload_json=json.dumps(clean), explanation=payload.explanation,
         difficulty=payload.difficulty, points=payload.points,
@@ -117,7 +131,7 @@ def create_question(
     db.add(item)
     db.commit()
     db.refresh(item)
-    return _to_out(item)
+    return _to_out(item, db)
 
 
 @router.patch("/{course_id}/question-bank/{question_id}", response_model=QuestionOut)
@@ -128,12 +142,20 @@ def update_question(
     db: Session = Depends(get_db),
     current_teacher: User = Depends(get_current_teacher),
 ):
-    _get_owned_course(db, course_id, current_teacher)
+    course = _get_owned_course(db, course_id, current_teacher)
     item = db.query(QuestionBankItem).filter(
         QuestionBankItem.id == question_id, QuestionBankItem.course_id == course_id
     ).first()
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Question not found")
+
+    if payload.clear_clo:
+        item.clo_id = None
+    elif payload.clo_id is not None:
+        clo_row = db.query(CLO).filter(CLO.id == payload.clo_id, CLO.catalog_id == course.catalog_id).first()
+        if not clo_row:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="CLO not found for this course's subject.")
+        item.clo_id = clo_row.id
 
     if payload.payload is not None:
         try:
@@ -157,7 +179,7 @@ def update_question(
 
     db.commit()
     db.refresh(item)
-    return _to_out(item)
+    return _to_out(item, db)
 
 
 @router.delete("/{course_id}/question-bank/{question_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -273,6 +295,8 @@ def generate_questions(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="This course has no catalog entry / concept graph yet.",
         )
+    quota.check_and_increment(db, current_teacher.id)
+    db.commit()
 
     graph = neo4j_service.get_catalog_graph(course.catalog_id)
     node = next((n for n in graph.get("nodes", []) if n.get("id") == payload.concept_node_id), None)
@@ -314,4 +338,4 @@ def generate_questions(
     db.commit()
     for item in created:
         db.refresh(item)
-    return [_to_out(i) for i in created]
+    return [_to_out(i, db) for i in created]

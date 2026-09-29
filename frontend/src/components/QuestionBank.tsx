@@ -3,8 +3,8 @@ import {
   Library, Sparkles, RefreshCw, Trash2, Search, Filter, Download, AlertTriangle,
   CheckCircle2, ListChecks, ToggleLeft, Type, Shuffle, ChevronDown, ChevronUp,
 } from 'lucide-react';
-import { questionBankService, contentGenerationService } from '../services/api';
-import type { BankQuestion, QuestionType, GeneratableConcept, GeneratedContentItem } from '../services/api';
+import { questionBankService, contentGenerationService, courseService, outcomesService } from '../services/api';
+import type { BankQuestion, QuestionType, GeneratableConcept, GeneratedContentItem, CLO } from '../services/api';
 import { EmptyStateIllustration } from './illustrations';
 import { apiErrorMessage } from '../lib/apiError';
 
@@ -60,6 +60,13 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({
   const [generating, setGenerating] = useState(false);
   const [importing, setImporting] = useState(false);
 
+  // CLO tagging - which Course Learning Outcome each question assesses, so an
+  // exam built from these questions feeds CLO/PLO attainment when graded (see
+  // app/exams/routes.py submit_exam_attempt). Loaded from the course's own
+  // catalog subject, same as ContentGeneration's "Link to CLO" dropdown.
+  const [clos, setClos] = useState<CLO[]>([]);
+  const [savingCloFor, setSavingCloFor] = useState<number | null>(null);
+
   const load = async () => {
     setLoading(true);
     try {
@@ -80,8 +87,25 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({
     load();
     contentGenerationService.listConcepts(courseId).then(setConcepts).catch(() => {});
     contentGenerationService.list(courseId).then(setSets).catch(() => {});
+    courseService.getDetails(courseId)
+      .then((c: any) => c?.catalog_id && outcomesService.listCLOs(c.catalog_id))
+      .then((c) => setClos(c || []))
+      .catch(() => setClos([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [courseId]);
+
+  const handleSetClo = async (q: BankQuestion, cloId: string) => {
+    setSavingCloFor(q.id);
+    try {
+      const updated = await questionBankService.update(courseId, q.id,
+        cloId ? { clo_id: Number(cloId) } : { clear_clo: true });
+      setQuestions((prev) => prev.map((x) => (x.id === q.id ? updated : x)));
+    } catch (err) {
+      setError(apiErrorMessage(err, "Could not update this question's CLO link."));
+    } finally {
+      setSavingCloFor(null);
+    }
+  };
 
   const filtered = useMemo(() => {
     const s = fSearch.trim().toLowerCase();
@@ -290,6 +314,11 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({
                         <span className={badgeClassFor(q.difficulty)}>{q.difficulty}</span>
                         <span className="text-[11px] text-text-muted">{q.points} pt{q.points === 1 ? '' : 's'}</span>
                         {q.concept_name && <span className="text-[11px] text-text-muted truncate">· {q.concept_name}</span>}
+                        {q.clo_code && (
+                          <span className="text-[11px] font-semibold rounded-full px-2 py-0.5 border text-primary bg-primary-muted border-primary/20">
+                            {q.clo_code}
+                          </span>
+                        )}
                       </div>
                     </button>
                     <div className="flex items-center gap-1 shrink-0">
@@ -307,6 +336,24 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({
                     <div className="mt-3 ml-5 pt-3 border-t border-border">
                       <AnswerKey question={q} />
                       {q.explanation && <p className="text-[12px] text-text-muted mt-2 italic">{q.explanation}</p>}
+                      {!selectable && clos.length > 0 && (
+                        <div className="mt-3">
+                          <label className="block text-[11px] font-semibold text-text-secondary mb-1">
+                            Link to CLO <span className="text-text-muted font-normal">(optional)</span>
+                          </label>
+                          <select
+                            className="input-light text-xs py-1"
+                            value={q.clo_id ?? ''}
+                            disabled={savingCloFor === q.id}
+                            onChange={(e) => handleSetClo(q, e.target.value)}
+                          >
+                            <option value="">No CLO link</option>
+                            {clos.map((c) => (
+                              <option key={c.id} value={c.id}>{c.code} — {c.title}</option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

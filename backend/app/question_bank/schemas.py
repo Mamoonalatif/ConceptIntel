@@ -16,6 +16,7 @@ class QuestionIn(BaseModel):
     time_limit_seconds: Optional[int] = None
     concept_node_id: Optional[str] = None
     concept_name: Optional[str] = None
+    clo_id: Optional[int] = None
 
     @field_validator("question_type")
     @classmethod
@@ -64,6 +65,8 @@ class QuestionUpdate(BaseModel):
     points: Optional[int] = None
     time_limit_seconds: Optional[int] = None
     status: Optional[str] = None
+    clo_id: Optional[int] = None
+    clear_clo: bool = False
 
 
 class QuestionOut(BaseModel):
@@ -79,6 +82,8 @@ class QuestionOut(BaseModel):
     time_limit_seconds: Optional[int] = None
     concept_node_id: Optional[str] = None
     concept_name: Optional[str] = None
+    clo_id: Optional[int] = None
+    clo_code: Optional[str] = None
     source: str
     status: str
     created_at: datetime

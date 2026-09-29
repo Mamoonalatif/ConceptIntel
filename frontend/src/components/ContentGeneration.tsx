@@ -5,7 +5,7 @@ import {
   ShieldCheck, ShieldAlert, History, FileText, Upload, ClipboardCheck,
 } from 'lucide-react';
 import { contentGenerationService, outcomesService } from '../services/api';
-import type { GeneratedContentItem, GeneratableConcept, GenerationJob, QuestionStyle, CLO } from '../services/api';
+import type { GeneratedContentItem, GeneratableConcept, GenerationJob, QuestionStyle, CLO, PLO } from '../services/api';
 import { EmptyStateIllustration } from './illustrations';
 import { GenerationProgressModal } from './content/GenerationProgressModal';
 // The renderers live in one place: this page used to carry its own thinner copies of
@@ -95,11 +95,21 @@ export const ContentGeneration: React.FC<ContentGenerationProps> = ({
   // from the course catalog's CLO list, empty string means "no link".
   const [clos, setClos] = useState<CLO[]>([]);
   const [selectedCloId, setSelectedCloId] = useState('');
+  // Every PLO, just to resolve a selected CLO's plo_ids into codes for the badge
+  // row below the dropdown - the CLO -> PLO link itself lives on the CLO row.
+  const [plos, setPlos] = useState<PLO[]>([]);
 
   useEffect(() => {
     if (!catalogId) { setClos([]); return; }
     outcomesService.listCLOs(catalogId).then(setClos).catch(() => setClos([]));
   }, [catalogId]);
+
+  useEffect(() => {
+    outcomesService.listPLOs().then(setPlos).catch(() => setPlos([]));
+  }, []);
+
+  const selectedClo = clos.find((c) => String(c.id) === selectedCloId);
+  const selectedCloPlos = selectedClo ? plos.filter((p) => selectedClo.plo_ids.includes(p.id)) : [];
   // A one-off document to generate from. Held in memory only - it is never uploaded
   // to the course, so it never reaches the RAG index or concept extraction.
   const [source, setSource] = useState<{ filename: string; characters: number; truncated: boolean; text: string } | null>(null);
@@ -646,6 +656,18 @@ export const ContentGeneration: React.FC<ContentGenerationProps> = ({
               <p className="text-[12px] text-text-muted mt-1.5">
                 Tags this item as supporting one Course Learning Outcome, for CLO/PLO attainment reporting.
               </p>
+              {selectedClo && (
+                <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                  <span className="text-[11px] text-text-muted">Rolls up to:</span>
+                  {selectedCloPlos.length > 0 ? selectedCloPlos.map((p) => (
+                    <span key={p.id} className="text-[11px] font-semibold rounded-full px-2 py-0.5 border text-secondary bg-secondary-muted border-secondary/20">
+                      {p.code}
+                    </span>
+                  )) : (
+                    <span className="text-[11px] text-text-muted italic">no PLO linked yet</span>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
@@ -937,6 +959,15 @@ export const ContentGeneration: React.FC<ContentGenerationProps> = ({
                               {item.clo_code}
                             </span>
                           )}
+                          {item.clo_id && clos.find((c) => c.id === item.clo_id)?.plo_ids.map((ploId) => {
+                            const p = plos.find((x) => x.id === ploId);
+                            return p ? (
+                              <span key={ploId} className="text-[11px] font-semibold rounded-full px-2 py-0.5 border text-secondary bg-secondary-muted border-secondary/20"
+                                title="Program Learning Outcome this CLO rolls up to">
+                                {p.code}
+                              </span>
+                            ) : null;
+                          })}
                           {isTeacher && (
                             <span
                               className={`text-[11px] font-semibold rounded-full px-2 py-0.5 border flex items-center gap-1 ${

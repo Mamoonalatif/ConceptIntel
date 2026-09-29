@@ -21,7 +21,7 @@ import ReactFlow, {
 import { useAuth } from '../context/AuthContext';
 import { graphService, courseService, contentGenerationService, outcomesService, clearApiCache } from '../services/api';
 import { FoxSpinner } from '../components/FoxSpinner';
-import type { CLO } from '../services/api';
+import type { CLO, PLO } from '../services/api';
 import { apiErrorMessage } from '../lib/apiError';
 import { layoutPrerequisiteGraph } from '../lib/graphLayout';
 import {
@@ -113,10 +113,22 @@ const KnowledgeGraphInner: React.FC = () => {
   // backend). Loaded once the catalog id is known.
   const [catalogId, setCatalogId] = useState<number | null>(null);
   const [clos, setClos] = useState<CLO[]>([]);
+  // Every PLO, to resolve a CLO's plo_ids into codes wherever CLOs are shown -
+  // the Concept -> CLO -> PLO chain's next link (see app/outcomes/* backend).
+  const [plos, setPlos] = useState<PLO[]>([]);
   const [conceptCloMap, setConceptCloMap] = useState<Record<string, number[]>>({});
   const [savingConceptClos, setSavingConceptClos] = useState(false);
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+  // Outcomes view: swaps the canvas from the plain Concept/PREREQUISITE graph to
+  // the Concept -> CLO -> PLO -> GA chain (app/outcomes/services.py
+  // get_catalog_outcomes_graph). Concepts are collapsed into a count per CLO here
+  // rather than drawn individually - the point of this view is the CLO/PLO/GA
+  // structure, not re-showing concepts already visible in the default view.
+  const [graphView, setGraphView] = useState<'concepts' | 'outcomes'>('concepts');
+  const [outcomeNodes, setOutcomeNodes] = useState<Node[]>([]);
+  const [outcomeEdges, setOutcomeEdges] = useState<Edge[]>([]);
+  const [loadingOutcomes, setLoadingOutcomes] = useState(false);
   const [concepts, setConcepts] = useState<Concept[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -294,6 +306,65 @@ const KnowledgeGraphInner: React.FC = () => {
   }, [user, courseId]);
 
   useEffect(() => { if (idNum) loadGraphData(); }, [courseId]);
+  useEffect(() => { outcomesService.listPLOs().then(setPlos).catch(() => setPlos([])); }, []);
+
+  // ── Load the Outcomes view (Concept -> CLO -> PLO -> GA) ──
+  // Three ranked columns, left to right: CLO, PLO, GA. A concept edge into a CLO
+  // is summarised as a count on the CLO node rather than drawn, since every
+  // concept already has its own node in the default view.
+  useEffect(() => {
+    if (graphView !== 'outcomes' || !catalogId) return;
+    let cancelled = false;
+    setLoadingOutcomes(true);
+    outcomesService.getOutcomesGraph(catalogId).then((data) => {
+      if (cancelled) return;
+      const conceptCounts: Record<string, number> = {};
+      data.concept_clo_edges.forEach((e) => {
+        conceptCounts[e.clo_id] = (conceptCounts[e.clo_id] || 0) + 1;
+      });
+      const COL_GAP = 260, ROW_GAP = 130;
+      const colX = { clo: 0, plo: COL_GAP, ga: COL_GAP * 2 };
+      const mkNode = (id: string, idx: number, col: 'clo' | 'plo' | 'ga', label: string, sub?: string): Node => ({
+        id, position: { x: colX[col], y: idx * ROW_GAP },
+        sourcePosition: Position.Right, targetPosition: Position.Left,
+        data: {
+          label: (
+            <span className="text-[11px] font-bold leading-tight text-center px-1">
+              {label}{sub ? <span className="block text-[9px] font-normal opacity-80">{sub}</span> : null}
+            </span>
+          ),
+        },
+        className: `flex flex-col items-center justify-center w-40 h-16 rounded-xl border-2 shadow-md ${
+          col === 'clo' ? 'bg-primary-muted border-primary/40 text-primary' :
+          col === 'plo' ? 'bg-secondary-muted border-secondary/40 text-secondary' :
+          'bg-slate-200 border-slate-400 text-slate-800'
+        }`,
+      });
+
+      const nodesOut: Node[] = [
+        ...data.clos.map((c, i) => mkNode(`clo-${c.id}`, i, 'clo', c.code, `${conceptCounts[c.id] || 0} concept(s)`)),
+        ...data.plos.map((p, i) => mkNode(`plo-${p.id}`, i, 'plo', p.code, p.title)),
+        ...data.gas.map((g, i) => mkNode(`ga-${g.id}`, i, 'ga', g.code, g.title)),
+      ];
+      const edgeStyle = { strokeWidth: 1.5, stroke: '#94a3b8', strokeOpacity: 0.75 };
+      const marker = { type: MarkerType.ArrowClosed, color: '#94a3b8', width: 14, height: 14 };
+      const edgesOut: Edge[] = [
+        ...data.clo_plo_edges.map((e) => ({
+          id: `cp-${e.clo_id}-${e.plo_id}`, source: `clo-${e.clo_id}`, target: `plo-${e.plo_id}`,
+          markerEnd: marker, style: edgeStyle,
+        })),
+        ...data.plo_ga_edges.map((e) => ({
+          id: `pg-${e.plo_id}-${e.ga_id}`, source: `plo-${e.plo_id}`, target: `ga-${e.ga_id}`,
+          markerEnd: marker, style: edgeStyle,
+        })),
+      ];
+      setOutcomeNodes(nodesOut);
+      setOutcomeEdges(edgesOut);
+    }).catch(() => {
+      if (!cancelled) { setOutcomeNodes([]); setOutcomeEdges([]); }
+    }).finally(() => { if (!cancelled) setLoadingOutcomes(false); });
+    return () => { cancelled = true; };
+  }, [graphView, catalogId]);
 
   // ── Auto-clear alerts ──
   useEffect(() => {
@@ -740,6 +811,24 @@ const KnowledgeGraphInner: React.FC = () => {
 
         {/* Action Toolbar */}
         <div className="flex items-center gap-2">
+          {/* Concepts / Outcomes view toggle - the Concept graph vs the
+              Concept -> CLO -> PLO -> GA outcome chain (app/outcomes/*). */}
+          {isTeacher && (
+            <div className="flex items-center rounded-lg border border-border overflow-hidden text-xs font-semibold">
+              <button
+                onClick={() => setGraphView('concepts')}
+                className={`px-3 py-1.5 transition-all ${graphView === 'concepts' ? 'bg-primary-muted text-primary' : 'text-text-secondary hover:text-primary'}`}
+              >
+                Concepts
+              </button>
+              <button
+                onClick={() => setGraphView('outcomes')}
+                className={`px-3 py-1.5 transition-all border-l border-border ${graphView === 'outcomes' ? 'bg-primary-muted text-primary' : 'text-text-secondary hover:text-primary'}`}
+              >
+                Outcomes
+              </button>
+            </div>
+          )}
           {/* Analytics Toggle */}
           <button
             id="analytics-toggle"
@@ -914,6 +1003,32 @@ const KnowledgeGraphInner: React.FC = () => {
             <div className="h-full flex flex-col items-center justify-center gap-4">
               <FoxSpinner className="w-14 h-14" label="Loading knowledge structures..." />
             </div>
+          ) : isTeacher && graphView === 'outcomes' ? (
+            loadingOutcomes ? (
+              <div className="h-full flex flex-col items-center justify-center gap-4">
+                <FoxSpinner className="w-14 h-14" label="Loading outcomes chain..." />
+              </div>
+            ) : outcomeNodes.length === 0 ? (
+              <div className="h-full flex flex-col items-center justify-center gap-2 text-center max-w-sm mx-auto">
+                <p className="text-sm font-bold text-text-primary">No outcomes chain yet</p>
+                <p className="text-xs text-text-secondary leading-relaxed">
+                  Define CLOs for this subject (Concepts view → a concept's sidebar → auto-extract) and link them to PLOs to see this chain.
+                </p>
+              </div>
+            ) : (
+              <ReactFlow
+                nodes={outcomeNodes}
+                edges={outcomeEdges}
+                fitView
+                fitViewOptions={{ padding: 0.18 }}
+                minZoom={0.08}
+                maxZoom={2.5}
+                nodesDraggable={false}
+              >
+                <Background color="#dde3f0" gap={20} size={1} />
+                <Controls />
+              </ReactFlow>
+            )
           ) : isTeacher ? (
             <ReactFlow
               nodes={displayNodes}
@@ -1301,7 +1416,21 @@ const KnowledgeGraphInner: React.FC = () => {
                                 }
                               }}
                             />
-                            <span><span className="font-bold">{clo.code}</span> — {clo.title}</span>
+                            <span>
+                              <span className="font-bold">{clo.code}</span> — {clo.title}
+                              {clo.plo_ids.length > 0 && (
+                                <span className="ml-1.5 inline-flex flex-wrap gap-1">
+                                  {clo.plo_ids.map((ploId) => {
+                                    const p = plos.find((x) => x.id === ploId);
+                                    return p ? (
+                                      <span key={ploId} className="text-[10px] font-semibold rounded-full px-1.5 py-0.5 border text-secondary bg-secondary-muted border-secondary/20">
+                                        {p.code}
+                                      </span>
+                                    ) : null;
+                                  })}
+                                </span>
+                              )}
+                            </span>
                           </label>
                         );
                       })}
@@ -1312,11 +1441,22 @@ const KnowledgeGraphInner: React.FC = () => {
                     <div className="flex flex-wrap gap-1.5">
                       {(conceptCloMap[selectedNode.id] || []).map((cloId) => {
                         const clo = clos.find((c) => c.id === cloId);
-                        return clo ? (
-                          <span key={cloId} className="text-[11px] font-semibold rounded-full px-2 py-0.5 border text-primary bg-primary-muted border-primary/20">
-                            {clo.code}
-                          </span>
-                        ) : null;
+                        if (!clo) return null;
+                        return (
+                          <React.Fragment key={cloId}>
+                            <span className="text-[11px] font-semibold rounded-full px-2 py-0.5 border text-primary bg-primary-muted border-primary/20">
+                              {clo.code}
+                            </span>
+                            {clo.plo_ids.map((ploId) => {
+                              const p = plos.find((x) => x.id === ploId);
+                              return p ? (
+                                <span key={ploId} className="text-[11px] font-semibold rounded-full px-2 py-0.5 border text-secondary bg-secondary-muted border-secondary/20">
+                                  {p.code}
+                                </span>
+                              ) : null;
+                            })}
+                          </React.Fragment>
+                        );
                       })}
                     </div>
                   )}

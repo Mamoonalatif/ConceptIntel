@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from app.auth.routes import get_current_teacher, get_current_user
 from app.courses.access import assert_course_access
 from app.database.connection import get_db
-from app.database.models import Course, Exam, ExamAttempt, QuestionBankItem, User
+from app.database.models import CLOAttainment, CLOAttainmentEvidence, Course, Exam, ExamAttempt, QuestionBankItem, User
 from app.exams import service as exam_service
 from app.exams.schemas import (
     ExamAttemptOut, ExamAttemptSummary, ExamIn, ExamOut, ExamResultOut,
@@ -24,6 +24,7 @@ from app.exams.schemas import (
 )
 from app.gamification import service as gamification_service
 from app.mastery import service as mastery_service
+from app.outcomes import services as outcomes_service
 
 router = APIRouter(prefix="/courses", tags=["Exams"])
 logger = logging.getLogger("conceptintel.exams")
@@ -327,19 +328,47 @@ def submit_exam_attempt(
     result = exam_service.grade_attempt(db, exam, attempt, payload.responses or {})
 
     try:
-        concept = next(
-            (q.concept_node_id for q in exam_service.load_questions(
-                db, exam_service.exam_question_ids(exam)) if q.concept_node_id),
-            None,
-        )
-        if concept and course.catalog_id:
-            mastery_service.record_evidence(
-                db, current_user.id, course_id, course.catalog_id,
-                concept, exam.title, result["score"],
-                source_type="quiz", source_id=exam.id,
-            )
+        if course.catalog_id:
+            for c in result.get("concept_scores", []):
+                mastery_service.record_evidence(
+                    db, current_user.id, course_id, course.catalog_id,
+                    c["concept_node_id"], exam.title, c["score"],
+                    source_type="quiz", source_id=exam.id,
+                )
     except Exception as e:
         logger.warning("Could not record mastery for exam %s: %s", exam.id, e)
+
+    try:
+        touched_clo_ids: set = set()
+        for c in result.get("clo_scores", []):
+            clo_id = c["clo_id"]
+            touched_clo_ids.add(clo_id)
+            db.add(CLOAttainmentEvidence(
+                student_id=current_user.id, course_id=course_id, clo_id=clo_id,
+                source_type="quiz", source_id=exam.id, score=c["score"],
+            ))
+            attainment = db.query(CLOAttainment).filter(
+                CLOAttainment.student_id == current_user.id,
+                CLOAttainment.course_id == course_id,
+                CLOAttainment.clo_id == clo_id,
+            ).first()
+            if attainment is None:
+                db.add(CLOAttainment(
+                    student_id=current_user.id, course_id=course_id, clo_id=clo_id,
+                    attainment_score=c["score"], evidence_count=1,
+                ))
+            else:
+                attainment.attainment_score = (
+                    (attainment.attainment_score * attainment.evidence_count) + c["score"]
+                ) / (attainment.evidence_count + 1)
+                attainment.evidence_count += 1
+        if touched_clo_ids:
+            db.flush()
+            for clo_id in touched_clo_ids:
+                outcomes_service.recompute_plo_attainment(db, current_user.id, clo_id)
+    except Exception as e:
+        logger.warning("Could not record CLO/PLO attainment for exam %s: %s", exam.id, e)
+
     gamification_service.award_points(
         db, current_user.id, course_id, round(result["score"] / 10),
         reason=f"Exam: {exam.title}", source_type="quiz", source_id=exam.id,

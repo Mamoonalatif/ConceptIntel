@@ -6,6 +6,7 @@ from pathlib import Path
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
+from app.core import quota
 from app.database.connection import get_db
 from app.database.models import (
     ContentGenerationJob, Course, GeneratedContent, QuizAttempt, User, CLO, Assignment, Rubric, RubricCriterion,
@@ -146,6 +147,8 @@ def generate_content(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You are not the instructor of this course.")
     if not course.catalog_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This course has no catalog entry / concept graph yet.")
+    quota.check_and_increment(db, current_teacher.id)
+    db.commit()  # counted the instant it clears the cap, regardless of what happens below
 
     target = _resolve_target_concept(course.catalog_id, payload)
     node_id = target["node_id"]
@@ -288,6 +291,8 @@ def generate_content_async(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You are not the instructor of this course.")
     if not course.catalog_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This course has no catalog entry / concept graph yet.")
+    quota.check_and_increment(db, current_teacher.id)
+    db.commit()
 
     # Raises 400/404 on an impossible request before anything is queued.
     target = _resolve_target_concept(course.catalog_id, payload)

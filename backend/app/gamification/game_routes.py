@@ -56,6 +56,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.core import quota
 from app.database.connection import get_db
 from app.database.models import Course, GeneratedGame, GamePlay, User
 from app.gamification import game_service
@@ -184,6 +185,8 @@ def generate_game(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="This course has no catalog entry / concept graph yet.",
         )
+    quota.check_and_increment(db, current_user.id)
+    db.commit()
 
     node = _lookup_concept_node(course.catalog_id, payload.concept_node_id)
     concept_name = node.get("name") or "this concept"

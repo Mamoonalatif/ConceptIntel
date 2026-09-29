@@ -180,6 +180,8 @@ def grade_attempt(
     points_earned = 0.0
     points_possible = 0.0
     per_question: List[Dict[str, Any]] = []
+    concept_points: Dict[str, List[float]] = {}
+    clo_points: Dict[int, List[float]] = {}
 
     for s in served:
         item = by_id.get(s["id"])
@@ -195,6 +197,15 @@ def grade_attempt(
         earned = round(weight * fraction, 4)
         points_earned += earned
 
+        if item.concept_node_id:
+            bucket = concept_points.setdefault(item.concept_node_id, [0.0, 0.0])
+            bucket[0] += earned
+            bucket[1] += weight
+        if item.clo_id:
+            clo_bucket = clo_points.setdefault(item.clo_id, [0.0, 0.0])
+            clo_bucket[0] += earned
+            clo_bucket[1] += weight
+
         entry = {
             "id": item.id,
             "prompt": item.prompt,
@@ -208,6 +219,17 @@ def grade_attempt(
             entry["explanation"] = item.explanation or ""
             entry["answer_key"] = _readable_answer(item.question_type, payload)
         per_question.append(entry)
+
+    concept_scores = [
+        {"concept_node_id": node_id, "score": round((earned_pts / possible_pts) * 100, 2)}
+        for node_id, (earned_pts, possible_pts) in concept_points.items()
+        if possible_pts
+    ]
+    clo_scores = [
+        {"clo_id": clo_id, "score": round((earned_pts / possible_pts) * 100, 2)}
+        for clo_id, (earned_pts, possible_pts) in clo_points.items()
+        if possible_pts
+    ]
 
     score = round((points_earned / points_possible) * 100, 2) if points_possible else 0.0
     attempt.responses_json = json.dumps(responses)
@@ -224,6 +246,8 @@ def grade_attempt(
         "passed": bool(attempt.passed),
         "pass_mark": float(exam.pass_mark or 0),
         "per_question": per_question if exam.show_answers_after else [],
+        "concept_scores": concept_scores,
+        "clo_scores": clo_scores,
     }
 
 
