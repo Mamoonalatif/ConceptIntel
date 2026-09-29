@@ -1,6 +1,6 @@
 # Minimal single-node Airflow setup (LocalExecutor - no Celery/Redis needed for
 # Airflow itself; Redis in this project is a separate, app-level cache - see
-# backend/app/core/cache.py). Only automates the OCR -> Kimi -> structure -> diff
+# backend/app/core/cache.py). Only automates the OCR -> AI -> structure -> diff
 # stages; teacher review and coordinator approval happen via ordinary FastAPI
 # endpoints, not inside Airflow.
 #
@@ -31,7 +31,7 @@ x-airflow-common: &airflow-common
   # dependencies into the Airflow image so DAG tasks can import app.* directly.
   # (Airflow's docs call this out as not recommended for production - fine here.)
   # Kept in sync with backend/requirements.txt - the DAG tasks import app.* modules
-  # transitively (pipeline_service -> kimi_service -> rag.chunking, revision_service
+  # transitively (pipeline_service -> generation_service -> rag.chunking, revision_service
   # -> knowledge_graph.services, etc.), so every backend dependency needs to be
   # importable inside the Airflow container too, not just the ones the 3 DAG tasks
   # call directly.

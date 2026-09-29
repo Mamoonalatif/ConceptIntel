@@ -4,8 +4,8 @@ produces a per-concept score plus explainable feedback - the missing half of the
 Assignment Evaluation module (see AssignmentSubmission.grade/feedback in
 app/database/models.py, previously never written to anywhere).
 
-Reuses the same OpenRouter/Kimi client already configured for the content
-processing pipeline (see app/content_processing/kimi_service.py) rather than
+Reuses the same OpenRouter client already configured for the content
+processing pipeline (see app/content_processing/generation_service.py) rather than
 introducing a second AI integration just for grading.
 """
 import json
@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from app.config import settings
-from app.content_processing.kimi_service import _get_client, openrouter_payment_error_message, _reasoning_extra_body
+from app.content_processing.generation_service import _get_client, openrouter_payment_error_message, _reasoning_extra_body
 from app.observability import trace_ai_call
 from app.upload.services import extract_text_from_file
 
@@ -190,21 +190,21 @@ Student's submission (extracted text, first 12000 characters):
     for attempt in range(3):
         try:
             started = time.monotonic()
-            logger.info("Grading request starting (attempt %d/3, model=%s)", attempt + 1, settings.KIMI_MODEL)
+            logger.info("Grading request starting (attempt %d/3, model=%s)", attempt + 1, settings.GENERATION_MODEL)
             response = client.chat.completions.create(
-                model=settings.KIMI_MODEL,
+                model=settings.GENERATION_MODEL,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_content},
                 ],
                 response_format={"type": "json_object"},
                 temperature=0.2,
-                # kimi-k2.5 is a reasoning model - excluding reasoning tokens
-                # avoids it burning the whole max_tokens budget on internal
-                # "thinking" before ever emitting the JSON answer (that failure
+                # A reasoning model spends tokens on internal thinking before its
+                # answer - excluding those avoids it burning the whole max_tokens
+                # budget on that before ever emitting the JSON answer (that failure
                 # mode returns message.content=None, which crashed json.loads
                 # with a cryptic "not NoneType" error on every retry, not just
-                # occasionally - see kimi_service.py for the full explanation).
+                # occasionally - see generation_service.py for the full explanation).
                 max_tokens=3000,
                 timeout=60.0,
                 extra_body=_reasoning_extra_body(),

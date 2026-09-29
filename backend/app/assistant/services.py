@@ -14,12 +14,12 @@ configured for Gemini, and Google's API is geo-blocked from this region, returni
 "400 FAILED_PRECONDITION: User location is not supported for the API use" for every
 call despite a valid key. So provider selection is now a CASCADE: try the configured
 provider, and on either "not configured" or a runtime failure, fall through to the
-Kimi/OpenRouter branch, which shares its credentials with concept extraction,
+OpenRouter branch, which shares its credentials with concept extraction,
 grading and content generation and is therefore configured whenever the rest of the
 platform works. FALLBACK_MESSAGE is the last resort, not the first casualty.
 
 The rejected alternative was retrying the configured provider (the hand-rolled
-3-attempt loop used in `app/content_processing/kimi_service.py`). The failures this
+3-attempt loop used in `app/content_processing/generation_service.py`). The failures this
 guards against - a geo-block, a wrong key, an unset key - are permanent, so retrying
 would just make a user-facing chat turn three times slower before failing anyway.
 Falling sideways to a provider that works is strictly better here. The pipeline's
@@ -69,7 +69,7 @@ fine for warmth, but don't overuse them."""
 HISTORY_WINDOW = 20
 
 
-KIMI_PROVIDER = "kimi"
+OPENROUTER_PROVIDER = "openrouter"
 
 
 def _provider() -> str:
@@ -89,7 +89,7 @@ def _is_configured(provider: Optional[str] = None) -> bool:
     provider = provider or _provider()
     if provider == "gemini":
         return _key_is_usable(settings.GEMINI_API_KEY)
-    if provider == KIMI_PROVIDER:
+    if provider == OPENROUTER_PROVIDER:
         return _key_is_usable(settings.OPENROUTER_API_KEY)
     return _key_is_usable(settings.OPENAI_API_KEY)
 
@@ -138,7 +138,7 @@ def _grounded_content(db: Session, user: User, new_user_content: str) -> str:
 
 
 def _build_messages(history: List[ChatMessage], new_user_content: str) -> List[dict]:
-    """OpenAI-shaped message list, shared by the OpenAI and Kimi branches - both
+    """OpenAI-shaped message list, shared by the OpenAI and OpenRouter branches - both
     speak the same chat-completions schema, so building it twice was only ever an
     opportunity for the two to drift."""
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
@@ -174,8 +174,8 @@ def _generate_openai_reply(history: List[ChatMessage], new_user_content: str) ->
     return _require_content(response)
 
 
-def _generate_kimi_reply(history: List[ChatMessage], new_user_content: str) -> str:
-    """Reuses the same OpenRouter/Kimi credentials already configured for concept
+def _generate_openrouter_reply(history: List[ChatMessage], new_user_content: str) -> str:
+    """Reuses the same OpenRouter credentials already configured for concept
     extraction, assignment grading, and content generation - lets the assistant
     work without provisioning a separate OpenAI or Gemini key at all, and is what
     every other branch falls back to.
@@ -185,14 +185,14 @@ def _generate_kimi_reply(history: List[ChatMessage], new_user_content: str) -> s
     change. Note there is deliberately NO response_format={"type": "json_object"}
     here: the assistant returns prose for a chat bubble, not a parsed structure.
     """
-    from app.content_processing.kimi_service import _get_client, _reasoning_extra_body
+    from app.content_processing.generation_service import _get_client, _reasoning_extra_body
 
     client = _get_client()
     if client is None:
         raise RuntimeError("OPENROUTER_API_KEY is not configured")
 
     response = client.chat.completions.create(
-        model=settings.KIMI_MODEL,
+        model=settings.GENERATION_MODEL,
         messages=_build_messages(history, new_user_content),
         temperature=0.5,
         max_tokens=800,
@@ -240,8 +240,8 @@ def _dispatch(provider: str, history: List[ChatMessage], new_user_content: str) 
     whether that means try the next provider or give up."""
     if provider == "gemini":
         return _generate_gemini_reply(history, new_user_content)
-    if provider == KIMI_PROVIDER:
-        return _generate_kimi_reply(history, new_user_content)
+    if provider == OPENROUTER_PROVIDER:
+        return _generate_openrouter_reply(history, new_user_content)
     return _generate_openai_reply(history, new_user_content)
 
 
@@ -256,7 +256,7 @@ def generate_assistant_reply(db: Session, user: User, history: List[ChatMessage]
     see; the ChatMessage stored in the database keeps the original, un-grounded
     text (assistant/routes.py stores payload.content, not this).
 
-    Tries settings.AI_PROVIDER first, then cascades to the Kimi/OpenRouter branch if
+    Tries settings.AI_PROVIDER first, then cascades to the OpenRouter branch if
     that provider is unconfigured or fails at runtime - see the module docstring for
     why a cascade rather than a retry. Never raises: like concept extraction in
     app/knowledge_graph/services.py, it always returns a string the caller can show
@@ -266,10 +266,10 @@ def generate_assistant_reply(db: Session, user: User, history: List[ChatMessage]
     provider = _provider()
     effective_content = _grounded_content(db, user, new_user_content)
 
-    # Ordered attempt list, deduplicated: when Kimi IS the configured provider
+    # Ordered attempt list, deduplicated: when OpenRouter IS the configured provider
     # there is nothing to fall back to, and retrying it would just be the retry
     # loop this design deliberately rejected.
-    candidates = [provider] + ([KIMI_PROVIDER] if provider != KIMI_PROVIDER else [])
+    candidates = [provider] + ([OPENROUTER_PROVIDER] if provider != OPENROUTER_PROVIDER else [])
 
     last_error: Optional[Exception] = None
     for candidate in candidates:

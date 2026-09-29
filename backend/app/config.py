@@ -70,7 +70,7 @@ class Settings:
     # chatbot (app/assistant/services.py) when AI_PROVIDER=openai. Every other AI
     # call in this project (content processing, concept extraction/knowledge graph
     # building, grading, question/content generation, embeddings, image captioning)
-    # goes through Kimi K2 / OpenRouter instead - see OPENROUTER_API_KEY below.
+    # goes through GENERATION_MODEL / OpenRouter instead - see OPENROUTER_API_KEY below.
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
     OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
@@ -83,22 +83,23 @@ class Settings:
 
     # Structured-generation model (content processing, concept extraction/knowledge
     # graph building, grading, question/content generation, embeddings, image
-    # captioning) - see app/content_processing/kimi_service.py _get_client, the one
+    # captioning) - see app/content_processing/generation_service.py _get_client, the one
     # shared client factory almost every one of those call sites imports from.
     # Historically always Kimi K2 via OpenRouter's OpenAI-compatible endpoint
-    # (OPENROUTER_API_KEY/OPENROUTER_BASE_URL) - KIMI_MODEL is the model id kept for
-    # backward compatibility even though it may now hold a non-Kimi model.
+    # (OPENROUTER_API_KEY/OPENROUTER_BASE_URL) - this setting was named KIMI_MODEL
+    # back then. Renamed to GENERATION_MODEL since it's provider-agnostic: it can
+    # (and currently does, via GEMINI_DIRECT below) hold a Gemini model id instead.
     #
     # GEMINI_DIRECT=true instead calls Google's own OpenAI-compatible endpoint with
     # GEMINI_API_KEY, bypassing OpenRouter entirely - the only way to actually spend
     # Google AI Studio's free-tier quota (e.g. Gemini 2.5 Flash's 1,500 free
     # requests/day) rather than OpenRouter's paid-per-token rate for the same model.
-    # When enabled, KIMI_MODEL must be a bare Gemini model id Google's endpoint
+    # When enabled, GENERATION_MODEL must be a bare Gemini model id Google's endpoint
     # accepts (e.g. "gemini-2.5-flash-lite"), NOT an OpenRouter-style "google/..." id.
     GEMINI_DIRECT: bool = os.getenv("GEMINI_DIRECT", "false").lower() == "true"
     OPENROUTER_API_KEY: str = os.getenv("OPENROUTER_API_KEY", "")
     OPENROUTER_BASE_URL: str = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
-    KIMI_MODEL: str = os.getenv("KIMI_MODEL", "moonshotai/kimi-k2")
+    GENERATION_MODEL: str = os.getenv("GENERATION_MODEL", "moonshotai/kimi-k2")
 
     # Simple per-user, per-calendar-day cap on token-spending "Generate" actions
     # (content generation, question-bank generation, game generation) - a backstop
@@ -164,7 +165,7 @@ class Settings:
     # OpenRouter for the same reason as embeddings.
     VISION_MODEL: str = os.getenv("VISION_MODEL", "openai/gpt-4o-mini")
 
-    # Redis (app-level cache: Kimi extraction results keyed by content hash, and
+    # Redis (app-level cache: concept extraction results keyed by content hash, and
     # short-TTL caching of read-heavy graph endpoints). Not used by Airflow itself.
     REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
     REDIS_CACHE_TTL_SECONDS: int = int(os.getenv("REDIS_CACHE_TTL_SECONDS", "3600"))

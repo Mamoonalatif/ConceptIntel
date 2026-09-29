@@ -16,7 +16,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 from app.config import settings
-from app.content_processing.kimi_service import _get_client, openrouter_payment_error_message, _reasoning_extra_body
+from app.content_processing.generation_service import _get_client, openrouter_payment_error_message, _reasoning_extra_body
 from app.observability import trace_ai_call
 from app.question_bank import service as qb
 
@@ -106,7 +106,7 @@ def generate_questions(
     """Returns validated question dicts ready to persist: {prompt, payload, explanation}.
 
     Retries the whole call up to 3 times, matching the convention in
-    content_processing/kimi_service.py. Individual questions that fail validation are
+    content_processing/generation_service.py. Individual questions that fail validation are
     dropped rather than failing the batch - one malformed answer key out of eight is
     not a reason to give the teacher nothing.
     """
@@ -141,7 +141,7 @@ def generate_questions(
         try:
             started = time.monotonic()
             response = client.chat.completions.create(
-                model=settings.KIMI_MODEL,
+                model=settings.GENERATION_MODEL,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_content},

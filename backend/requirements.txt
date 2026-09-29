@@ -25,7 +25,7 @@ httpx==0.27.0
 pytesseract==0.3.10
 Pillow==10.3.0
 
-# Content processing pipeline (OCR + Kimi K2 structuring)
+# Content processing pipeline (OCR + AI structuring)
 easyocr==1.7.1
 pymupdf==1.24.5
 redis==5.0.3

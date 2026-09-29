@@ -3,7 +3,7 @@
 WHY OPENROUTER RATHER THAN A LOCAL MODEL OR A SECOND PROVIDER
 -------------------------------------------------------------
 Embeddings now go through the same OpenRouter key, endpoint and client factory as
-every other AI call in this project (see app/content_processing/kimi_service.py),
+every other AI call in this project (see app/content_processing/generation_service.py),
 which keeps the number of providers at one. Two alternatives were tried and
 rejected:
 
@@ -123,8 +123,8 @@ def _check_dim(vectors: List[List[float]]) -> None:
 
 def _embed_remote(texts: List[str]) -> List[List[float]]:
     """Batched embedding via OpenRouter. Retries the whole call up to 3 times,
-    matching the convention in kimi_service.clean_and_structure_chunk."""
-    from app.content_processing.kimi_service import _get_client, openrouter_payment_error_message
+    matching the convention in generation_service.clean_and_structure_chunk."""
+    from app.content_processing.generation_service import _get_client, openrouter_payment_error_message
 
     client = _get_client()
     if client is None:

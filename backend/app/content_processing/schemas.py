@@ -5,7 +5,7 @@ from datetime import datetime
 
 class TriggerPipelineRequest(BaseModel):
     # Optional free-text hint from the teacher (e.g. "these are CLOs for chapters 3-5,
-    # treat as authoritative outcomes") - folded into the Kimi cleaning/structuring prompt.
+    # treat as authoritative outcomes") - folded into the AI cleaning/structuring prompt.
     teacher_notes: Optional[str] = None
 
 

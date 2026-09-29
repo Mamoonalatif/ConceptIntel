@@ -121,7 +121,7 @@ const CourseDetail: React.FC = () => {
   const [searchResults, setSearchResults] = useState<ContentSearchResult[] | null>(null);
   const [searching, setSearching] = useState(false);
 
-  // Reviewed AI pipeline (trigger -> Kimi structuring -> diff -> teacher review ->
+  // Reviewed AI pipeline (trigger -> AI structuring -> diff -> teacher review ->
   // coordinator approval -> merge) - separate from the legacy instant "Rebuild Graph".
   const [pipelineJobs, setPipelineJobs] = useState<GraphBuildJob[]>([]);
   const [triggeringPipeline, setTriggeringPipeline] = useState(false);
@@ -823,7 +823,7 @@ const CourseDetail: React.FC = () => {
                 onClick={handleTriggerPipeline}
                 disabled={triggeringPipeline || completedFiles === 0 || (!!latestJob && NON_TERMINAL_JOB_STATUSES.includes(latestJob.status))}
                 className="btn-primary text-xs px-3.5 py-1.5"
-                title="Runs OCR'd text through Kimi AI, then requires your review and coordinator approval before anything changes the graph"
+                title="Runs OCR'd text through AI, then requires your review and coordinator approval before anything changes the graph"
               >
                 {triggeringPipeline ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
                 Generate (AI + Review)

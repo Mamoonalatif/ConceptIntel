@@ -72,7 +72,7 @@ def clean_extracted_text(text: str) -> str:
     """Cleans extracted text by removing redundant spacing and formatting. This is
     the lightweight cleanup applied at extraction time; app/rag/cleaning.py's
     clean_for_rag() does a more thorough pass (Unicode normalization, de-hyphenation,
-    boilerplate stripping) downstream, for both RAG chunking and Kimi structuring."""
+    boilerplate stripping) downstream, for both RAG chunking and AI structuring."""
     # Replace multiple spaces with a single space
     text = re.sub(r"[ \t]+", " ", text)
     # Replace three or more newlines with double newline

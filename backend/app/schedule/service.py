@@ -19,14 +19,14 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database.models import Course, CourseSchedule, ScheduleSession
-from app.content_processing.kimi_service import openrouter_payment_error_message, _get_client as _get_shared_client, _reasoning_extra_body
+from app.content_processing.generation_service import openrouter_payment_error_message, _get_client as _get_shared_client, _reasoning_extra_body
 from app.content_processing.pipeline_service import get_course_outline_text
 
 logger = logging.getLogger("conceptintel.schedule")
 
 
 def _get_client() -> OpenAI:
-    # Was its own near-duplicate of kimi_service._get_client (same OpenRouter-only
+    # Was its own near-duplicate of generation_service._get_client (same OpenRouter-only
     # client, copy-pasted) - delegating to the shared one instead means this module
     # picks up GEMINI_DIRECT support (see config.py) for free instead of silently
     # staying on OpenRouter while every other caller switches.
@@ -37,7 +37,7 @@ def _get_client() -> OpenAI:
 
 
 def _extract_sessions_from_outline(outline_text: str) -> List[Dict[str, Any]]:
-    """Single Kimi call - the outline is already capped to ~8000 chars by
+    """Single generation call - the outline is already capped to ~8000 chars by
     get_course_outline_text and isn't chunked anywhere else in this codebase, so a
     per-chunk loop (as used for concept extraction) isn't needed here."""
     client = _get_client()
@@ -60,7 +60,7 @@ Respond ONLY with valid JSON in this exact format:
     for attempt in range(3):
         try:
             response = client.chat.completions.create(
-                model=settings.KIMI_MODEL,
+                model=settings.GENERATION_MODEL,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": f"Course outline:\n\n{outline_text}"},
@@ -103,7 +103,7 @@ def _get_or_create_schedule(db: Session, course_id: int) -> CourseSchedule:
 
 
 def _sessions_to_json(sessions: List[Dict[str, Any]]) -> str:
-    """Normalizes raw session dicts (from Kimi or a teacher's PUT body) into the
+    """Normalizes raw session dicts (from the generation model or a teacher's PUT body) into the
     stored JSON shape."""
     normalized = [
         {

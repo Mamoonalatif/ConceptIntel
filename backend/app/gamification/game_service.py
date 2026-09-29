@@ -41,7 +41,7 @@ regenerate) is far better than catching it in the student's browser (where we
 cannot).
 
 Retry shape and the OpenRouter call parameters follow the project convention
-established in app/content_processing/kimi_service.py.
+established in app/content_processing/generation_service.py.
 """
 import json
 import logging
@@ -51,7 +51,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 from app.config import settings
-from app.content_processing.kimi_service import _get_client, is_budget_exhausted_error, BUDGET_EXHAUSTED_MESSAGE, _reasoning_extra_body
+from app.content_processing.generation_service import _get_client, is_budget_exhausted_error, BUDGET_EXHAUSTED_MESSAGE, _reasoning_extra_body
 from app.observability import trace_ai_call
 
 logger = logging.getLogger("conceptintel.gamification.games")
@@ -72,7 +72,7 @@ GAME_MAX_TOKENS = int(os.getenv("GAME_MAX_TOKENS", "16000"))
 # 16000 tokens of generated markup does not come back in a minute; a 60s deadline
 # here would not "fail fast", it would fail *always*, three times, and then raise.
 # Still an explicit finite value rather than the openai SDK's 600s default, which
-# is the actual reason the 60s convention exists (see kimi_service._get_client).
+# is the actual reason the 60s convention exists (see generation_service._get_client).
 GAME_CALL_TIMEOUT = 180.0
 
 # Structural floor for "this is a real page, not a stub". A genuine playable game
@@ -331,7 +331,7 @@ def generate_concept_game(
         try:
             started = time.monotonic()
             response = client.chat.completions.create(
-                model=settings.KIMI_MODEL,
+                model=settings.GENERATION_MODEL,
                 messages=[
                     {"role": "system", "content": GAME_SYSTEM_PROMPT},
                     {"role": "user", "content": base_user_content + repair_note},
@@ -344,7 +344,7 @@ def generate_concept_game(
                 temperature=0.6,
                 max_tokens=GAME_MAX_TOKENS,
                 timeout=GAME_CALL_TIMEOUT,
-                # kimi is a reasoning model - without this it spends the token budget
+                # A reasoning model spends the token budget
                 # on hidden thinking and returns message.content=None, which for a
                 # 16k-token page generation is an expensive way to get nothing.
                 extra_body=_reasoning_extra_body(),
@@ -433,7 +433,7 @@ def _fatal_api_error(exc: Exception) -> Optional[str]:
         )
     if status == 404:
         return (
-            f"OpenRouter does not recognise the model '{settings.KIMI_MODEL}' - check KIMI_MODEL "
+            f"OpenRouter does not recognise the model '{settings.GENERATION_MODEL}' - check GENERATION_MODEL "
             "in backend/.env."
         )
     return None

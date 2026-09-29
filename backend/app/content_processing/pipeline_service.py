@@ -3,7 +3,7 @@ from typing import Any, Dict, List
 
 from app.database.connection import SessionLocal
 from app.database.models import GraphBuildJob, UploadedFile, CourseCatalog
-from app.content_processing import kimi_service
+from app.content_processing import generation_service
 from app.knowledge_graph import revision_service
 from app.knowledge_graph.services import neo4j_service
 
@@ -101,9 +101,9 @@ def stage_extract_text(job_id: int) -> str:
 
 
 def stage_clean_and_structure(job_id: int, combined_text: str) -> List[Dict[str, Any]]:
-    """Stage 2: Kimi K2 cleans OCR/typo noise and extracts structured concepts, one
+    """Stage 2: the generation model cleans OCR/typo noise and extracts structured concepts, one
     result per text chunk - scoped to this job's course name/code, and grounded
-    against concepts that already exist in the catalog's shared graph so Kimi can
+    against concepts that already exist in the catalog's shared graph so it can
     recognize reworded duplicates up front rather than relying purely on the
     post-hoc dedup in revision_service.compute_diff()."""
     db = SessionLocal()
@@ -117,7 +117,7 @@ def stage_clean_and_structure(job_id: int, combined_text: str) -> List[Dict[str,
         existing_concept_names = neo4j_service.get_existing_concept_names(job.catalog_id)
         course_outline = get_course_outline_text(db, job.course_id)
 
-        return kimi_service.structure_full_text(
+        return generation_service.structure_full_text(
             combined_text,
             course_name=course_name,
             course_code=course_code,

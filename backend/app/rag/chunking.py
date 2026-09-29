@@ -5,8 +5,8 @@ a sliding token window and overlap, following standard RAG chunking practice: ta
 400-512 tokens per chunk, ~15% overlap, never below ~100 tokens, never above ~900.
 Tables are kept intact as their own chunks rather than split across boundaries.
 
-Also used as the chunker feeding Kimi K2's concept-structuring call (see
-content_processing/kimi_service.py) instead of naive character-count chunking -
+Also used as the chunker feeding the concept-structuring call (see
+content_processing/generation_service.py) instead of naive character-count chunking -
 better chunk boundaries (whole paragraphs/sentences, not mid-word cuts) improve
 extraction quality, not just retrieval.
 """

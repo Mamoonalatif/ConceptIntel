@@ -1,5 +1,5 @@
 """AI-drafted grading rubric for an assignment. Reuses the same RAG retrieval
-(app/rag/retrieval.py) and Kimi client (app/content_processing/kimi_service.py)
+(app/rag/retrieval.py) and generation client (app/content_processing/generation_service.py)
 already wired into grading_service.py, so a rubric is grounded in what the course
 actually taught rather than the model's generic idea of the assignment's subject.
 
@@ -23,7 +23,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 from app.config import settings
-from app.content_processing.kimi_service import _get_client, openrouter_payment_error_message, _reasoning_extra_body
+from app.content_processing.generation_service import _get_client, openrouter_payment_error_message, _reasoning_extra_body
 from app.observability import trace_ai_call
 
 logger = logging.getLogger("conceptintel.rubric")
@@ -189,9 +189,9 @@ Course Learning Outcomes (CLOs) available to tag criteria against:
     for attempt in range(3):
         try:
             started = time.monotonic()
-            logger.info("Rubric generation starting (attempt %d/3, model=%s)", attempt + 1, settings.KIMI_MODEL)
+            logger.info("Rubric generation starting (attempt %d/3, model=%s)", attempt + 1, settings.GENERATION_MODEL)
             response = client.chat.completions.create(
-                model=settings.KIMI_MODEL,
+                model=settings.GENERATION_MODEL,
                 messages=[
                     {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": user_content},

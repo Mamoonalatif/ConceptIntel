@@ -50,7 +50,7 @@ def _diff_and_propose(**context):
 
 with DAG(
     dag_id="content_graph_pipeline",
-    description="OCR'd text -> Kimi K2 cleaning/structuring -> diff against the shared catalog graph",
+    description="OCR'd text -> AI cleaning/structuring -> diff against the shared catalog graph",
     start_date=datetime(2026, 1, 1),
     schedule=None,
     catchup=False,

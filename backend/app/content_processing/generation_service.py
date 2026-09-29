@@ -12,7 +12,7 @@ from app.core.cache import cache, content_hash
 from app.observability import trace_ai_call
 from app.rag.chunking import chunk_document
 
-logger = logging.getLogger("conceptintel.kimi")
+logger = logging.getLogger("conceptintel.generation")
 
 # Back-compat alias for the concurrency-budget message specifically - some
 # callers import this name directly. Prefer openrouter_payment_error_message()
@@ -27,8 +27,8 @@ BUDGET_EXHAUSTED_MESSAGE = (
 INSUFFICIENT_CREDITS_MESSAGE = (
     "This AI account is out of OpenRouter credit (or its remaining balance can't "
     "cover this request). Add credits at https://openrouter.ai/settings/credits, "
-    "or switch to a free model (set KIMI_MODEL=moonshotai/kimi-k2:free in "
-    "backend/.env) to keep working without a balance."
+    "switch GENERATION_MODEL to a free OpenRouter model, or set GEMINI_DIRECT=true "
+    "in backend/.env to use Google's free tier instead."
 )
 
 
@@ -232,7 +232,7 @@ def _build_system_prompt(
 
     existing_concepts_block = ""
     if existing_concept_names:
-        # Grounding: telling Kimi what's already in this course's shared graph lets it
+        # Grounding: telling the model what's already in this course's shared graph lets it
         # recognize "this is the same concept, just reworded" up front, instead of
         # relying entirely on the post-hoc string-matching dedup in
         # knowledge_graph/revision_service.py. Capped to keep the prompt bounded for
@@ -510,7 +510,7 @@ def _sanitize_extraction(data: Dict[str, Any]) -> Dict[str, Any]:
     return {"concepts": kept}
 
 
-@trace_ai_call("kimi-concept-extraction")
+@trace_ai_call("concept-extraction")
 def clean_and_structure_chunk(
     chunk: str,
     course_name: str,
@@ -520,17 +520,18 @@ def clean_and_structure_chunk(
     course_outline: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Calls Kimi K2 (via OpenRouter) to clean OCR/typo noise and extract structured
-    concepts from one text chunk, scoped to a specific course and grounded against
-    that course's already-existing concepts. Results are cached by content hash so
-    retrying a failed pipeline run, or re-uploading the same material, doesn't
-    re-spend tokens.
+    Calls the configured generation model (settings.GENERATION_MODEL, via OpenRouter
+    or Google directly under GEMINI_DIRECT) to clean OCR/typo noise and extract
+    structured concepts from one text chunk, scoped to a specific course and
+    grounded against that course's already-existing concepts. Results are cached by
+    content hash so retrying a failed pipeline run, or re-uploading the same
+    material, doesn't re-spend tokens.
     """
     # course_code and course_outline are part of the key because both change the
     # system prompt - omitting course_code previously meant editing a course's code
     # returned a stale extraction.
     cache_key = (
-        "kimi:extract:"
+        "genai:extract:"
         + content_hash(
             chunk,
             course_name,
@@ -542,7 +543,7 @@ def clean_and_structure_chunk(
     )
     cached = cache.get_json(cache_key)
     if cached is not None:
-        logger.info("Kimi extraction cache hit for chunk (len=%d)", len(chunk))
+        logger.info("Concept extraction cache hit for chunk (len=%d)", len(chunk))
         return cached
 
     client = _get_client()
@@ -568,19 +569,19 @@ def clean_and_structure_chunk(
         try:
             _throttle_for_free_tier()
             started = time.monotonic()
-            logger.warning("Kimi request starting (attempt %d/3, model=%s)", attempt + 1, settings.KIMI_MODEL)
+            logger.warning("Generation request starting (attempt %d/3, model=%s)", attempt + 1, settings.GENERATION_MODEL)
             response = client.chat.completions.create(
-                model=settings.KIMI_MODEL,
+                model=settings.GENERATION_MODEL,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_content},
                 ],
                 response_format={"type": "json_object"},
                 temperature=0.15,
-                # kimi-k2.5 is a reasoning model - it spends tokens on internal
-                # "thinking" (reasoning_details) BEFORE the actual answer. With
-                # max_tokens=4000 (tuned for the older, non-reasoning kimi-k2), a
-                # long chunk's reasoning alone could consume the whole budget,
+                # A reasoning model (Kimi's k2.5 was the one that surfaced this)
+                # spends tokens on internal "thinking" (reasoning_details) BEFORE
+                # the actual answer. With max_tokens=4000 (tuned for an older,
+                # non-reasoning model), a long chunk's reasoning alone could consume the whole budget,
                 # leaving finish_reason="length" and message.content=None - the
                 # exact "JSON object must be str... not NoneType" crash this was
                 # hitting on every single attempt (not a transient fluke, so all 3
@@ -593,7 +594,7 @@ def clean_and_structure_chunk(
                 timeout=60.0,
                 extra_body=_reasoning_extra_body(),
             )
-            logger.warning("Kimi request finished in %.1fs", time.monotonic() - started)
+            logger.warning("Generation request finished in %.1fs", time.monotonic() - started)
             raw_content = response.choices[0].message.content
             if not raw_content:
                 raise ValueError(
@@ -605,7 +606,7 @@ def clean_and_structure_chunk(
             return data
         except (json.JSONDecodeError, ValueError) as e:
             last_error = e
-            logger.warning("Kimi returned malformed/empty content on attempt %d/3: %s", attempt + 1, str(e))
+            logger.warning("Generation model returned malformed/empty content on attempt %d/3: %s", attempt + 1, str(e))
         except Exception as e:
             payment_message = openrouter_payment_error_message(e)
             if payment_message:
@@ -619,7 +620,7 @@ def clean_and_structure_chunk(
                 # instead of guessing, then retry for real.
                 delay = _extract_retry_delay_seconds(e)
                 logger.warning(
-                    "Kimi API call rate-limited on attempt %d/3, waiting %.1fs before retry: %s",
+                    "Generation API call rate-limited on attempt %d/3, waiting %.1fs before retry: %s",
                     attempt + 1, delay, str(e),
                 )
                 if attempt < 2:
@@ -627,9 +628,9 @@ def clean_and_structure_chunk(
             else:
                 # Covers timeouts and other transient API/network errors - same
                 # rationale as the JSON case: a repeat call frequently succeeds.
-                logger.warning("Kimi API call failed on attempt %d/3: %s: %s", attempt + 1, type(e).__name__, str(e))
+                logger.warning("Generation API call failed on attempt %d/3: %s: %s", attempt + 1, type(e).__name__, str(e))
 
-    raise RuntimeError(f"Kimi call failed after 3 attempts: {last_error}")
+    raise RuntimeError(f"Generation call failed after 3 attempts: {last_error}")
 
 
 def structure_full_text(
@@ -651,7 +652,7 @@ def structure_full_text(
         return []
 
     chunks = chunk_document(text)
-    logger.info("Structuring %d chunk(s) via Kimi K2 for course '%s'", len(chunks), course_name)
+    logger.info("Structuring %d chunk(s) via %s for course '%s'", len(chunks), settings.GENERATION_MODEL, course_name)
 
     # Names accumulate across chunks. Each chunk used to be extracted blind to every
     # other chunk, so a concept spanning three chunks came back three times under
@@ -669,7 +670,7 @@ def structure_full_text(
                 chunk.text, course_name, course_code, teacher_notes, known_names, course_outline
             )
         except Exception as e:
-            logger.error("Kimi extraction failed for chunk %d/%d: %s", i + 1, len(chunks), str(e))
+            logger.error("Concept extraction failed for chunk %d/%d: %s", i + 1, len(chunks), str(e))
             raise
 
         for c in result.get("concepts", []):

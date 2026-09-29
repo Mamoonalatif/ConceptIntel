@@ -648,7 +648,7 @@ export const uploadService = {
   },
 };
 
-// Reviewed content-processing pipeline: OCR'd text -> Kimi cleaning/structuring ->
+// Reviewed content-processing pipeline: OCR'd text -> AI cleaning/structuring ->
 // diff against the shared catalog graph -> teacher review -> coordinator approval.
 export interface ConceptDiffItem {
   name: string;

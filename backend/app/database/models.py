@@ -738,7 +738,7 @@ class GeneratedContent(Base):
     # Added after this table shipped, so nullable with a default rather than NOT NULL -
     # backfilled to "Medium" for existing rows by scripts/add_difficulty_column.py.
     # Matches the per-concept difficulty vocabulary the extraction prompt already
-    # emits (app/content_processing/kimi_service.py), so a concept's own difficulty
+    # emits (app/content_processing/generation_service.py), so a concept's own difficulty
     # can seed the selector's default.
     difficulty = Column(String, nullable=False, default="Medium")  # "Easy" | "Medium" | "Hard"
     # How many retrieved course-material excerpts this item was generated from.
@@ -1242,7 +1242,7 @@ class PointsLedgerEntry(Base):
 
 
 class GraphBuildJob(Base):
-    """Tracks one run of the content-processing pipeline (Kimi cleaning/structuring →
+    """Tracks one run of the content-processing pipeline (AI cleaning/structuring →
     diff against the shared catalog graph → teacher/coordinator review), from trigger
     to merge. A course's catalog may accumulate many jobs over time as different
     teachers upload more material."""
@@ -1257,7 +1257,7 @@ class GraphBuildJob(Base):
     # "AwaitingTeacherReview", "AwaitingCoordinatorApproval", "Merged", "Rejected", "Failed"
     status = Column(String, default="Queued", nullable=False)
 
-    teacher_notes = Column(Text, nullable=True)  # optional free-text hint fed into the Kimi prompt
+    teacher_notes = Column(Text, nullable=True)  # optional free-text hint fed into the generation prompt
     airflow_run_id = Column(String, nullable=True)
     error_message = Column(Text, nullable=True)
 

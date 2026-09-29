@@ -3,8 +3,8 @@ uploaded outline: extract Course Learning Outcomes, suggest which existing
 Program Learning Outcomes each one maps to, and suggest which concept-graph
 nodes each CLO is addressed by.
 
-Reuses the same OpenRouter/Kimi client as concept extraction and grading (see
-app/content_processing/kimi_service.py) - no new AI provider.
+Reuses the same OpenRouter client as concept extraction and grading (see
+app/content_processing/generation_service.py) - no new AI provider.
 
 Nothing here writes to the database - every function returns plain data for the
 caller (outcomes/routes.py) to create/link, using the exact same direct-write
@@ -19,7 +19,7 @@ import logging
 from typing import Any, Dict, List
 
 from app.config import settings
-from app.content_processing.kimi_service import _get_client, openrouter_payment_error_message, _reasoning_extra_body
+from app.content_processing.generation_service import _get_client, openrouter_payment_error_message, _reasoning_extra_body
 from app.observability import trace_ai_call
 
 logger = logging.getLogger("conceptintel.outcomes.ai")
@@ -36,7 +36,7 @@ def _call_json(system_prompt: str, user_content: str, max_tokens: int = 2500) ->
     for attempt in range(3):
         try:
             response = client.chat.completions.create(
-                model=settings.KIMI_MODEL,
+                model=settings.GENERATION_MODEL,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_content},

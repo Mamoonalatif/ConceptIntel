@@ -59,7 +59,7 @@ def trigger_pipeline(
 ):
     """
     Kicks off the reviewed content pipeline (OCR'd text - already stored on each
-    UploadedFile - -> Kimi cleaning/structuring -> diff against the catalog's shared
+    UploadedFile - -> AI cleaning/structuring -> diff against the catalog's shared
     graph -> teacher review -> coordinator approval -> merge). Requires at least one
     uploaded file for this course with status 'Completed'.
     """

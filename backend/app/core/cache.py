@@ -55,7 +55,7 @@ class RedisCache:
 
 def content_hash(*parts: str) -> str:
     """Stable hash of one or more text parts, used as a cache key so identical
-    (text, teacher_notes) pairs skip a repeat Kimi API call."""
+    (text, teacher_notes) pairs skip a repeat generation API call."""
     h = hashlib.sha256()
     for part in parts:
         h.update((part or "").encode("utf-8", errors="ignore"))

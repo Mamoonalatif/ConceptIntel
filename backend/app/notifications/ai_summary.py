@@ -1,8 +1,8 @@
 """AI-generated, student-facing summaries for course posting notifications.
 
 Routed through the project's one shared LLM client factory
-(`app.content_processing.kimi_service._get_client` -> OpenRouter) on
-`settings.KIMI_MODEL`, the same path as concept extraction, grading and content
+(`app.content_processing.generation_service._get_client` -> OpenRouter) on
+`settings.GENERATION_MODEL`, the same path as concept extraction, grading and content
 generation. The rejected alternative - and what this module used to do - was to
 build its own `OpenAI(api_key=settings.OPENAI_API_KEY)` client on
 `settings.OPENAI_MODEL`, copying the pattern from
@@ -68,13 +68,13 @@ def _summarize_via_openrouter(post_type: str, title: str, content: str) -> str:
     """The actual model call. Raises on any failure; the caller owns the fallback.
 
     Single-shot, with no retry loop - unlike the content pipeline in
-    `kimi_service.clean_and_structure_chunk`. That call produces the graph and has
+    `generation_service.clean_and_structure_chunk`. That call produces the graph and has
     no acceptable substitute, so retrying is worth the latency; this one has a
     perfectly good offline fallback available immediately, and it runs inline on a
     post-create request, so two extra round trips would be paid in user-visible
     latency to improve a one-line blurb. Prose out, so no response_format.
     """
-    from app.content_processing.kimi_service import _get_client, _reasoning_extra_body
+    from app.content_processing.generation_service import _get_client, _reasoning_extra_body
 
     client = _get_client()
     if client is None:
@@ -82,7 +82,7 @@ def _summarize_via_openrouter(post_type: str, title: str, content: str) -> str:
 
     label = _POST_TYPE_LABELS.get(post_type, "post")
     response = client.chat.completions.create(
-        model=settings.KIMI_MODEL,
+        model=settings.GENERATION_MODEL,
         messages=[
             {"role": "system", "content": SUMMARY_SYSTEM_PROMPT},
             {

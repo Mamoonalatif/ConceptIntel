@@ -11,9 +11,9 @@ Why caption-then-embed instead of true image embeddings (e.g. CLIP)? Two reasons
    embedding model plus a separate retrieval path that then needs to be merged with
    text results.
 
-Kimi K2 is text-only, so captioning cannot ride on settings.KIMI_MODEL - but it can
+The text generation model is text-only, so captioning cannot ride on settings.GENERATION_MODEL - but it can
 and does ride on the same OpenRouter account and the same shared client factory
-(`app.content_processing.kimi_service._get_client`), just with a vision-capable
+(`app.content_processing.generation_service._get_client`), just with a vision-capable
 model id (settings.VISION_MODEL, default "openai/gpt-4o-mini"). The rejected
 alternative was a second, dedicated `OpenAI(api_key=settings.OPENAI_API_KEY)`
 client, which is what this module used to do: it meant captioning depended on a
@@ -169,7 +169,7 @@ def caption_image(image_bytes: bytes, course_name: str) -> Optional[str]:
     failure or missing config - captioning is a nice-to-have, not required for the
     rest of the pipeline to function.
 
-    No retry loop here, unlike kimi_service: a caption is optional enrichment and a
+    No retry loop here, unlike generation_service: a caption is optional enrichment and a
     single upload can produce MAX_IMAGES_PER_FILE of these, so retrying each one
     would triple the worst-case ingestion cost and latency to recover something the
     pipeline is already designed to do without.
@@ -177,7 +177,7 @@ def caption_image(image_bytes: bytes, course_name: str) -> Optional[str]:
     if not is_captioning_configured():
         return None
     try:
-        from app.content_processing.kimi_service import _get_client, _reasoning_extra_body
+        from app.content_processing.generation_service import _get_client, _reasoning_extra_body
         client = _get_client()
         if client is None:
             # Belt-and-braces: is_captioning_configured() applies the same test, so

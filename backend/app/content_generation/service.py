@@ -1,7 +1,7 @@
 """AI generation of learning materials (flashcards, MCQs/quizzes, study guides)
 from a single knowledge-graph concept - the Content Generation module. Reuses the
-same OpenRouter/Kimi client as concept extraction and assignment grading (see
-app/content_processing/kimi_service.py) rather than a third AI integration.
+same OpenRouter client as concept extraction and assignment grading (see
+app/content_processing/generation_service.py) rather than a third AI integration.
 
 Correctness strategy: every generated item is validated against a strict Pydantic
 schema (see schemas.py - e.g. an MCQ must have 2-5 options and a correct_index that
@@ -38,7 +38,7 @@ from typing import Any, Dict, List, Optional
 from pydantic import ValidationError
 
 from app.config import settings
-from app.content_processing.kimi_service import _get_client, openrouter_payment_error_message, _reasoning_extra_body
+from app.content_processing.generation_service import _get_client, openrouter_payment_error_message, _reasoning_extra_body
 from app.content_generation.schemas import QUESTION_STYLES, FlashcardOut, MCQOut, StudyGuideOut, AssignmentDraftOut
 from app.observability import trace_ai_call
 
@@ -380,21 +380,21 @@ def _call_and_validate(
     item_cls (pydantic). Retries the whole call (not just re-parsing) up to 3 times
     if the response is malformed JSON OR fails schema validation - a repeat call
     with the same prompt frequently produces a well-formed response even when the
-    first didn't, same pattern as kimi_service.clean_and_structure_chunk."""
+    first didn't, same pattern as generation_service.clean_and_structure_chunk."""
     client = _client_or_raise()
     last_error = None
     for attempt in range(3):
         try:
             started = time.monotonic()
             response = client.chat.completions.create(
-                model=settings.KIMI_MODEL,
+                model=settings.GENERATION_MODEL,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_content},
                 ],
                 response_format={"type": "json_object"},
                 temperature=0.4,
-                # kimi-k2.5 is a reasoning model - excluded here so it answers
+                # A reasoning model spends tokens on internal thinking - excluded here so it answers
                 # directly instead of spending the token budget on internal
                 # "thinking" first (which could exhaust max_tokens before ever
                 # emitting content, leaving message.content=None).
@@ -514,7 +514,7 @@ def generate_study_guide(
     for attempt in range(3):
         try:
             response = client.chat.completions.create(
-                model=settings.KIMI_MODEL,
+                model=settings.GENERATION_MODEL,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_content},
@@ -627,7 +627,7 @@ def generate_assignment(
     for attempt in range(3):
         try:
             response = client.chat.completions.create(
-                model=settings.KIMI_MODEL,
+                model=settings.GENERATION_MODEL,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_content},
@@ -702,7 +702,7 @@ def generate_concept_material(
     for attempt in range(3):
         try:
             response = client.chat.completions.create(
-                model=settings.KIMI_MODEL,
+                model=settings.GENERATION_MODEL,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_content},
@@ -758,7 +758,7 @@ def edit_concept_material(current_material: str, instruction: str) -> str:
     for attempt in range(3):
         try:
             response = client.chat.completions.create(
-                model=settings.KIMI_MODEL,
+                model=settings.GENERATION_MODEL,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_content},
@@ -819,7 +819,7 @@ def refine_assignment_draft(current_draft: Dict[str, Any], instruction: str) -> 
     for attempt in range(3):
         try:
             response = client.chat.completions.create(
-                model=settings.KIMI_MODEL,
+                model=settings.GENERATION_MODEL,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_content},

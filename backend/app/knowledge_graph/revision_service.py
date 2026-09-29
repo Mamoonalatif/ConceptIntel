@@ -84,7 +84,7 @@ def _semantic_dedup(
 
 def compute_diff(catalog_id: int, chunk_extractions: List[Dict[str, Any]]) -> GraphDiff:
     """
-    Aggregates concepts extracted (by Kimi) across all chunks of one pipeline run,
+    Aggregates concepts extracted (by the generation model) across all chunks of one pipeline run,
     dedupes them against each other AND against what's already in the catalog's
     live Neo4j graph, and returns a diff describing what would change if approved.
     Nothing is written to Neo4j here - this is a preview only.
