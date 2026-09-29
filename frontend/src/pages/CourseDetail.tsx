@@ -169,22 +169,30 @@ const CourseDetail: React.FC = () => {
   const fetchData = async (silent = false) => {
     try {
       if (!silent) setLoading(true);
-      const courseData = await courseService.getDetails(idNum);
+      // These four calls don't depend on each other's results - they were
+      // previously awaited one at a time, so the page paid for four sequential
+      // round trips (each one waiting on the last) instead of the one round
+      // trip's worth of wall-clock time Promise.all gets by firing them together.
+      const [courseData, filesData, roleData] = await Promise.all([
+        courseService.getDetails(idNum),
+        uploadService.getCourseFiles(idNum),
+        isTeacher
+          ? Promise.all([enrollmentService.getEnrolledStudents(idNum), contentProcessingService.listJobsForCourse(idNum)])
+          : enrollmentService.getMyCourses(),
+      ]);
       setCourse(courseData);
-      const filesData = await uploadService.getCourseFiles(idNum);
       setFiles(filesData);
       if (isTeacher) {
-        const studentsData = await enrollmentService.getEnrolledStudents(idNum);
+        const [studentsData, jobsData] = roleData as [any[], any[]];
         setStudents(studentsData);
-        const jobsData = await contentProcessingService.listJobsForCourse(idNum);
         setPipelineJobs(jobsData);
       } else {
-        const myCourses = await enrollmentService.getMyCourses();
+        const myCourses = roleData as any[];
         const mine = myCourses.find((e: any) => e.course_id === idNum);
         setMyProgress(mine ? Math.round(mine.progress) : null);
       }
     } catch (err: any) {
-      if (!silent) setError('Failed to load course details. Ensure backend connection is active.');
+      if (!silent) setError(apiErrorMessage(err, 'Failed to load course details. Ensure backend connection is active.'));
     } finally {
       if (!silent) setLoading(false);
     }

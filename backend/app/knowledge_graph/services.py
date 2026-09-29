@@ -38,7 +38,19 @@ class Neo4jService:
     def __init__(self):
         self.driver = None
         self._last_connect_attempt = 0.0
-        self._connect()
+        # Deliberately does NOT call self._connect() here. This class is
+        # constructed as a module-level singleton (see `neo4j_service` below),
+        # which means __init__ runs at IMPORT time - i.e. during backend startup,
+        # before the app can serve a single request. Connecting here used to block
+        # startup for ~20s whenever the Aura free-tier instance was paused
+        # (measured directly), on every request the app makes... including every
+        # `--reload` during local dev. That 20s was being paid on EVERY backend
+        # start regardless of whether the request that follows even touches the
+        # knowledge graph (most don't - course lists, enrollments, dashboards).
+        # _ensure_connected() below is already called at the top of every real
+        # graph operation (get_session/query), so the connection now happens
+        # lazily on the first actual graph request instead - the cost moves to
+        # where it's actually needed, and unrelated pages stop paying for it.
 
     def _connect(self) -> None:
         """(Re)attempts the connection. Safe to call more than once - records the
