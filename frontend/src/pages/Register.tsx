@@ -103,7 +103,12 @@ const Register: React.FC = () => {
     setLoading(true);
     try {
       await register({ email, password, full_name: fullName.trim(), role: 'student' });
-      navigate(redirect ? `/login?redirect=${encodeURIComponent(redirect)}` : '/login');
+      // The account is created but unverified (see backend/app/auth/routes.py
+      // register()) - login will 403 until the emailed link is clicked. The
+      // ?verify=1 flag tells Login.tsx to show that explanation instead of
+      // silently landing back on a blank sign-in form.
+      const base = redirect ? `/login?redirect=${encodeURIComponent(redirect)}` : '/login';
+      navigate(`${base}${base.includes('?') ? '&' : '?'}verify=1`);
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Registration failed. Check inputs.');
       setLoading(false);

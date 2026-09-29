@@ -55,11 +55,12 @@ if settings.SENTRY_DSN:
 else:
     logger.info("SENTRY_DSN not set - Sentry error monitoring disabled.")
 
-if settings.JWT_SECRET == "super_secret_conceptintel_token_signing_key_2026":
-    logger.warning(
-        "JWT_SECRET is not set - using the built-in development default. Every "
-        "deployment left on this default shares the same signing key, letting "
-        "anyone forge a valid auth token. Set a real JWT_SECRET in production."
+if settings.JWT_SECRET_WAS_GENERATED:
+    logger.error(
+        "JWT_SECRET is not set - a random secret was generated for this process "
+        "only. Every existing login session will be invalidated the next time this "
+        "process restarts (deploy, crash, reload), forcing everyone to sign in "
+        "again. Set a real JWT_SECRET in production so sessions survive restarts."
     )
 
 if not (settings.AWS_ACCESS_KEY_ID and settings.AWS_SECRET_ACCESS_KEY and settings.AWS_S3_BUCKET) \

@@ -1,3 +1,4 @@
+import base64
 import csv
 import hashlib
 import io
@@ -8,7 +9,8 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import List, Optional, Set
+from typing import List, Optional, Set, Union
+import qrcode
 from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
 from fastapi.responses import StreamingResponse
 from fastapi.security import OAuth2PasswordBearer
@@ -17,13 +19,14 @@ from sqlalchemy.orm import Session
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token as google_id_token
 from app.config import settings
-from app.email_service import send_staff_credentials_email, send_password_reset_email
+from app.email_service import send_staff_credentials_email, send_password_reset_email, send_verification_email
 from app.database.connection import get_db, SessionLocal
 from app.database.models import (
     User, TeacherRequest, Program, Course, CourseCatalog,
     ProgramCoordinatorAssignment, CourseCoordinatorAssignment,
     Assignment, AssignmentSubmission, Announcement, Material, Meeting,
     Comment, ChatMessage, NotificationPreference, PasswordResetToken,
+    EmailVerificationToken,
 )
 from app.courses.services import delete_course_cascade
 from app.auth.schemas import (
@@ -33,10 +36,15 @@ from app.auth.schemas import (
     UserStatusUpdate, UserAdminUpdate, GoogleAuthRequest, StaffRoleUpdate, ChangePasswordRequest,
     StaffMemberResponse, StaffAuthoritiesUpdate, ForgotPasswordRequest, ResetPasswordRequest,
     RefreshRequest, RefreshResponse,
+    TwoFactorRequiredResponse, TwoFactorLoginVerify, TwoFactorSetupResponse,
+    TwoFactorEnableRequest, TwoFactorEnableResponse, TwoFactorDisableRequest, TwoFactorStatusResponse,
+    VerifyEmailRequest, ResendVerificationRequest,
 )
 from app.auth.utils import (
     hash_password, verify_password, create_access_token, create_refresh_token,
     decode_access_token, generate_temporary_password,
+    create_two_factor_pending_token, generate_totp_secret, get_totp_uri, verify_totp_code,
+    generate_backup_codes, consume_backup_code,
 )
 from app.supabase_auth import (
     is_supabase_auth_configured, create_supabase_user, verify_supabase_password,
@@ -117,6 +125,11 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
 
     user = db.query(User).filter(User.id == user_id).first()
     if user is None:
+        raise credentials_exception
+    # A token minted before the account's token_version was last bumped (password
+    # change/reset, POST /auth/logout-all) is treated as revoked, even though the
+    # JWT signature itself is still valid and unexpired - see User.token_version.
+    if payload.get("tv", 0) != user.token_version:
         raise credentials_exception
     if not user.is_active:
         raise HTTPException(
@@ -311,14 +324,43 @@ def register(user_in: UserCreate, db: Session = Depends(get_db)):
         full_name=user_in.full_name,
         role=role_lower,
         supabase_uid=supabase_uid,
+        # is_verified defaults to False (see User model) - the address passed
+        # validate_deliverable_email (its DOMAIN can receive mail) but nobody has
+        # proven THIS caller owns the mailbox yet. _send_verification_email below
+        # does that. Login is gated on this - see login().
     )
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
+
+    _send_verification_email(db, new_user)
     return new_user
 
 
-@router.post("/login", response_model=Token)
+def _issue_tokens_for_user(user: User) -> dict:
+    token_data = {
+        "sub": user.email,
+        "role": user.role,
+        "user_id": user.id,
+        # See User.token_version - lets every token minted for this login be
+        # revoked later (password change/reset, POST /auth/logout-all) without
+        # a server-side token/session table.
+        "tv": user.token_version,
+    }
+    access_token = create_access_token(token_data)
+    refresh_token = create_refresh_token(token_data)
+
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "bearer",
+        "role": user.role,
+        "full_name": user.full_name,
+        "user": UserResponse.model_validate(user),
+    }
+
+
+@router.post("/login", response_model=Union[Token, TwoFactorRequiredResponse])
 def login(credentials: UserLogin, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == credentials.email).first()
     if not user:
@@ -349,23 +391,139 @@ def login(credentials: UserLogin, db: Session = Depends(get_db)):
             detail="Your account is not active. Please contact support."
         )
 
-    # Create token payload
-    token_data = {
-        "sub": user.email,
-        "role": user.role,
-        "user_id": user.id
-    }
-    access_token = create_access_token(token_data)
-    refresh_token = create_refresh_token(token_data)
+    if not user.is_verified:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Please verify your email address before signing in. Check your inbox for the verification link, or request a new one.",
+        )
 
-    return {
-        "access_token": access_token,
-        "refresh_token": refresh_token,
-        "token_type": "bearer",
-        "role": user.role,
-        "full_name": user.full_name,
-        "user": UserResponse.model_validate(user),
-    }
+    # Password alone is not enough for a 2FA-enabled account: return a short-lived
+    # pending token instead of real access/refresh tokens, and make the frontend
+    # collect a code via POST /auth/2fa/verify-login before this login actually
+    # completes.
+    if user.is_2fa_enabled:
+        return TwoFactorRequiredResponse(temp_token=create_two_factor_pending_token(user.id))
+
+    return _issue_tokens_for_user(user)
+
+
+@router.post("/2fa/verify-login", response_model=Token)
+def two_factor_verify_login(payload: TwoFactorLoginVerify, db: Session = Depends(get_db)):
+    """Completes a login for a 2FA-enabled account - exchanges the temp_token from
+    /auth/login's TwoFactorRequiredResponse plus a code for real access/refresh
+    tokens, the same shape a normal /auth/login returns."""
+    decoded = decode_access_token(payload.temp_token)
+    if decoded is None or decoded.get("type") != "2fa_pending":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="This sign-in attempt has expired. Please sign in again.",
+        )
+
+    user = db.query(User).filter(User.id == decoded.get("user_id")).first()
+    if user is None or not user.is_active or not user.is_2fa_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="This sign-in attempt has expired. Please sign in again.",
+        )
+
+    if verify_totp_code(user.totp_secret, payload.code):
+        return _issue_tokens_for_user(user)
+
+    remaining = consume_backup_code(user.backup_codes_json, payload.code)
+    if remaining is not None:
+        user.backup_codes_json = remaining
+        db.commit()
+        return _issue_tokens_for_user(user)
+
+    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid authentication code.")
+
+
+@router.get("/2fa/status", response_model=TwoFactorStatusResponse)
+def two_factor_status(current_user: User = Depends(get_current_user)):
+    return TwoFactorStatusResponse(is_2fa_enabled=current_user.is_2fa_enabled)
+
+
+@router.post("/2fa/setup", response_model=TwoFactorSetupResponse)
+def two_factor_setup(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Starts (or restarts) 2FA setup: generates a fresh pending TOTP secret and
+    returns a scannable QR code. 2FA is NOT enabled by this call alone - the user
+    must prove they can generate a valid code with POST /auth/2fa/enable first, so
+    an account is never locked behind a code nobody can actually produce (e.g. the
+    QR code was never scanned, or scanned into the wrong app)."""
+    if current_user.is_2fa_enabled:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Two-factor authentication is already enabled.")
+
+    secret = generate_totp_secret()
+    current_user.totp_secret = secret
+    db.commit()
+
+    uri = get_totp_uri(secret, current_user.email)
+    qr_img = qrcode.make(uri)
+    buf = io.BytesIO()
+    qr_img.save(buf, format="PNG")
+    qr_base64 = base64.b64encode(buf.getvalue()).decode("ascii")
+
+    return TwoFactorSetupResponse(secret=secret, otpauth_uri=uri, qr_code_base64=qr_base64)
+
+
+@router.post("/2fa/enable", response_model=TwoFactorEnableResponse)
+def two_factor_enable(
+    payload: TwoFactorEnableRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Confirms setup (see two_factor_setup) and actually turns 2FA on. Returns a
+    fresh set of backup codes - shown to the user exactly once, here."""
+    if current_user.is_2fa_enabled:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Two-factor authentication is already enabled.")
+    if not current_user.totp_secret:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Start setup first with POST /auth/2fa/setup.")
+    if not verify_totp_code(current_user.totp_secret, payload.code):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid authentication code. Check your authenticator app and try again.")
+
+    raw_codes, hashed_json = generate_backup_codes()
+    current_user.is_2fa_enabled = True
+    current_user.backup_codes_json = hashed_json
+    db.commit()
+
+    return TwoFactorEnableResponse(backup_codes=raw_codes)
+
+
+@router.post("/2fa/disable")
+def two_factor_disable(
+    payload: TwoFactorDisableRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Turns 2FA off. Requires re-proving control of the account - either the
+    current password or a currently-valid code - so a hijacked, still-logged-in
+    session token alone can't strip 2FA protection off an account."""
+    if not current_user.is_2fa_enabled:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Two-factor authentication is not enabled.")
+
+    verified = False
+    if payload.code:
+        verified = verify_totp_code(current_user.totp_secret, payload.code) or (
+            consume_backup_code(current_user.backup_codes_json, payload.code) is not None
+        )
+    elif payload.password:
+        if current_user.supabase_uid:
+            verified = verify_supabase_password(current_user.email, payload.password)
+        else:
+            verified = bool(current_user.hashed_password) and verify_password(payload.password, current_user.hashed_password)
+
+    if not verified:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Could not verify your password or authentication code.")
+
+    current_user.is_2fa_enabled = False
+    current_user.totp_secret = None
+    current_user.backup_codes_json = None
+    db.commit()
+
+    return {"message": "Two-factor authentication has been disabled."}
 
 
 def _link_supabase_user_background(user_id: int, email: str, full_name: str) -> None:
@@ -385,7 +543,7 @@ def _link_supabase_user_background(user_id: int, email: str, full_name: str) -> 
         bg_db.close()
 
 
-@router.post("/google", response_model=Token)
+@router.post("/google", response_model=Union[Token, TwoFactorRequiredResponse])
 def google_login(payload: GoogleAuthRequest, db: Session = Depends(get_db)):
     """Sign in (or self-register as a student) using a Google ID token obtained by the
     frontend via Google Identity Services. Mirrors /register's rule that public
@@ -432,13 +590,20 @@ def google_login(payload: GoogleAuthRequest, db: Session = Depends(get_db)):
             full_name=full_name,
             role="student",
             google_id=google_sub,
+            # Google's own ID token already asserted email_verified above - no
+            # separate confirmation email needed for an account created this way.
+            is_verified=True,
         )
         db.add(user)
         db.commit()
         db.refresh(user)
     elif user.google_id is None:
         # First Google sign-in for an account that previously only had a password.
+        # Google's ID token just proved this caller owns the mailbox, which also
+        # satisfies email verification for an account that registered locally and
+        # never clicked its confirmation link.
         user.google_id = google_sub
+        user.is_verified = True
         db.commit()
         db.refresh(user)
     elif user.google_id != google_sub:
@@ -471,18 +636,16 @@ def google_login(payload: GoogleAuthRequest, db: Session = Depends(get_db)):
             detail="Your account is not active. Please contact support."
         )
 
-    token_data = {"sub": user.email, "role": user.role, "user_id": user.id}
-    access_token = create_access_token(token_data)
-    refresh_token = create_refresh_token(token_data)
+    # Google's own ID token only proves the person controls that Google account -
+    # it says nothing about whether THIS caller also knows the TOTP secret/backup
+    # codes this account additionally protected itself with. Without this check, a
+    # 2FA-enabled account (set up specifically to require a second factor) could be
+    # fully signed into just by linking/using Google, silently bypassing the second
+    # factor entirely. Same pending-token handshake as password login.
+    if user.is_2fa_enabled:
+        return TwoFactorRequiredResponse(temp_token=create_two_factor_pending_token(user.id))
 
-    return {
-        "access_token": access_token,
-        "refresh_token": refresh_token,
-        "token_type": "bearer",
-        "role": user.role,
-        "full_name": user.full_name,
-        "user": UserResponse.model_validate(user),
-    }
+    return _issue_tokens_for_user(user)
 
 
 @router.get("/me", response_model=UserResponse)
@@ -505,15 +668,33 @@ def refresh_access_token(payload: RefreshRequest, db: Session = Depends(get_db))
         )
 
     user = db.query(User).filter(User.id == decoded.get("user_id")).first()
-    if user is None or not user.is_active:
+    if (
+        user is None
+        or not user.is_active
+        or decoded.get("tv", 0) != user.token_version
+    ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired refresh token. Please sign in again.",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    access_token = create_access_token({"sub": user.email, "role": user.role, "user_id": user.id})
+    access_token = create_access_token({"sub": user.email, "role": user.role, "user_id": user.id, "tv": user.token_version})
     return {"access_token": access_token, "token_type": "bearer"}
+
+
+@router.post("/logout-all")
+def logout_all(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Revokes every access/refresh token issued for this account so far - including
+    the one used to call this endpoint - by bumping token_version (see
+    User.token_version). The frontend should treat a 401 right after calling this
+    as expected and clear its own stored tokens."""
+    current_user.token_version += 1
+    db.commit()
+    return {"message": "You have been signed out of every device/session."}
 
 
 @router.post("/change-password")
@@ -541,7 +722,13 @@ def change_password(
             if not payload.current_password or not verify_password(payload.current_password, current_user.hashed_password):
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect.")
         current_user.hashed_password = hash_password(payload.new_password)
-        db.commit()
+
+    # A password change is the standard "assume the old credential may be
+    # compromised" moment - revoke every token issued under the old password so a
+    # stolen access/refresh token stops working the instant the password changes,
+    # not just up to whichever expiry it happened to carry (see User.token_version).
+    current_user.token_version += 1
+    db.commit()
 
     return {"message": "Password updated successfully."}
 
@@ -615,10 +802,95 @@ def reset_password(payload: ResetPasswordRequest, db: Session = Depends(get_db))
     else:
         user.hashed_password = hash_password(payload.new_password)
 
+    # A "forgot password" reset is exactly the scenario token_version revocation
+    # exists for: if the account was reset because someone else's session/token was
+    # compromised, that session must stop working the moment the legitimate owner
+    # regains control - not linger until its own expiry (see User.token_version).
+    user.token_version += 1
     reset_token.used_at = datetime.utcnow()
     db.commit()
 
     return {"message": "Password reset successfully. You can now sign in with your new password."}
+
+
+# --- Email verification ---
+
+VERIFICATION_TOKEN_TTL = timedelta(hours=24)
+
+
+def _hash_verification_token(raw_token: str) -> str:
+    return hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+
+
+def _send_verification_email(db: Session, user: User) -> None:
+    """Issues a fresh verification token and emails the confirmation link. Used by
+    both register() and resend_verification() below. The token is created and
+    committed synchronously (so it exists the instant this returns), but the actual
+    SMTP send is dispatched to a background thread - same reasoning as
+    _create_staff_account's credentials email: Gmail SMTP can hang, and there is no
+    reason a slow/failed send should turn a successful registration into a timed-out
+    request. Best-effort either way: if email delivery isn't configured, the account
+    is simply left unverified until resend_verification/an admin intervenes."""
+    raw_token = secrets.token_urlsafe(32)
+    db.add(EmailVerificationToken(
+        user_id=user.id,
+        token_hash=_hash_verification_token(raw_token),
+        expires_at=datetime.utcnow() + VERIFICATION_TOKEN_TTL,
+    ))
+    db.commit()
+
+    frontend_url = (settings.FRONTEND_URL or "http://localhost:5173").rstrip("/")
+    verify_link = f"{frontend_url}/verify-email?token={raw_token}"
+    threading.Thread(
+        target=send_verification_email,
+        args=(user.email, user.full_name, verify_link),
+        daemon=True,
+    ).start()
+
+
+@router.post("/verify-email")
+def verify_email(payload: VerifyEmailRequest, db: Session = Depends(get_db)):
+    """Completes email verification from the link sent at registration. Same
+    single-use, time-limited token pattern as reset_password above."""
+    token_hash = _hash_verification_token(payload.token)
+    verification_token = (
+        db.query(EmailVerificationToken)
+        .filter(EmailVerificationToken.token_hash == token_hash)
+        .order_by(EmailVerificationToken.id.desc())
+        .first()
+    )
+    if (
+        not verification_token
+        or verification_token.used_at is not None
+        or verification_token.expires_at < datetime.utcnow()
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This verification link is invalid or has expired. Request a new one.",
+        )
+
+    user = db.query(User).filter(User.id == verification_token.user_id).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This verification link is invalid or has expired.")
+
+    user.is_verified = True
+    verification_token.used_at = datetime.utcnow()
+    db.commit()
+
+    return {"message": "Your email has been verified. You can now sign in."}
+
+
+@router.post("/resend-verification")
+def resend_verification(payload: ResendVerificationRequest, db: Session = Depends(get_db)):
+    """Same generic-response convention as forgot_password - doesn't reveal whether
+    the address belongs to an account, or whether that account is already verified."""
+    generic_response = {"message": "If an account exists for that email and isn't verified yet, a new verification link has been sent."}
+    user = db.query(User).filter(func.lower(User.email) == payload.email.lower()).first()
+    if not user or user.is_verified or not user.is_active:
+        return generic_response
+
+    _send_verification_email(db, user)
+    return generic_response
 
 
 # --- Avatar / profile photo upload ---
@@ -809,6 +1081,10 @@ def _create_staff_account(db: Session, email: str, full_name: str, role: str) ->
         full_name=full_name,
         role=role,
         supabase_uid=supabase_uid,
+        # Admin-provisioned, not self-registered - the admin already vouches for
+        # this address (and it already passed validate_deliverable_email), so there
+        # is no separate "prove you own this mailbox" step to gate login behind.
+        is_verified=True,
     )
     db.add(new_user)
     db.commit()
@@ -1212,11 +1488,13 @@ def delete_user(
     Only Course/Enrollment/UploadedFile/Notification cascade automatically via
     their SQLAlchemy relationship on User - every other table with a FK to
     users.id (assignments, announcements, materials, meetings, comments, chat
-    history, notification preferences, coordinator scope assignments) has no
-    cascade configured, so a plain `db.delete(user)` raises a foreign-key
-    IntegrityError for any user with real activity (which is effectively every
-    non-throwaway account). This explicitly clears those dependents first, in
-    dependency order, before deleting the user row."""
+    history, notification preferences, coordinator scope assignments, password
+    reset tokens, email verification tokens) has no cascade configured, so a plain
+    `db.delete(user)` raises a foreign-key IntegrityError for any user with real
+    activity (which is effectively every non-throwaway account, and - since
+    EmailVerificationToken is now created for every self-registered student at
+    signup - effectively every student account at all). This explicitly clears
+    those dependents first, in dependency order, before deleting the user row."""
     if user_id == current_admin.id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="You cannot delete your own admin account")
 
@@ -1241,6 +1519,8 @@ def delete_user(
     db.query(NotificationPreference).filter(NotificationPreference.user_id == user_id).delete(synchronize_session=False)
     db.query(ProgramCoordinatorAssignment).filter(ProgramCoordinatorAssignment.user_id == user_id).delete(synchronize_session=False)
     db.query(CourseCoordinatorAssignment).filter(CourseCoordinatorAssignment.user_id == user_id).delete(synchronize_session=False)
+    db.query(PasswordResetToken).filter(PasswordResetToken.user_id == user_id).delete(synchronize_session=False)
+    db.query(EmailVerificationToken).filter(EmailVerificationToken.user_id == user_id).delete(synchronize_session=False)
 
     db.delete(user)  # cascades Course -> Enrollment/UploadedFile/ContentChunk, and Notification
     db.commit()

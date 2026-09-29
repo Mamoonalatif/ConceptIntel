@@ -19,6 +19,7 @@ interface AuthContextType {
   token: string | null;
   isLoading: boolean;
   login: (credentials: any, rememberMe?: boolean) => Promise<any>;
+  verifyTwoFactor: (tempToken: string, code: string, rememberMe?: boolean) => Promise<any>;
   loginWithGoogle: (idToken: string, rememberMe?: boolean) => Promise<any>;
   register: (userData: any) => Promise<any>;
   logout: () => void;
@@ -326,12 +327,31 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const login = async (credentials: any, rememberMe: boolean = false) => {
     const data = await authService.login(credentials);
+    // A 2FA-enabled account: the password was correct, but this is NOT a completed
+    // sign-in yet - no token was issued, so there is nothing to store. The caller
+    // (Login.tsx) checks for requires_2fa and prompts for a code, then calls
+    // verifyTwoFactor below with the temp_token returned here.
+    if (data?.requires_2fa) {
+      return data;
+    }
+    await completeSignIn(data.access_token, data.refresh_token, rememberMe, data.user);
+    return data;
+  };
+
+  const verifyTwoFactor = async (tempToken: string, code: string, rememberMe: boolean = false) => {
+    const data = await authService.verifyTwoFactorLogin(tempToken, code);
     await completeSignIn(data.access_token, data.refresh_token, rememberMe, data.user);
     return data;
   };
 
   const loginWithGoogle = async (idToken: string, rememberMe: boolean = false) => {
     const data = await authService.google(idToken);
+    // Same 2FA handshake as login() above - a linked Google account does not skip
+    // a second factor the account was explicitly given (see backend/app/auth/routes.py
+    // google_login).
+    if (data?.requires_2fa) {
+      return data;
+    }
     await completeSignIn(data.access_token, data.refresh_token, rememberMe, data.user);
     return data;
   };
@@ -374,7 +394,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, isLoading, login, loginWithGoogle, register, logout, refreshUser }}>
+    <AuthContext.Provider value={{ user, token, isLoading, login, verifyTwoFactor, loginWithGoogle, register, logout, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );

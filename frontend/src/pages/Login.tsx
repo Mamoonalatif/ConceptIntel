@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { GoogleSignInButton } from '../components/GoogleSignInButton';
 import { isValidEmail } from '../lib/validators';
+import { authService } from '../services/api';
 import { FoxMark } from '../components/FoxMark';
 import { FoxMascot } from '../components/FoxMascot';
 import type { MascotRole } from '../components/FoxMascot';
@@ -120,7 +121,7 @@ const LeftPanel: React.FC = () => {
 };
 
 const Login: React.FC = () => {
-  const { login } = useAuth();
+  const { login, verifyTwoFactor } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const redirect = searchParams.get('redirect');
@@ -130,22 +131,110 @@ const Login: React.FC = () => {
   const [rememberMe, setRememberMe] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  // Set once the password check succeeds for a 2FA-enabled account - switches the
+  // form to the "enter your authenticator code" step. See AuthContext.login /
+  // backend/app/auth/routes.py login() for where this comes from.
+  const [twoFactorTempToken, setTwoFactorTempToken] = useState<string | null>(null);
+  const [twoFactorCode, setTwoFactorCode] = useState('');
+  // True when a login attempt failed specifically because the account's email
+  // isn't verified yet (see backend/app/auth/routes.py login()'s 403) - offers a
+  // "resend the link" action instead of just a generic error.
+  const [unverified, setUnverified] = useState(false);
+  const [resendState, setResendState] = useState<'idle' | 'sending' | 'sent'>('idle');
+  const justRegistered = searchParams.get('verify') === '1';
 
   const emailInvalid = email.length > 0 && !isValidEmail(email);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setUnverified(false);
     if (!isValidEmail(email)) { setError('Enter a valid email address.'); return; }
     setLoading(true);
     try {
       const data = await login({ email, password }, rememberMe);
+      if (data?.requires_2fa) {
+        setTwoFactorTempToken(data.temp_token);
+        setLoading(false);
+        return;
+      }
       navigate(redirect || dashboardPathForRole(data.role));
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Invalid email or password');
+      setUnverified(err.response?.status === 403 && /verify your email/i.test(err.response?.data?.detail || ''));
       setLoading(false);
     }
   };
+
+  const handleResendVerification = async () => {
+    setResendState('sending');
+    try {
+      await authService.resendVerification(email);
+      setResendState('sent');
+    } catch {
+      setResendState('idle');
+    }
+  };
+
+  const handleVerifyTwoFactor = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!twoFactorTempToken) return;
+    setError('');
+    setLoading(true);
+    try {
+      const data = await verifyTwoFactor(twoFactorTempToken, twoFactorCode.trim(), rememberMe);
+      navigate(redirect || dashboardPathForRole(data.role));
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Invalid authentication code.');
+      setLoading(false);
+    }
+  };
+
+  if (twoFactorTempToken) {
+    return (
+      <div className="h-screen bg-background flex items-center justify-center p-6">
+        <div className="w-full max-w-md glass-panel rounded-3xl shadow-card p-8">
+          <h1 className="text-2xl font-extrabold text-text-primary leading-none">Two-factor authentication</h1>
+          <p className="text-text-secondary text-sm mt-2 mb-6">
+            Enter the 6-digit code from your authenticator app, or one of your backup codes.
+          </p>
+
+          {error && (
+            <div className="bg-red-50 border border-red-200 text-red-600 rounded-xl p-3.5 flex items-center gap-2 mb-6 text-sm animate-fade-in">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{error}</span>
+            </div>
+          )}
+
+          <form onSubmit={handleVerifyTwoFactor} className="space-y-5">
+            <input
+              type="text"
+              inputMode="numeric"
+              autoFocus
+              className="input-light text-center tracking-[0.3em] text-lg"
+              placeholder="000000"
+              value={twoFactorCode}
+              onChange={(e) => setTwoFactorCode(e.target.value)}
+            />
+            <button
+              type="submit"
+              disabled={loading || !twoFactorCode}
+              className="btn-primary w-full justify-center disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <span>Verify</span>}
+            </button>
+            <button
+              type="button"
+              className="w-full text-sm font-semibold text-text-secondary hover:text-primary transition-colors"
+              onClick={() => { setTwoFactorTempToken(null); setTwoFactorCode(''); setError(''); }}
+            >
+              Back to sign in
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="h-screen bg-background flex flex-col overflow-hidden">
@@ -195,10 +284,29 @@ const Login: React.FC = () => {
                 </div>
               </div>
 
+              {!error && justRegistered && (
+                <div className="bg-primary-muted border border-primary/20 text-primary rounded-xl p-3.5 flex items-center gap-2 mb-6 text-sm animate-fade-in">
+                  <Mail className="w-4 h-4 shrink-0" />
+                  <span>Account created! Check your email for a verification link before signing in.</span>
+                </div>
+              )}
+
               {error && (
-                <div className="bg-red-50 border border-red-200 text-red-600 rounded-xl p-3.5 flex items-center gap-2 mb-6 text-sm animate-fade-in">
-                  <AlertCircle className="w-4 h-4 shrink-0" />
-                  <span>{error}</span>
+                <div className="bg-red-50 border border-red-200 text-red-600 rounded-xl p-3.5 flex flex-col gap-2 mb-6 text-sm animate-fade-in">
+                  <div className="flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                    <span>{error}</span>
+                  </div>
+                  {unverified && (
+                    <button
+                      type="button"
+                      onClick={handleResendVerification}
+                      disabled={resendState !== 'idle'}
+                      className="self-start text-xs font-semibold text-red-700 hover:underline disabled:opacity-60"
+                    >
+                      {resendState === 'sent' ? 'Verification email sent - check your inbox.' : resendState === 'sending' ? 'Sending...' : 'Resend verification email'}
+                    </button>
+                  )}
                 </div>
               )}
 
@@ -298,6 +406,7 @@ const Login: React.FC = () => {
                 rememberMe={rememberMe}
                 onSuccess={(role) => navigate(redirect || dashboardPathForRole(role))}
                 onError={setError}
+                onRequiresTwoFactor={(tempToken) => setTwoFactorTempToken(tempToken)}
               />
 
               <div className="mt-6 pt-6 border-t border-border text-center">

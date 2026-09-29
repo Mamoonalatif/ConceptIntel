@@ -21,6 +21,15 @@ class User(Base):
     is_program_coordinator = Column(Boolean, default=False, nullable=False)
     is_course_coordinator = Column(Boolean, default=False, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
+    # True for every account whose email address has actually been proven reachable
+    # by its owner: a Google sign-in (Google already checked email_verified on its
+    # ID token) or an admin-provisioned staff account (the admin vouches for it).
+    # False for a fresh self-registered student until they click the link from
+    # send_verification_email - see auth/routes.py register()/verify_email(). Note
+    # this is separate from the MX/deliverability check on the email address itself
+    # (auth/schemas.py validate_deliverable_email): that only proves the DOMAIN can
+    # receive mail, not that THIS caller controls the specific mailbox.
+    is_verified = Column(Boolean, default=False, nullable=False)
     # Google account identifier ("sub" claim), set the first time a user signs in with Google.
     google_id = Column(String, unique=True, index=True, nullable=True)
     # Bridge to Supabase Auth's auth.users.id (UUID) - set once a user authenticates
@@ -40,6 +49,27 @@ class User(Base):
     # pattern as course material attachments.
     avatar_url = Column(String, nullable=True)
 
+    # --- Two-factor authentication (TOTP, RFC 6238) ---
+    # Set as soon as /auth/2fa/setup is called, but 2FA only actually gates login
+    # once is_2fa_enabled is True (see /auth/2fa/enable) - a user who starts setup
+    # and never confirms it with a valid code never has login behavior changed.
+    totp_secret = Column(String, nullable=True)
+    is_2fa_enabled = Column(Boolean, default=False, nullable=False)
+    # JSON list of sha256 hashes of one-time backup codes (same "never store the raw
+    # value" convention as PasswordResetToken.token_hash) - each one lets the user
+    # back into their account if they lose their authenticator device. Consumed
+    # (removed from the list) on use.
+    backup_codes_json = Column(Text, nullable=True)
+
+    # Every access/refresh token minted for this user carries this value as a "tv"
+    # claim (see auth/utils.py); get_current_user and /auth/refresh both reject a
+    # token whose tv doesn't match the CURRENT value here. Refresh tokens are
+    # otherwise stateless JWTs with no server-side record, so bumping this is the
+    # only way to revoke every outstanding session for an account on demand -
+    # incremented on password change/reset (a credential-compromise response) and
+    # by POST /auth/logout-all.
+    token_version = Column(Integer, default=0, nullable=False)
+
     # Relationships
     courses_taught = relationship("Course", back_populates="teacher", cascade="all, delete-orphan")
     enrollments = relationship("Enrollment", back_populates="student", cascade="all, delete-orphan")
@@ -57,6 +87,20 @@ class PasswordResetToken(Base):
     app/main.py, Base.metadata.create_all() never alters an existing table), and a
     new table IS something create_all() can add on its own, unlike a new column."""
     __tablename__ = "password_reset_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    token_hash = Column(String, nullable=False, index=True)
+    expires_at = Column(DateTime, nullable=False)
+    used_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, server_default=func.now(), nullable=False)
+
+
+class EmailVerificationToken(Base):
+    """A one-time "confirm your email" link, same storage convention as
+    PasswordResetToken (only the sha256 hash is persisted - the raw token only ever
+    exists in the emailed link and briefly in memory server-side)."""
+    __tablename__ = "email_verification_tokens"
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
@@ -919,6 +963,10 @@ class QuestionBankItem(Base):
     catalog_id = Column(Integer, ForeignKey("course_catalog.id"), nullable=True, index=True)
     concept_node_id = Column(String, nullable=True, index=True)
     concept_name = Column(String, nullable=True)
+    # Which Course Learning Outcome this question assesses, if any - feeds
+    # CLOAttainment (and, via CLOPLOMap, PLOAttainment) when an exam containing
+    # this question is graded. Optional: a question can grade normally without one.
+    clo_id = Column(Integer, ForeignKey("clos.id"), nullable=True, index=True)
 
     question_type = Column(String, nullable=False, index=True)  # see docstring for the five shapes
     prompt = Column(Text, nullable=False)
@@ -1521,4 +1569,20 @@ class GraphEditProposal(Base):
     coordinator_notes = Column(Text, nullable=True)
 
     created_at = Column(DateTime, server_default=func.now())
+
+
+class DailyGenerationUsage(Base):
+    """Per-user, per-calendar-day counter for token-spending 'Generate' actions
+    (content generation, question-bank generation, game generation) - a blunt
+    backstop against one account racking up LLM spend by clicking Generate
+    repeatedly (see app/core/quota.py), not a precise token budget."""
+    __tablename__ = "daily_generation_usage"
+    __table_args__ = (
+        UniqueConstraint("user_id", "usage_date", name="uq_user_usage_date"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    usage_date = Column(Date, nullable=False, index=True)
+    count = Column(Integer, nullable=False, default=0)
 

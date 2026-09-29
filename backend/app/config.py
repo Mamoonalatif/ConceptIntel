@@ -1,4 +1,5 @@
 import os
+import secrets
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -14,7 +15,18 @@ class Settings:
     DATABASE_URL: str = os.getenv("DATABASE_URL", "")
 
     # JWT Authentication
-    JWT_SECRET: str = os.getenv("JWT_SECRET", "super_secret_conceptintel_token_signing_key_2026")
+    # No JWT_SECRET in the environment used to silently fall back to a fixed,
+    # hardcoded string baked into this file - every deployment left unconfigured
+    # shared the exact same signing key, so anyone could forge a valid auth token
+    # for ANY user against ANY such deployment (this repo's git history, or the
+    # public source itself, was the key). A per-process random secret closes that:
+    # it can't be known in advance and isn't shared across deployments, at the cost
+    # of invalidating every session on restart if JWT_SECRET is never actually set -
+    # a real availability annoyance, but never a forgeable-token vulnerability. See
+    # app/main.py for the startup warning this drives.
+    _env_jwt_secret = os.getenv("JWT_SECRET", "")
+    JWT_SECRET_WAS_GENERATED: bool = not _env_jwt_secret
+    JWT_SECRET: str = _env_jwt_secret or secrets.token_urlsafe(48)
     JWT_ALGORITHM: str = os.getenv("JWT_ALGORITHM", "HS256")
     ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "1440"))
     # A long-lived companion to the access token, issued alongside it at login and
@@ -74,6 +86,12 @@ class Settings:
     OPENROUTER_API_KEY: str = os.getenv("OPENROUTER_API_KEY", "")
     OPENROUTER_BASE_URL: str = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
     KIMI_MODEL: str = os.getenv("KIMI_MODEL", "moonshotai/kimi-k2")
+
+    # Simple per-user, per-calendar-day cap on token-spending "Generate" actions
+    # (content generation, question-bank generation, game generation) - a backstop
+    # against one account racking up spend by clicking Generate repeatedly, not a
+    # precise budget. 0 disables the cap entirely.
+    DAILY_GENERATION_LIMIT: int = int(os.getenv("DAILY_GENERATION_LIMIT", "40"))
 
     # ---------------------------------------------------------------------
     # RAG / embeddings

@@ -6,6 +6,10 @@ python-multipart==0.0.9
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
 pydantic[email]==2.6.4
+email-validator==2.1.1
+dnspython==2.6.1
+pyotp==2.9.0
+qrcode[pil]==7.4.2
 neo4j==5.18.0
 openai==1.14.1
 google-genai==1.0.0

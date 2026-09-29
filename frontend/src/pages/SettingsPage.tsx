@@ -3,10 +3,11 @@ import { useNavigate } from 'react-router-dom';
 import { AppShell, type NavItem } from '../components/AppShell';
 import { useAuth } from '../context/AuthContext';
 import { ChangePasswordModal } from '../components/ChangePasswordModal';
+import { TwoFactorSetupModal, TwoFactorDisableModal } from '../components/TwoFactorSetupModal';
 import { ProfilePhotoEditor } from '../components/ProfilePhotoEditor';
-import { notificationPreferencesService, type NotificationPreferences } from '../services/api';
+import { notificationPreferencesService, authService, type NotificationPreferences } from '../services/api';
 import { getPrimaryNavItems } from '../lib/roleNav';
-import { Settings, RefreshCw, AlertCircle, KeyRound, Mail } from 'lucide-react';
+import { Settings, RefreshCw, AlertCircle, KeyRound, Mail, ShieldCheck, ShieldOff } from 'lucide-react';
 import { apiErrorMessage } from '../lib/apiError';
 
 /* Accessible pill toggle switch, styled with the app's theme tokens.
@@ -89,6 +90,9 @@ const SettingsPage: React.FC = () => {
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [photoError, setPhotoError] = useState('');
+  const [is2faEnabled, setIs2faEnabled] = useState<boolean | null>(null);
+  const [show2faSetup, setShow2faSetup] = useState(false);
+  const [show2faDisable, setShow2faDisable] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -100,6 +104,14 @@ const SettingsPage: React.FC = () => {
         if (!cancelled) setError(apiErrorMessage(err, 'Could not load your notification preferences.'));
       } finally {
         if (!cancelled) setLoading(false);
+      }
+    })();
+    (async () => {
+      try {
+        const status = await authService.twoFactorStatus();
+        if (!cancelled) setIs2faEnabled(status.is_2fa_enabled);
+      } catch {
+        /* non-fatal - the toggle just won't render until this resolves */
       }
     })();
     return () => {
@@ -169,6 +181,32 @@ const SettingsPage: React.FC = () => {
           </div>
         )}
 
+        {/* Two-factor authentication */}
+        <div className="glass-panel rounded-2xl p-6 border border-border shadow-card">
+          <h2 className="text-base font-bold text-text-primary mb-1">Two-factor authentication</h2>
+          <p className="text-xs text-text-secondary mb-4">
+            Require a code from an authenticator app, in addition to your password, when signing in.
+          </p>
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-2 text-sm font-semibold text-text-primary">
+              {is2faEnabled ? (
+                <><ShieldCheck className="w-4 h-4 text-emerald-600" /> Enabled</>
+              ) : (
+                <><ShieldOff className="w-4 h-4 text-text-muted" /> Not enabled</>
+              )}
+            </div>
+            {is2faEnabled === null ? null : is2faEnabled ? (
+              <button onClick={() => setShow2faDisable(true)} className="btn-ghost text-xs shrink-0">
+                Disable
+              </button>
+            ) : (
+              <button onClick={() => setShow2faSetup(true)} className="btn-primary text-xs shrink-0">
+                Enable 2FA
+              </button>
+            )}
+          </div>
+        </div>
+
         {/* Email notifications */}
         <div className="glass-panel rounded-2xl p-6 border border-border shadow-card">
           <h2 className="text-base font-bold text-text-primary mb-1">Email notifications</h2>
@@ -210,6 +248,19 @@ const SettingsPage: React.FC = () => {
       </div>
 
       {showChangePassword && <ChangePasswordModal onClose={() => setShowChangePassword(false)} />}
+      {show2faSetup && (
+        <TwoFactorSetupModal
+          onClose={() => setShow2faSetup(false)}
+          onEnabled={() => { setShow2faSetup(false); setIs2faEnabled(true); }}
+        />
+      )}
+      {show2faDisable && (
+        <TwoFactorDisableModal
+          hasPassword
+          onClose={() => setShow2faDisable(false)}
+          onDisabled={() => { setShow2faDisable(false); setIs2faEnabled(false); }}
+        />
+      )}
     </AppShell>
   );
 };

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { authService } from '../services/api';
+import { useAuth } from '../context/AuthContext';
 import { PasswordChecklist, isPasswordValid } from './PasswordChecklist';
 import { X, Lock, Eye, EyeOff, AlertCircle, CheckCircle2, XCircle, RefreshCw } from 'lucide-react';
 
@@ -8,6 +9,11 @@ interface ChangePasswordModalProps {
 }
 
 export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({ onClose }) => {
+  // Changing the password revokes every outstanding token server-side (see
+  // backend/app/auth/routes.py change_password / User.token_version), including
+  // the one this very session is using - so the current session must sign itself
+  // out right after, instead of silently 401ing on its next request.
+  const { logout } = useAuth();
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -67,9 +73,9 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({ onClos
           <div className="p-6">
             <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-xl p-4 flex items-center gap-2 text-sm mb-4">
               <CheckCircle2 className="w-4 h-4 shrink-0" />
-              Password updated successfully.
+              Password updated. For your security, please sign in again with your new password.
             </div>
-            <button onClick={onClose} className="btn-primary w-full justify-center">Done</button>
+            <button onClick={logout} className="btn-primary w-full justify-center">Sign in again</button>
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="p-6 space-y-4">

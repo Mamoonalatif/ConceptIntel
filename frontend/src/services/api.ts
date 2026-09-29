@@ -40,7 +40,7 @@ api.interceptors.request.use(
 // also store a long-lived refresh_token (see storeToken there) - on a 401 this
 // interceptor exchanges it for a fresh access token via POST /auth/refresh and
 // silently retries the request exactly once.
-const REFRESH_EXEMPT_PATHS = ['/auth/login', '/auth/register', '/auth/google', '/auth/refresh'];
+const REFRESH_EXEMPT_PATHS = ['/auth/login', '/auth/register', '/auth/google', '/auth/refresh', '/auth/2fa/verify-login'];
 
 // Shared across every 401 that lands in the same tick, so five requests failing
 // at once trigger one refresh call, not five.
@@ -246,8 +246,41 @@ export const authService = {
     const res = await api.post('/auth/reset-password', { token, new_password });
     return res.data;
   },
+  verifyEmail: async (token: string) => {
+    const res = await api.post('/auth/verify-email', { token });
+    return res.data;
+  },
+  resendVerification: async (email: string) => {
+    const res = await api.post('/auth/resend-verification', { email });
+    return res.data;
+  },
   refresh: async (refreshToken: string) => {
     const res = await api.post('/auth/refresh', { refresh_token: refreshToken });
+    return res.data;
+  },
+  // --- Two-factor authentication ---
+  // login() above may resolve with { requires_2fa: true, temp_token } instead of a
+  // normal token payload - see backend/app/auth/routes.py login(). The caller (see
+  // AuthContext.login) checks for that shape and, if present, does NOT treat it as
+  // a completed sign-in; the frontend then collects a code and calls this instead.
+  verifyTwoFactorLogin: async (tempToken: string, code: string) => {
+    const res = await api.post('/auth/2fa/verify-login', { temp_token: tempToken, code });
+    return res.data;
+  },
+  twoFactorStatus: async (): Promise<{ is_2fa_enabled: boolean }> => {
+    const res = await api.get('/auth/2fa/status');
+    return res.data;
+  },
+  twoFactorSetup: async (): Promise<{ secret: string; otpauth_uri: string; qr_code_base64: string }> => {
+    const res = await api.post('/auth/2fa/setup');
+    return res.data;
+  },
+  twoFactorEnable: async (code: string): Promise<{ backup_codes: string[] }> => {
+    const res = await api.post('/auth/2fa/enable', { code });
+    return res.data;
+  },
+  twoFactorDisable: async (data: { password?: string; code?: string }) => {
+    const res = await api.post('/auth/2fa/disable', data);
     return res.data;
   },
   requestTeacherAccess: async (data: { email: string; full_name: string; reason?: string }) => {
@@ -1877,6 +1910,9 @@ export interface BankQuestion {
   time_limit_seconds: number | null;
   concept_node_id: string | null;
   concept_name: string | null;
+  /** Course Learning Outcome this question assesses, if tagged. */
+  clo_id: number | null;
+  clo_code: string | null;
   source: 'generated' | 'imported' | 'manual';
   status: string;
   created_at: string;

@@ -76,6 +76,20 @@ def send_password_reset_email(to_email: str, full_name: str, reset_link: str) ->
     return send_email(to_email, subject, html_body)
 
 
+def send_verification_email(to_email: str, full_name: str, verify_link: str) -> bool:
+    subject = "Verify your ConceptIntel email address"
+    html_body = f"""
+    <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+      <h2 style="color: #4f46e5;">Verify your email</h2>
+      <p>Hi {full_name},</p>
+      <p>Thanks for signing up for ConceptIntel. Please confirm this is your email address:</p>
+      <p><a href="{verify_link}" style="display: inline-block; background: #4f46e5; color: white; padding: 10px 20px; border-radius: 8px; text-decoration: none;">Verify email address</a></p>
+      <p style="color: #94a3b8; font-size: 12px;">This link expires in 24 hours. If you didn't create a ConceptIntel account, you can safely ignore this email.</p>
+    </div>
+    """
+    return send_email(to_email, subject, html_body)
+
+
 def send_notification_email(to_email: str, full_name: str, title: str, message: str, link: str = None) -> bool:
     """Email counterpart for a small set of high-value in-app notifications (upload
     failures, graph rejections, new teacher requests) - see the call sites in

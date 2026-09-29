@@ -7,6 +7,9 @@ interface GoogleSignInButtonProps {
   rememberMe?: boolean;
   onSuccess: (role: string) => void;
   onError: (message: string) => void;
+  // Called instead of onSuccess when the linked account has 2FA enabled - the
+  // caller should collect a code and finish with useAuth().verifyTwoFactor(tempToken, code).
+  onRequiresTwoFactor?: (tempToken: string) => void;
 }
 
 const isConfigured = Boolean(import.meta.env.VITE_GOOGLE_CLIENT_ID);
@@ -15,6 +18,7 @@ export const GoogleSignInButton: React.FC<GoogleSignInButtonProps> = ({
   rememberMe = true,
   onSuccess,
   onError,
+  onRequiresTwoFactor,
 }) => {
   const { loginWithGoogle } = useAuth();
   const { theme } = useTheme();
@@ -39,6 +43,11 @@ export const GoogleSignInButton: React.FC<GoogleSignInButtonProps> = ({
     }
     try {
       const data = await loginWithGoogle(credentialResponse.credential, rememberMe);
+      if (data?.requires_2fa) {
+        if (onRequiresTwoFactor) onRequiresTwoFactor(data.temp_token);
+        else onError('This account requires a two-factor code, which is not supported here.');
+        return;
+      }
       onSuccess(data.role);
     } catch (err: any) {
       onError(err.response?.data?.detail || 'Google sign-in failed.');
