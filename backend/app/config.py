@@ -81,8 +81,21 @@ class Settings:
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
     GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
 
-    # Kimi K2 via OpenRouter (OpenAI-compatible endpoint) - used by the new
-    # content_processing pipeline for cleaning/structuring OCR'd + uploaded text.
+    # Structured-generation model (content processing, concept extraction/knowledge
+    # graph building, grading, question/content generation, embeddings, image
+    # captioning) - see app/content_processing/kimi_service.py _get_client, the one
+    # shared client factory almost every one of those call sites imports from.
+    # Historically always Kimi K2 via OpenRouter's OpenAI-compatible endpoint
+    # (OPENROUTER_API_KEY/OPENROUTER_BASE_URL) - KIMI_MODEL is the model id kept for
+    # backward compatibility even though it may now hold a non-Kimi model.
+    #
+    # GEMINI_DIRECT=true instead calls Google's own OpenAI-compatible endpoint with
+    # GEMINI_API_KEY, bypassing OpenRouter entirely - the only way to actually spend
+    # Google AI Studio's free-tier quota (e.g. Gemini 2.5 Flash's 1,500 free
+    # requests/day) rather than OpenRouter's paid-per-token rate for the same model.
+    # When enabled, KIMI_MODEL must be a bare Gemini model id Google's endpoint
+    # accepts (e.g. "gemini-2.5-flash-lite"), NOT an OpenRouter-style "google/..." id.
+    GEMINI_DIRECT: bool = os.getenv("GEMINI_DIRECT", "false").lower() == "true"
     OPENROUTER_API_KEY: str = os.getenv("OPENROUTER_API_KEY", "")
     OPENROUTER_BASE_URL: str = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
     KIMI_MODEL: str = os.getenv("KIMI_MODEL", "moonshotai/kimi-k2")

@@ -19,16 +19,21 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database.models import Course, CourseSchedule, ScheduleSession
-from app.content_processing.kimi_service import openrouter_payment_error_message
+from app.content_processing.kimi_service import openrouter_payment_error_message, _get_client as _get_shared_client
 from app.content_processing.pipeline_service import get_course_outline_text
 
 logger = logging.getLogger("conceptintel.schedule")
 
 
 def _get_client() -> OpenAI:
-    if not settings.OPENROUTER_API_KEY or settings.OPENROUTER_API_KEY.startswith("your_"):
-        raise RuntimeError("OPENROUTER_API_KEY is not configured - cannot generate a schedule.")
-    return OpenAI(api_key=settings.OPENROUTER_API_KEY, base_url=settings.OPENROUTER_BASE_URL)
+    # Was its own near-duplicate of kimi_service._get_client (same OpenRouter-only
+    # client, copy-pasted) - delegating to the shared one instead means this module
+    # picks up GEMINI_DIRECT support (see config.py) for free instead of silently
+    # staying on OpenRouter while every other caller switches.
+    client = _get_shared_client()
+    if client is None:
+        raise RuntimeError("OPENROUTER_API_KEY (or GEMINI_API_KEY, if GEMINI_DIRECT is set) is not configured - cannot generate a schedule.")
+    return client
 
 
 def _extract_sessions_from_outline(outline_text: str) -> List[Dict[str, Any]]:

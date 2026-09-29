@@ -267,7 +267,21 @@ def _build_system_prompt(
     )
 
 
+# Google's OpenAI-compatible endpoint (see
+# https://ai.google.dev/gemini-api/docs/openai) - the ONLY base_url that actually
+# draws against Google AI Studio's free-tier quota; OpenRouter serves the same
+# Gemini models but always at its own paid per-token rate. Fixed, not deployment-
+# specific, so it isn't an env var like OPENROUTER_BASE_URL.
+GEMINI_OPENAI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
+
+
 def _get_client() -> Optional[OpenAI]:
+    # See config.py GEMINI_DIRECT - calls Google directly (and its free tier) when
+    # enabled, instead of OpenRouter's paid rate for the same model.
+    if settings.GEMINI_DIRECT:
+        if not settings.GEMINI_API_KEY or settings.GEMINI_API_KEY.startswith("your_"):
+            return None
+        return OpenAI(api_key=settings.GEMINI_API_KEY, base_url=GEMINI_OPENAI_BASE_URL, timeout=60.0)
     if not settings.OPENROUTER_API_KEY or settings.OPENROUTER_API_KEY.startswith("your_"):
         return None
     # Explicit timeout - the openai SDK's default (600s) means a slow/hung free-tier
