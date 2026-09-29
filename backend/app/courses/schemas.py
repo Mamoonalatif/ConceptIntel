@@ -13,6 +13,16 @@ def check_description_word_count(v: str) -> str:
     return v
 
 
+def check_positive_max_students(v: Optional[int]) -> Optional[int]:
+    """None means unlimited (see enrollment/services.py's capacity check) - but a
+    caller-supplied 0 or negative value isn't a smaller-but-valid capacity, it
+    silently locks every student out of joining. Reject it outright instead of
+    accepting a course nobody can ever enroll in."""
+    if v is not None and v < 1:
+        raise ValueError("max_students must be at least 1 (omit it entirely for unlimited capacity)")
+    return v
+
+
 # --- Course Catalog (predefined offerings; admin-managed) ---
 
 class CourseCatalogCreate(BaseModel):
@@ -62,6 +72,11 @@ class CourseCreate(BaseModel):
     def check_description_length(cls, v: str) -> str:
         return check_description_word_count(v)
 
+    @field_validator("max_students")
+    @classmethod
+    def check_max_students(cls, v: Optional[int]) -> Optional[int]:
+        return check_positive_max_students(v)
+
     @model_validator(mode="after")
     def check_date_ordering(self):
         if self.enrollment_start < date.today():
@@ -98,6 +113,11 @@ class CourseUpdate(BaseModel):
         if v is None:
             return v
         return check_description_word_count(v)
+
+    @field_validator("max_students")
+    @classmethod
+    def check_max_students(cls, v: Optional[int]) -> Optional[int]:
+        return check_positive_max_students(v)
 
     @model_validator(mode="after")
     def check_date_ordering(self):
@@ -162,3 +182,8 @@ class AdminCourseUpdate(BaseModel):
     max_students: Optional[int] = None
     status: Optional[str] = None
     prerequisite_course_id: Optional[int] = None
+
+    @field_validator("max_students")
+    @classmethod
+    def check_max_students(cls, v: Optional[int]) -> Optional[int]:
+        return check_positive_max_students(v)

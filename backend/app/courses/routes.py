@@ -1,6 +1,6 @@
-import random
+import secrets
 import string
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 from typing import List
 from pydantic import BaseModel
@@ -18,8 +18,16 @@ from app.auth.routes import (
 )
 from app.courses.access import assert_course_access
 from app.courses.services import delete_course_cascade
+from app.core.rate_limit import enforce_rate_limit
 
 router = APIRouter(prefix="/courses", tags=["Courses"])
+
+# Public and unauthenticated (see lookup_course_by_code below), so the only
+# available key is the caller's IP - generous enough for the real use case
+# (a student mistyping a code a few times) while useless for scripting through
+# the enrollment-code keyspace.
+LOOKUP_RATE_LIMIT = 20
+LOOKUP_RATE_LIMIT_WINDOW_SECONDS = 300
 
 
 def _assert_program_in_scope(scope: ProgramScope, program_id):
@@ -32,10 +40,14 @@ def _assert_program_in_scope(scope: ProgramScope, program_id):
         )
 
 def generate_unique_code(db: Session) -> str:
-    """Generates a unique 8-character alphanumeric enrollment code."""
+    """Generates a unique 8-character alphanumeric enrollment code. This code is
+    effectively a bearer credential - anyone who has it can join the course (see
+    enrollment/services.py join_course_service) - so it's generated with `secrets`
+    (CSPRNG), not the `random` module's Mersenne Twister, which is predictable
+    enough from a handful of outputs to make future codes guessable."""
     characters = string.ascii_uppercase + string.digits
     while True:
-        code = "".join(random.choices(characters, k=8))
+        code = "".join(secrets.choice(characters) for _ in range(8))
         # Ensure it doesn't already exist
         exists = db.query(Course).filter(Course.enrollment_code == code).first()
         if not exists:
@@ -200,12 +212,15 @@ def get_all_courses(db: Session = Depends(get_db), current_user: User = Depends(
 @router.get("/lookup/{enrollment_code}", response_model=CourseLookupResponse)
 def lookup_course_by_code(
     enrollment_code: str,
+    request: Request,
     db: Session = Depends(get_db),
 ):
     """Read-only, no-side-effect, PUBLIC lookup (no auth) - used both by the student
     enrollment form and by the /join/:code landing page, which a logged-out visitor
     can land on straight from a shared join link before they've signed in. Only
     exposes name/code - nothing else."""
+    client_ip = request.client.host if request.client else "unknown"
+    enforce_rate_limit("course-lookup", client_ip, LOOKUP_RATE_LIMIT, LOOKUP_RATE_LIMIT_WINDOW_SECONDS)
     code = enrollment_code.strip().upper()
     course = db.query(Course).filter(Course.enrollment_code == code).first()
     if not course:

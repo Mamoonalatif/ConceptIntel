@@ -10,8 +10,17 @@ from app.enrollment.services import join_course_service, EnrollmentError
 from app.auth.routes import get_current_student, get_current_teacher, get_current_user
 from app.notifications.service import create_notification
 from app.notifications.types import NotificationType
+from app.core.rate_limit import enforce_rate_limit
 
 router = APIRouter(prefix="/enrollment", tags=["Enrollments"])
+
+# The enrollment code is effectively a bearer credential (see
+# courses/routes.py generate_unique_code) - without a limit here, a caller could
+# script through the whole 8-character keyspace against this endpoint. 10 tries
+# per 5 minutes is generous for a real student (who has the code in an email/
+# announcement and mistypes at most a couple of times) but useless for guessing.
+JOIN_RATE_LIMIT = 10
+JOIN_RATE_LIMIT_WINDOW_SECONDS = 300
 
 
 @router.post("/join", response_model=EnrollmentResponse)
@@ -24,6 +33,7 @@ def join_course(
     validation/business rules live in enrollment/services.py - this route is just
     the HTTP translation layer (structured errors -> HTTPException, unexpected
     DB failures -> a clean 503 instead of a leaked stack trace)."""
+    enforce_rate_limit("enrollment-join", str(current_student.id), JOIN_RATE_LIMIT, JOIN_RATE_LIMIT_WINDOW_SECONDS)
     try:
         enrollment = join_course_service(db, current_student, req.enrollment_code)
     except EnrollmentError as e:
