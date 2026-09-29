@@ -177,7 +177,7 @@ def caption_image(image_bytes: bytes, course_name: str) -> Optional[str]:
     if not is_captioning_configured():
         return None
     try:
-        from app.content_processing.kimi_service import _get_client
+        from app.content_processing.kimi_service import _get_client, _reasoning_extra_body
         client = _get_client()
         if client is None:
             # Belt-and-braces: is_captioning_configured() applies the same test, so
@@ -198,7 +198,7 @@ def caption_image(image_bytes: bytes, course_name: str) -> Optional[str]:
             temperature=0.2,
             max_tokens=150,
             timeout=60.0,
-            extra_body={"reasoning": {"exclude": True}},
+            extra_body=_reasoning_extra_body(),
         )
         caption = (response.choices[0].message.content or "").strip()
         if not caption:

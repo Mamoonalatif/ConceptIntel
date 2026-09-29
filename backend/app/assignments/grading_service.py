@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from app.config import settings
-from app.content_processing.kimi_service import _get_client, openrouter_payment_error_message
+from app.content_processing.kimi_service import _get_client, openrouter_payment_error_message, _reasoning_extra_body
 from app.observability import trace_ai_call
 from app.upload.services import extract_text_from_file
 
@@ -207,7 +207,7 @@ Student's submission (extracted text, first 12000 characters):
                 # occasionally - see kimi_service.py for the full explanation).
                 max_tokens=3000,
                 timeout=60.0,
-                extra_body={"reasoning": {"exclude": True}},
+                extra_body=_reasoning_extra_body(),
             )
             logger.info("Grading request finished in %.1fs", time.monotonic() - started)
             raw_content = response.choices[0].message.content

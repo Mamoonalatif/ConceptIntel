@@ -74,7 +74,7 @@ def _summarize_via_openrouter(post_type: str, title: str, content: str) -> str:
     post-create request, so two extra round trips would be paid in user-visible
     latency to improve a one-line blurb. Prose out, so no response_format.
     """
-    from app.content_processing.kimi_service import _get_client
+    from app.content_processing.kimi_service import _get_client, _reasoning_extra_body
 
     client = _get_client()
     if client is None:
@@ -99,7 +99,7 @@ def _summarize_via_openrouter(post_type: str, title: str, content: str) -> str:
         # and message.content=None.
         max_tokens=200,
         timeout=60.0,
-        extra_body={"reasoning": {"exclude": True}},
+        extra_body=_reasoning_extra_body(),
     )
 
     summary = (response.choices[0].message.content or "").strip()

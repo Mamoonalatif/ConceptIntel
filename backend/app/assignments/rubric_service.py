@@ -23,7 +23,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 from app.config import settings
-from app.content_processing.kimi_service import _get_client, openrouter_payment_error_message
+from app.content_processing.kimi_service import _get_client, openrouter_payment_error_message, _reasoning_extra_body
 from app.observability import trace_ai_call
 
 logger = logging.getLogger("conceptintel.rubric")
@@ -202,7 +202,7 @@ Course Learning Outcomes (CLOs) available to tag criteria against:
                 # own descriptions, several times the previous payload size.
                 max_tokens=4000,
                 timeout=60.0,
-                extra_body={"reasoning": {"exclude": True}},
+                extra_body=_reasoning_extra_body(),
             )
             logger.info("Rubric generation finished in %.1fs", time.monotonic() - started)
             raw_content = response.choices[0].message.content

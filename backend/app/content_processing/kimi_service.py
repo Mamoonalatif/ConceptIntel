@@ -291,6 +291,21 @@ def _get_client() -> Optional[OpenAI]:
     return OpenAI(api_key=settings.OPENROUTER_API_KEY, base_url=settings.OPENROUTER_BASE_URL, timeout=60.0)
 
 
+def _reasoning_extra_body() -> dict:
+    """The `reasoning` field (used everywhere in this codebase to turn off a
+    reasoning model's chain-of-thought token spend, since every call here wants a
+    direct answer, not visible thinking) is an OpenRouter-specific extension, not a
+    real OpenAI or Gemini API field. Google's OpenAI-compatible endpoint validates
+    the request body strictly and 400s on any field it doesn't recognize
+    ('Unknown name "reasoning": Cannot find field') - confirmed by an actual call,
+    not assumed. Every call site must build extra_body through this helper instead
+    of hardcoding the literal dict, so GEMINI_DIRECT doesn't break every single one
+    of them at once."""
+    if settings.GEMINI_DIRECT:
+        return {}
+    return {"reasoning": {"exclude": True}}
+
+
 # Names that are never concepts no matter how confidently the model proposes them.
 # Compared against the normalized (lowercased, whitespace-collapsed) name. This is a
 # backstop for the prompt, not a replacement for it - every entry here was actually
@@ -529,7 +544,7 @@ def clean_and_structure_chunk(
                 # a provider ignores that hint.
                 max_tokens=8000,
                 timeout=60.0,
-                extra_body={"reasoning": {"exclude": True}},
+                extra_body=_reasoning_extra_body(),
             )
             logger.warning("Kimi request finished in %.1fs", time.monotonic() - started)
             raw_content = response.choices[0].message.content

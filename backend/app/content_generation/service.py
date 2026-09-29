@@ -38,7 +38,7 @@ from typing import Any, Dict, List, Optional
 from pydantic import ValidationError
 
 from app.config import settings
-from app.content_processing.kimi_service import _get_client, openrouter_payment_error_message
+from app.content_processing.kimi_service import _get_client, openrouter_payment_error_message, _reasoning_extra_body
 from app.content_generation.schemas import QUESTION_STYLES, FlashcardOut, MCQOut, StudyGuideOut, AssignmentDraftOut
 from app.observability import trace_ai_call
 
@@ -400,7 +400,7 @@ def _call_and_validate(
                 # emitting content, leaving message.content=None).
                 max_tokens=max_tokens,
                 timeout=60.0,
-                extra_body={"reasoning": {"exclude": True}},
+                extra_body=_reasoning_extra_body(),
             )
             logger.info("Content generation call finished in %.1fs (attempt %d/3)", time.monotonic() - started, attempt + 1)
             raw_content = response.choices[0].message.content
@@ -526,7 +526,7 @@ def generate_study_guide(
                 # mid-JSON often enough to burn all three retries.
                 max_tokens=3500,
                 timeout=60.0,
-                extra_body={"reasoning": {"exclude": True}},
+                extra_body=_reasoning_extra_body(),
             )
             raw_content = response.choices[0].message.content
             if not raw_content:
@@ -636,7 +636,7 @@ def generate_assignment(
                 temperature=0.35,
                 max_tokens=2500,
                 timeout=60.0,
-                extra_body={"reasoning": {"exclude": True}},
+                extra_body=_reasoning_extra_body(),
             )
             raw_content = response.choices[0].message.content
             if not raw_content:
@@ -711,7 +711,7 @@ def generate_concept_material(
                 temperature=0.35,
                 max_tokens=6000,
                 timeout=90.0,
-                extra_body={"reasoning": {"exclude": True}},
+                extra_body=_reasoning_extra_body(),
             )
             raw_content = response.choices[0].message.content
             if not raw_content:
@@ -767,7 +767,7 @@ def edit_concept_material(current_material: str, instruction: str) -> str:
                 temperature=0.3,
                 max_tokens=6000,
                 timeout=90.0,
-                extra_body={"reasoning": {"exclude": True}},
+                extra_body=_reasoning_extra_body(),
             )
             raw_content = response.choices[0].message.content
             if not raw_content:
@@ -828,7 +828,7 @@ def refine_assignment_draft(current_draft: Dict[str, Any], instruction: str) -> 
                 temperature=0.3,
                 max_tokens=2500,
                 timeout=60.0,
-                extra_body={"reasoning": {"exclude": True}},
+                extra_body=_reasoning_extra_body(),
             )
             raw_content = response.choices[0].message.content
             if not raw_content:

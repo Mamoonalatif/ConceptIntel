@@ -16,7 +16,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 from app.config import settings
-from app.content_processing.kimi_service import _get_client, openrouter_payment_error_message
+from app.content_processing.kimi_service import _get_client, openrouter_payment_error_message, _reasoning_extra_body
 from app.observability import trace_ai_call
 from app.question_bank import service as qb
 
@@ -150,7 +150,7 @@ def generate_questions(
                 temperature=0.4,
                 max_tokens=4000,
                 timeout=60.0,
-                extra_body={"reasoning": {"exclude": True}},
+                extra_body=_reasoning_extra_body(),
             )
             logger.info(
                 "Question generation (%s x%d) finished in %.1fs (attempt %d/3)",

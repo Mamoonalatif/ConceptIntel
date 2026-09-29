@@ -51,7 +51,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 from app.config import settings
-from app.content_processing.kimi_service import _get_client, is_budget_exhausted_error, BUDGET_EXHAUSTED_MESSAGE
+from app.content_processing.kimi_service import _get_client, is_budget_exhausted_error, BUDGET_EXHAUSTED_MESSAGE, _reasoning_extra_body
 from app.observability import trace_ai_call
 
 logger = logging.getLogger("conceptintel.gamification.games")
@@ -347,7 +347,7 @@ def generate_concept_game(
                 # kimi is a reasoning model - without this it spends the token budget
                 # on hidden thinking and returns message.content=None, which for a
                 # 16k-token page generation is an expensive way to get nothing.
-                extra_body={"reasoning": {"exclude": True}},
+                extra_body=_reasoning_extra_body(),
             )
             elapsed = time.monotonic() - started
 

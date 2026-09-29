@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database.models import Course, CourseSchedule, ScheduleSession
-from app.content_processing.kimi_service import openrouter_payment_error_message, _get_client as _get_shared_client
+from app.content_processing.kimi_service import openrouter_payment_error_message, _get_client as _get_shared_client, _reasoning_extra_body
 from app.content_processing.pipeline_service import get_course_outline_text
 
 logger = logging.getLogger("conceptintel.schedule")
@@ -69,7 +69,7 @@ Respond ONLY with valid JSON in this exact format:
                 temperature=0.15,
                 max_tokens=3000,
                 timeout=60.0,
-                extra_body={"reasoning": {"exclude": True}},
+                extra_body=_reasoning_extra_body(),
             )
             raw_content = response.choices[0].message.content
             if not raw_content:

@@ -19,7 +19,7 @@ import logging
 from typing import Any, Dict, List
 
 from app.config import settings
-from app.content_processing.kimi_service import _get_client, openrouter_payment_error_message
+from app.content_processing.kimi_service import _get_client, openrouter_payment_error_message, _reasoning_extra_body
 from app.observability import trace_ai_call
 
 logger = logging.getLogger("conceptintel.outcomes.ai")
@@ -45,7 +45,7 @@ def _call_json(system_prompt: str, user_content: str, max_tokens: int = 2500) ->
                 temperature=0.2,
                 max_tokens=max_tokens,
                 timeout=60.0,
-                extra_body={"reasoning": {"exclude": True}},
+                extra_body=_reasoning_extra_body(),
             )
             raw_content = response.choices[0].message.content
             if not raw_content:

@@ -185,7 +185,7 @@ def _generate_kimi_reply(history: List[ChatMessage], new_user_content: str) -> s
     change. Note there is deliberately NO response_format={"type": "json_object"}
     here: the assistant returns prose for a chat bubble, not a parsed structure.
     """
-    from app.content_processing.kimi_service import _get_client
+    from app.content_processing.kimi_service import _get_client, _reasoning_extra_body
 
     client = _get_client()
     if client is None:
@@ -200,7 +200,7 @@ def _generate_kimi_reply(history: List[ChatMessage], new_user_content: str) -> s
         # Without this a reasoning model spends the whole max_tokens budget on
         # hidden thinking and hands back message.content=None - which here would
         # look exactly like the provider being down.
-        extra_body={"reasoning": {"exclude": True}},
+        extra_body=_reasoning_extra_body(),
     )
     return _require_content(response)
 
