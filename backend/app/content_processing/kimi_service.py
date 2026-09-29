@@ -1,6 +1,8 @@
 import json
 import logging
 import re
+import threading
+import time
 from typing import Any, Dict, List, Optional
 
 from openai import OpenAI
@@ -306,6 +308,51 @@ def _reasoning_extra_body() -> dict:
     return {"reasoning": {"exclude": True}}
 
 
+# Google AI Studio's free tier caps gemini-3.5-flash-lite at 15 requests/minute
+# PER PROJECT (confirmed live: "Quota exceeded ... limit: 15 ... Please retry in
+# 4.65s"). Nothing before this enforced any spacing between calls - a multi-chunk
+# job (knowledge-graph extraction is the worst case: one call per chunk, fired
+# back-to-back with zero delay, plus its own 3 retries with no backoff either)
+# could burn through 15 requests in a couple of seconds and then fail outright.
+# 4.5s between calls keeps 60s/4.5s ≈ 13 requests/minute - under the cap with
+# margin, rather than exactly at it. Only applies under GEMINI_DIRECT; OpenRouter
+# has its own, much higher limits this app hasn't hit.
+_GEMINI_FREE_TIER_MIN_INTERVAL_SECONDS = 4.5
+_last_gemini_call_lock = threading.Lock()
+_last_gemini_call_at = 0.0
+
+
+def _throttle_for_free_tier() -> None:
+    """Blocks just long enough to keep this process's Gemini calls under the
+    free-tier per-minute cap. Call this immediately before every
+    client.chat.completions.create() that might hit GEMINI_DIRECT. A no-op when
+    GEMINI_DIRECT is off."""
+    if not settings.GEMINI_DIRECT:
+        return
+    global _last_gemini_call_at
+    with _last_gemini_call_lock:
+        wait = _GEMINI_FREE_TIER_MIN_INTERVAL_SECONDS - (time.monotonic() - _last_gemini_call_at)
+        if wait > 0:
+            time.sleep(wait)
+        _last_gemini_call_at = time.monotonic()
+
+
+def _extract_retry_delay_seconds(error: Exception, default: float = 20.0) -> float:
+    """Pulls the server-suggested wait out of a 429's error body (Gemini's
+    RetryInfo.retryDelay, e.g. "4s") instead of guessing - falls back to a
+    conservative fixed delay when the shape doesn't match (a different provider,
+    a changed error format, etc.). Used only when a 429 actually happens - the
+    pacing in _throttle_for_free_tier above is what avoids needing this most of
+    the time."""
+    match = re.search(r"retryDelay['\"]?\s*:\s*['\"]?(\d+(?:\.\d+)?)s?", str(error))
+    if match:
+        try:
+            return max(float(match.group(1)), 1.0) + 1.0  # +1s safety margin
+        except ValueError:
+            pass
+    return default
+
+
 # Names that are never concepts no matter how confidently the model proposes them.
 # Compared against the normalized (lowercased, whitespace-collapsed) name. This is a
 # backstop for the prompt, not a replacement for it - every entry here was actually
@@ -516,10 +563,10 @@ def clean_and_structure_chunk(
     # that's a request hint, not a hard guarantee on every provider. Retry a few
     # times before giving up, since a repeat call with the same input frequently
     # succeeds where the first one didn't.
-    import time
     last_error = None
     for attempt in range(3):
         try:
+            _throttle_for_free_tier()
             started = time.monotonic()
             logger.warning("Kimi request starting (attempt %d/3, model=%s)", attempt + 1, settings.KIMI_MODEL)
             response = client.chat.completions.create(
@@ -563,10 +610,24 @@ def clean_and_structure_chunk(
             payment_message = openrouter_payment_error_message(e)
             if payment_message:
                 raise RuntimeError(payment_message) from e
-            # Covers timeouts and other transient API/network errors - same
-            # rationale as the JSON case: a repeat call frequently succeeds.
             last_error = e
-            logger.warning("Kimi API call failed on attempt %d/3: %s: %s", attempt + 1, type(e).__name__, str(e))
+            if getattr(e, "status_code", None) == 429:
+                # A genuine 429 means the per-minute quota is already blown for
+                # this window - retrying immediately (the previous behavior) just
+                # burns the attempt on the same still-exhausted quota. Sleep for
+                # what the server actually told us to wait (RetryInfo.retryDelay)
+                # instead of guessing, then retry for real.
+                delay = _extract_retry_delay_seconds(e)
+                logger.warning(
+                    "Kimi API call rate-limited on attempt %d/3, waiting %.1fs before retry: %s",
+                    attempt + 1, delay, str(e),
+                )
+                if attempt < 2:
+                    time.sleep(delay)
+            else:
+                # Covers timeouts and other transient API/network errors - same
+                # rationale as the JSON case: a repeat call frequently succeeds.
+                logger.warning("Kimi API call failed on attempt %d/3: %s: %s", attempt + 1, type(e).__name__, str(e))
 
     raise RuntimeError(f"Kimi call failed after 3 attempts: {last_error}")
 
