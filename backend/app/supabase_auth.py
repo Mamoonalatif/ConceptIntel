@@ -34,7 +34,14 @@ def _client() -> httpx.Client:
             "apikey": settings.SUPABASE_KEY,
             "Content-Type": "application/json",
         },
-        timeout=15.0,
+        # 15s let a login hang for that long in the worst case before even
+        # failing (verify_supabase_password is on the synchronous critical path
+        # of every password login) - 10s bounds that wait a bit tighter without
+        # cutting it so close that a normal-but-not-instant network round trip
+        # starts false-failing. This does NOT make a slow/degraded connection to
+        # Supabase fast - only code running on Supabase's or the network's own
+        # infrastructure can do that.
+        timeout=10.0,
     )
 
 

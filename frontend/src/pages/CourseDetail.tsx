@@ -110,6 +110,13 @@ const CourseDetail: React.FC = () => {
   const [students, setStudents] = useState<EnrolledStudent[]>([]);
   const [myProgress, setMyProgress] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
+  // Genuinely distinct from `!course` on its own: a network error, a backend 500,
+  // or a connection-pool timeout ALSO leave `course` null, but none of those mean
+  // the course doesn't exist - only an actual 404 response does. Conflating them
+  // showed "Course Not Found" (with no way to retry) for what was really a
+  // transient backend failure, which is actively misleading when the course is
+  // right there in the sidebar/dashboard a moment later.
+  const [notFound, setNotFound] = useState(false);
   const [uploading, setUploading] = useState(false);
   // Which kind of document the next upload is. Chosen explicitly rather than inferred
   // from the filename - see the upload card for why the distinction matters.
@@ -182,6 +189,7 @@ const CourseDetail: React.FC = () => {
       ]);
       setCourse(courseData);
       setFiles(filesData);
+      setNotFound(false);
       if (isTeacher) {
         const [studentsData, jobsData] = roleData as [any[], any[]];
         setStudents(studentsData);
@@ -192,7 +200,13 @@ const CourseDetail: React.FC = () => {
         setMyProgress(mine ? Math.round(mine.progress) : null);
       }
     } catch (err: any) {
-      if (!silent) setError(apiErrorMessage(err, 'Failed to load course details. Ensure backend connection is active.'));
+      if (!silent) {
+        if (err.response?.status === 404) {
+          setNotFound(true);
+        } else {
+          setError(apiErrorMessage(err, 'Failed to load course details. This looks like a temporary connection issue - try again.'));
+        }
+      }
     } finally {
       if (!silent) setLoading(false);
     }
@@ -369,13 +383,32 @@ const CourseDetail: React.FC = () => {
     );
   }
 
-  if (!course) {
+  if (notFound) {
     return (
       <AppShell roleLabel="Course" logoIcon={BookOpen} navItems={backNavItems}>
         <div className="flex flex-col items-center justify-center p-6">
           <AlertTriangle className="w-16 h-16 text-amber-400 mb-4" />
           <h3 className="text-xl font-bold text-text-primary mb-2">Course Not Found</h3>
           <button onClick={() => navigate(-1)} className="btn-primary mt-2">Go Back</button>
+        </div>
+      </AppShell>
+    );
+  }
+
+  if (!course) {
+    // Not a 404 - some other failure (network, backend error, connection-pool
+    // timeout) left the course unloaded. The course itself may well exist; this
+    // offers a retry instead of a dead-end "not found".
+    return (
+      <AppShell roleLabel="Course" logoIcon={BookOpen} navItems={backNavItems}>
+        <div className="flex flex-col items-center justify-center p-6">
+          <AlertTriangle className="w-16 h-16 text-amber-400 mb-4" />
+          <h3 className="text-xl font-bold text-text-primary mb-2">Couldn't load this course</h3>
+          {error && <p className="text-sm text-text-secondary mb-4 max-w-sm text-center">{error}</p>}
+          <div className="flex gap-3">
+            <button onClick={() => navigate(-1)} className="btn-ghost mt-2">Go Back</button>
+            <button onClick={() => fetchData()} className="btn-primary mt-2">Try Again</button>
+          </div>
         </div>
       </AppShell>
     );
