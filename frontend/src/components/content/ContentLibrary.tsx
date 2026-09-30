@@ -535,10 +535,19 @@ const GridCard: React.FC<RowProps> = ({
 
       {canManage && item.status === 'PendingReview' && (
         <div className="flex gap-2 pt-2 border-t border-border">
-          <button onClick={() => onReview(true)} className="flex-1 justify-center btn-primary text-xs px-3 py-1.5">
-            <Check className="w-3.5 h-3.5" />
-            Approve
-          </button>
+          {/* An assignment draft can't be approved through this generic action -
+              see the comment on the Edit button above and ContentLibrary's list-row
+              layout, which already has this same guard. The backend rejects it
+              with a 400 either way, but showing the button at all here was
+              misleading - "approve this" for something clicking Approve can't
+              actually approve. Reject is unaffected: rejecting an assignment
+              draft doesn't need to create anything, so the backend allows it. */}
+          {item.content_type !== 'assignment' && (
+            <button onClick={() => onReview(true)} className="flex-1 justify-center btn-primary text-xs px-3 py-1.5">
+              <Check className="w-3.5 h-3.5" />
+              Approve
+            </button>
+          )}
           <button onClick={() => onReview(false)} className="flex-1 justify-center btn-ghost text-xs px-3 py-1.5 text-rose-500">
             <X className="w-3.5 h-3.5" />
             Reject
