@@ -370,6 +370,18 @@ _NEVER_A_CONCEPT = {
     "introduction", "overview", "basics", "fundamental", "fundamentals", "core concepts",
     "summary", "conclusion", "chapter", "topics", "contents", "objectives", "example",
     "note", "figure", "table", "results", "methodology",
+    # Discourse/transition words - a poorly-OCR'd or garbled source can hand the
+    # extractor a sentence fragment starting with one of these, and it gets proposed
+    # as a "concept" verbatim. All observed live in this project's own Neo4j graph
+    # (a Digital Logic Design catalog had 20+ of these as top-level nodes): they are
+    # connectives, never topics, in any subject.
+    "however", "therefore", "nevertheless", "nonetheless", "although", "because",
+    "before", "during", "finally", "furthermore", "indeed", "instead", "likewise",
+    "obviously", "otherwise", "rather", "similarly", "suppose", "assuming", "assume",
+    "unfortunately", "unlike", "whatever", "conversely", "consequently", "moreover",
+    "meanwhile", "regardless", "besides", "additionally", "accordingly", "consider",
+    "another", "except", "possible", "typically", "verbally", "actually", "formally",
+    "equivalently", "essential", "important", "luckily", "theoretically",
 }
 
 # Patterns for administrative junk that an exact blacklist can't catch, because the
@@ -387,6 +399,11 @@ _NEVER_A_CONCEPT_PATTERNS = [
     re.compile(r"^(page|slide)\s*\d+", re.I),
     re.compile(r"^[A-Z]{2,4}[\s\-]?\d{3,4}$"),         # bare course codes: "PHY 101", "CS-101"
     re.compile(r"^\W+$"),                              # punctuation-only
+    # OCR/extraction noise: the same letter repeated 3+ times in a row is
+    # essentially never a real word in any language this app targets - observed
+    # live as "EEEEEEEE FFFFFFFFFFFFFFFFFFFFFFF" and similar garbage proposed as
+    # a concept name from a badly-scanned source.
+    re.compile(r"(.)\1{2,}", re.I),
 ]
 
 # Collapses any run of whitespace (including the literal newlines that put 52 broken
