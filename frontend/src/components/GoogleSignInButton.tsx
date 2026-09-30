@@ -1,9 +1,11 @@
+// Purpose: "Sign in with Google" button that exchanges Google's credential for a ConceptIntel session via AuthContext.
 import React from 'react';
 import { GoogleLogin, type CredentialResponse } from '@react-oauth/google';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { apiErrorMessage } from '../lib/apiError';
 
+// Props: remember-me flag plus callbacks for success, error and the 2FA branch.
 interface GoogleSignInButtonProps {
   rememberMe?: boolean;
   onSuccess: (role: string) => void;
@@ -13,8 +15,10 @@ interface GoogleSignInButtonProps {
   onRequiresTwoFactor?: (tempToken: string) => void;
 }
 
+// Google sign-in only works when a client ID is set in the environment; otherwise we show a disabled placeholder.
 const isConfigured = Boolean(import.meta.env.VITE_GOOGLE_CLIENT_ID);
 
+// Renders Google's login button (or a disabled one when not configured) and handles the result.
 export const GoogleSignInButton: React.FC<GoogleSignInButtonProps> = ({
   rememberMe = true,
   onSuccess,
@@ -37,6 +41,7 @@ export const GoogleSignInButton: React.FC<GoogleSignInButtonProps> = ({
     );
   }
 
+  // Called by Google with a signed credential; sends it to the backend, then either continues to 2FA or reports the user's role on success.
   const handleSuccess = async (credentialResponse: CredentialResponse) => {
     if (!credentialResponse.credential) {
       onError('Google did not return a credential.');

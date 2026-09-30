@@ -1,3 +1,5 @@
+# Upload helpers: text extraction from PDF/DOCX/PPTX/TXT/images, MIME type lookup, and a storage
+# layer that saves files to AWS S3, Supabase Storage or local disk (chosen by which settings exist).
 import re
 import pypdf
 import docx
@@ -6,6 +8,7 @@ import httpx
 from pathlib import Path
 from app.config import settings
 
+# Image extensions that are always run through OCR.
 IMAGE_TYPES = {"jpg", "jpeg", "png"}
 
 
@@ -24,6 +27,7 @@ def extract_text_from_file(filepath: Path, file_type: str) -> tuple[str, bool]:
     if not filepath.exists():
         raise FileNotFoundError(f"File not found at path: {filepath}")
 
+    # Choose an extraction method per file type.
     if file_type == "pdf":
         from app.content_processing.ocr_service import extract_pdf_text_with_ocr_fallback
         text, used_ocr = extract_pdf_text_with_ocr_fallback(filepath)
@@ -110,6 +114,7 @@ def get_content_type(extension: str) -> str:
 #  STORAGE BACKENDS - AWS S3 (optional)
 # ─────────────────────────────────────────────
 
+# Builds a boto3 S3 client from the configured AWS credentials.
 def _s3_client():
     import boto3
     return boto3.client(
@@ -144,6 +149,7 @@ def upload_file_to_s3(file_content: bytes, filename: str, content_type: str, fol
     return f"s3://{settings.AWS_S3_BUCKET}/{key}"
 
 
+# Reads an object back from S3 given its s3://bucket/key reference.
 def download_file_from_s3(s3_ref: str) -> bytes:
     bucket, key = _parse_s3_ref(s3_ref)
     client = _s3_client()
@@ -151,6 +157,7 @@ def download_file_from_s3(s3_ref: str) -> bytes:
     return obj["Body"].read()
 
 
+# Deletes an S3 object; failures are logged, not raised.
 def delete_file_from_s3(s3_ref: str) -> None:
     bucket, key = _parse_s3_ref(s3_ref)
     client = _s3_client()
@@ -164,6 +171,7 @@ def delete_file_from_s3(s3_ref: str) -> None:
 #  STORAGE BACKENDS - Supabase Storage (optional)
 # ─────────────────────────────────────────────
 
+# Auth headers for Supabase Storage REST calls (optionally with a Content-Type).
 def _supabase_headers(content_type: str = None) -> dict:
     headers = {
         "Authorization": f"Bearer {settings.SUPABASE_KEY}",

@@ -1,3 +1,4 @@
+# Central application settings loaded from environment variables (.env).
 import os
 import secrets
 from pathlib import Path
@@ -9,6 +10,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(dotenv_path=BASE_DIR / ".env")
 
 class Settings:
+    """All configuration, read once from environment variables / .env at import time.
+    Every attribute has a safe default so the app can start with optional services
+    (email, Redis, Langfuse, S3...) left unconfigured."""
     # Postgres Configuration - hosted on Supabase (Project Settings -> Database ->
     # Connection string, Session/Transaction pooler URI). No local Postgres install
     # is part of this project anymore - DATABASE_URL must be set in .env.
@@ -211,8 +215,10 @@ class Settings:
 
     @property
     def upload_path(self) -> Path:
+        """Absolute local upload directory, created on first access if missing."""
         path = BASE_DIR / self.UPLOAD_DIR
         path.mkdir(parents=True, exist_ok=True)
         return path
 
+# Single shared instance: other modules import it via "from app.config import settings".
 settings = Settings()

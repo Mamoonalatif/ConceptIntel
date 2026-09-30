@@ -1,3 +1,5 @@
+# Program endpoints: list/create/update/delete programs (admin) and assign/remove/list
+# program coordinators for a program.
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -10,6 +12,7 @@ from app.auth.routes import get_current_user, get_current_admin
 router = APIRouter(prefix="/programs", tags=["Programs"])
 
 
+# Fetches a program by ID or raises 404.
 def _get_program_or_404(db: Session, program_id: int) -> Program:
     program = db.query(Program).filter(Program.id == program_id).first()
     if not program:
@@ -17,6 +20,7 @@ def _get_program_or_404(db: Session, program_id: int) -> Program:
     return program
 
 
+# GET /programs - any logged-in user; see docstring.
 @router.get("", response_model=List[ProgramResponse])
 def list_programs(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Read-only listing for any authenticated user - used by pickers (catalog entry
@@ -24,6 +28,7 @@ def list_programs(db: Session = Depends(get_db), current_user: User = Depends(ge
     return db.query(Program).order_by(Program.name).all()
 
 
+# POST /programs - admin creates a program; names must be unique.
 @router.post("", response_model=ProgramResponse, status_code=status.HTTP_201_CREATED)
 def create_program(
     program_in: ProgramCreate,
@@ -45,6 +50,7 @@ def create_program(
     return new_program
 
 
+# PUT /programs/{id} - admin edits a program, keeping the name unique.
 @router.put("/{id}", response_model=ProgramResponse)
 def update_program(
     id: int,
@@ -68,6 +74,7 @@ def update_program(
     return program
 
 
+# DELETE /programs/{id} - admin deletes a program (see docstring for catalog handling).
 @router.delete("/{id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_program(
     id: int,
@@ -97,10 +104,12 @@ def delete_program(
 # role above Program Coordinator to delegate this to (mirrors how Course Coordinator
 # assignment is Program-Coordinator-only in courses/routes.py).
 
+# Body for assigning a coordinator: the target user's ID.
 class ProgramCoordinatorAssignRequest(BaseModel):
     user_id: int
 
 
+# A coordinator listed under a program (id, name, email).
 class ProgramCoordinatorEntry(BaseModel):
     id: int
     full_name: str
@@ -110,6 +119,7 @@ class ProgramCoordinatorEntry(BaseModel):
         from_attributes = True
 
 
+# POST /programs/{id}/coordinators - adds the program to a user's coordinator scope.
 @router.post("/{id}/coordinators", response_model=ProgramCoordinatorEntry, status_code=status.HTTP_201_CREATED)
 def assign_program_coordinator(
     id: int,
@@ -140,6 +150,7 @@ def assign_program_coordinator(
     return target_user
 
 
+# DELETE /programs/{id}/coordinators/{user_id} - removes that assignment.
 @router.delete("/{id}/coordinators/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 def remove_program_coordinator(
     id: int,
@@ -158,6 +169,7 @@ def remove_program_coordinator(
     return None
 
 
+# GET /programs/{id}/coordinators - lists coordinators of a program.
 @router.get("/{id}/coordinators", response_model=List[ProgramCoordinatorEntry])
 def list_program_coordinators(
     id: int,

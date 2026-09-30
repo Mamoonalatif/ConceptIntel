@@ -25,6 +25,7 @@ from app.content_processing.pipeline_service import get_course_outline_text
 logger = logging.getLogger("conceptintel.schedule")
 
 
+# Returns the shared LLM client, raising a clear error if no API key is configured.
 def _get_client() -> OpenAI:
     # Was its own near-duplicate of generation_service._get_client (same OpenRouter-only
     # client, copy-pasted) - delegating to the shared one instead means this module
@@ -41,6 +42,7 @@ def _extract_sessions_from_outline(outline_text: str) -> List[Dict[str, Any]]:
     get_course_outline_text and isn't chunked anywhere else in this codebase, so a
     per-chunk loop (as used for concept extraction) isn't needed here."""
     client = _get_client()
+    # Prompt telling the model to return only week -> topic names as strict JSON.
     system_prompt = """You are a curriculum planner extracting a week-by-week (or session-by-session)
 breakdown of topics from a university course outline/syllabus.
 
@@ -57,6 +59,7 @@ Respond ONLY with valid JSON in this exact format:
   ]
 }"""
     last_error = None
+    # Retry up to 3 times on bad/empty JSON or transient errors; payment errors abort immediately.
     for attempt in range(3):
         try:
             response = client.chat.completions.create(
@@ -92,6 +95,7 @@ Respond ONLY with valid JSON in this exact format:
     raise RuntimeError(f"Schedule extraction failed after 3 attempts: {last_error}")
 
 
+# Fetches the course's schedule row, creating an empty Draft one if missing.
 def _get_or_create_schedule(db: Session, course_id: int) -> CourseSchedule:
     schedule = db.query(CourseSchedule).filter(CourseSchedule.course_id == course_id).first()
     if not schedule:
@@ -182,6 +186,7 @@ def submit_schedule_edit(db: Session, course_id: int, teacher_id: int, sessions:
     return schedule
 
 
+# Converts session ORM rows into plain dicts, decoding the stored JSON topic lists.
 def serialize_sessions(sessions: List[ScheduleSession]) -> List[Dict[str, Any]]:
     return [
         {
@@ -194,6 +199,7 @@ def serialize_sessions(sessions: List[ScheduleSession]) -> List[Dict[str, Any]]:
     ]
 
 
+# Converts a schedule ORM row (with its sessions) into the dict shape the API returns.
 def serialize_schedule(schedule: CourseSchedule) -> Dict[str, Any]:
     return {
         "id": schedule.id,

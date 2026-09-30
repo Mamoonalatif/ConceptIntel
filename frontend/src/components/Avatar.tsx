@@ -1,3 +1,4 @@
+// Purpose: shared user avatar; shows the uploaded profile photo (fetched with auth) or a fox-face placeholder.
 import React, { useEffect, useState } from 'react';
 import { API_URL } from '../services/api';
 
@@ -28,6 +29,8 @@ const FoxFaceIcon: React.FC<{ className?: string }> = ({ className }) => (
 // the effect's dependency array, so replacing a photo is reflected
 // immediately instead of possibly showing a stale cached response (browser
 // HTTP cache, an intermediate proxy, etc.) for a few minutes.
+// Hook: downloads the user's avatar as an authenticated blob and returns a temporary object URL (or null if none).
+// Re-runs when the user/photo version changes; the cleanup revokes the URL to free memory.
 function useAvatarObjectUrl(userId: number | undefined, hasAvatar: boolean, version?: string | null): string | null {
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
 
@@ -62,6 +65,7 @@ function useAvatarObjectUrl(userId: number | undefined, hasAvatar: boolean, vers
   return objectUrl;
 }
 
+// Props for Avatar: which user, whether they have a photo, a cache-busting version, and display size.
 interface AvatarProps {
   userId?: number;
   hasAvatar?: boolean;
@@ -74,12 +78,14 @@ interface AvatarProps {
   className?: string;
 }
 
+// Tailwind size classes for the avatar box at each size.
 const SIZE_CLASSES: Record<NonNullable<AvatarProps['size']>, string> = {
   sm: 'w-8 h-8',
   md: 'w-12 h-12',
   lg: 'w-20 h-20',
 };
 
+// Matching sizes for the placeholder fox icon.
 const ICON_SIZE_CLASSES: Record<NonNullable<AvatarProps['size']>, string> = {
   sm: 'w-4 h-4',
   md: 'w-6 h-6',
@@ -96,6 +102,7 @@ export const Avatar: React.FC<AvatarProps> = ({ userId, hasAvatar = false, versi
   const sizeClass = SIZE_CLASSES[size];
   const iconSizeClass = ICON_SIZE_CLASSES[size];
 
+  // A photo was loaded: show it; otherwise fall through to the placeholder below.
   if (objectUrl) {
     return (
       <img

@@ -1,3 +1,7 @@
+// Course detail page shared by teachers and students. A tabbed layout (stream, classwork,
+// study material, files & search, concept graph, progress, people) where teacher-only
+// tabs are hidden for students. Teachers also upload materials and drive the AI
+// concept-graph pipeline (trigger -> review proposed concepts -> coordinator approval).
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -50,6 +54,7 @@ const NON_TERMINAL_JOB_STATUSES = [
   'AwaitingTeacherReview', 'AwaitingCoordinatorApproval',
 ];
 
+// Friendly text shown for each pipeline job status.
 const JOB_STATUS_LABELS: Record<string, string> = {
   Queued: 'Queued',
   ExtractingText: 'Extracting text',
@@ -62,6 +67,7 @@ const JOB_STATUS_LABELS: Record<string, string> = {
   Failed: 'Failed',
 };
 
+// Course fields used on this page.
 interface Course {
   id: number;
   name: string;
@@ -76,6 +82,7 @@ interface Course {
   catalog_id?: number | null;
 }
 
+// A file uploaded to the course, including processing and search-indexing (RAG) status.
 interface UploadedFile {
   id: number;
   filename: string;
@@ -88,6 +95,7 @@ interface UploadedFile {
   created_at: string;
 }
 
+// A row of the teacher's roster.
 interface EnrolledStudent {
   student_id: number;
   full_name: string;
@@ -97,6 +105,8 @@ interface EnrolledStudent {
 }
 
 
+// Page component. Loads the course, files and role-specific data (roster + pipeline jobs
+// for teachers, own progress for students) and renders the active section.
 const CourseDetail: React.FC = () => {
   const { courseId } = useParams<{ courseId: string }>();
   const navigate = useNavigate();
@@ -148,6 +158,7 @@ const CourseDetail: React.FC = () => {
   const validInitialTab: SectionKey = ALL_SECTIONS.some((s) => s.key === initialTab) ? (initialTab as SectionKey) : 'stream';
   const [activeSection, setActiveSection] = useState<SectionKey>(validInitialTab);
 
+  // Sections visible to the current role (teacher-only ones removed for students).
   const sections = React.useMemo(
     () => ALL_SECTIONS.filter((s) => (s.teacherOnly ? isTeacher : true)),
     [isTeacher]
@@ -159,6 +170,7 @@ const CourseDetail: React.FC = () => {
     if (!sections.some((s) => s.key === activeSection)) setActiveSection('stream');
   }, [sections, activeSection]);
 
+  // Runs semantic (RAG) search over the course's uploaded material.
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!searchQuery.trim()) return;
@@ -173,6 +185,8 @@ const CourseDetail: React.FC = () => {
     }
   };
 
+  // Loads everything the page needs in parallel. 'silent' is used by auto-refresh and by
+  // the retry so background failures do not replace the page with an error.
   const fetchData = async (silent = false) => {
     try {
       if (!silent) setLoading(true);
@@ -216,6 +230,7 @@ const CourseDetail: React.FC = () => {
   // updates in the background - this shows that progress without a manual refresh.
   useAutoRefresh(() => { if (idNum) fetchData(true); });
 
+  // Initial load whenever the course id in the URL changes.
   useEffect(() => {
     if (idNum) fetchData();
   }, [courseId]);
@@ -236,6 +251,7 @@ const CourseDetail: React.FC = () => {
     return () => clearInterval(interval);
   }, [isTeacher, latestJob?.id, latestJob?.status]);
 
+  // Uploads a new file as course material or course outline (per the selected kind).
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
     if (!selectedFile) return;
@@ -257,6 +273,7 @@ const CourseDetail: React.FC = () => {
     }
   };
 
+  // Replaces an existing file's content with a newly chosen file and re-triggers processing.
   const handleFileReplace = async (fileId: number, e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
     if (!selectedFile) return;
@@ -274,6 +291,7 @@ const CourseDetail: React.FC = () => {
     }
   };
 
+  // Deletes a file after confirmation and removes it from local state.
   const handleDeleteFile = async (fileId: number) => {
     if (!window.confirm('Are you sure you want to delete this document?')) return;
     try {
@@ -285,6 +303,7 @@ const CourseDetail: React.FC = () => {
     }
   };
 
+  // Re-runs text extraction and concept mining for a file.
   const handleReprocessFile = async (fileId: number) => {
     try {
       await uploadService.reprocessFile(fileId);
@@ -295,6 +314,7 @@ const CourseDetail: React.FC = () => {
     }
   };
 
+  // Starts the AI concept-graph pipeline job for the course (runs in the background).
   const handleTriggerPipeline = async () => {
     setTriggeringPipeline(true);
     setError('');
@@ -310,6 +330,7 @@ const CourseDetail: React.FC = () => {
     }
   };
 
+  // Fetches the AI-proposed changes (diff) for a job and opens the review modal.
   const handleOpenReview = async (jobId: number) => {
     setLoadingRevision(true);
     setError('');
@@ -324,6 +345,7 @@ const CourseDetail: React.FC = () => {
     }
   };
 
+  // Teacher confirms (forwards to the coordinator) or rejects the proposed revision.
   const handleTeacherDecision = async (action: 'confirm' | 'reject') => {
     if (!reviewRevision) return;
     setDecidingRevision(true);
@@ -346,6 +368,7 @@ const CourseDetail: React.FC = () => {
     }
   };
 
+  // Copies the enrolment code to the clipboard and shows a short confirmation.
   const handleCopyCode = () => {
     if (course?.enrollment_code) {
       navigator.clipboard.writeText(course.enrollment_code);
@@ -354,6 +377,7 @@ const CourseDetail: React.FC = () => {
     }
   };
 
+  // Copies a shareable join URL containing the enrolment code.
   const handleCopyJoinLink = () => {
     if (course?.enrollment_code) {
       navigator.clipboard.writeText(`${window.location.origin}/join/${course.enrollment_code}`);
@@ -362,6 +386,7 @@ const CourseDetail: React.FC = () => {
     }
   };
 
+  // Derived stats for the header row: files fully processed and average student progress.
   const completedFiles = files.filter(f => f.status === 'Completed').length;
   const avgProgress = students.length
     ? Math.round(students.reduce((sum, s) => sum + s.progress, 0) / students.length)

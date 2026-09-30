@@ -54,6 +54,7 @@ MIN_WEIGHT = 0.5
 
 
 def _mastery_by_concept(db: Session, student_id: int, course_id: int) -> Dict[str, float]:
+    """Map concept_node_id -> this student's mastery score for the course."""
     rows = db.query(ConceptMastery.concept_node_id, ConceptMastery.mastery_score).filter(
         ConceptMastery.student_id == student_id, ConceptMastery.course_id == course_id
     ).all()
@@ -122,11 +123,14 @@ def assemble_mock_test(
 
 
 def make_mock_token(question_ids: List[int], seed: int) -> str:
+    """Pack the chosen question ids and seed into a URL-safe base64 token sent to the client.
+    (Encoded, not encrypted: the submit endpoint re-checks the questions belong to the course.)"""
     raw = json.dumps({"q": question_ids, "s": seed}, separators=(",", ":")).encode()
     return base64.urlsafe_b64encode(raw).decode().rstrip("=")
 
 
 def read_mock_token(token: str) -> Tuple[List[int], int]:
+    """Decode a mock token back into (question_ids, seed); ValueError if it is malformed."""
     try:
         padded = token + "=" * (-len(token) % 4)
         data = json.loads(base64.urlsafe_b64decode(padded.encode()))
@@ -209,6 +213,7 @@ def grade_mock(
 
     score = round((points_earned / points_possible) * 100, 2) if points_possible else 0.0
 
+    # Converts {name: {earned, possible}} into accuracy % rows, weakest first.
     def _pct(d: Dict[str, Dict[str, float]]) -> List[Dict[str, Any]]:
         out = []
         for name, v in d.items():

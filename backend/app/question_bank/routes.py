@@ -29,6 +29,7 @@ logger = logging.getLogger("conceptintel.question_bank")
 
 
 def _get_owned_course(db: Session, course_id: int, teacher: User) -> Course:
+    """Fetch the course and require that this teacher is its instructor (403 otherwise)."""
     course = db.query(Course).filter(Course.id == course_id).first()
     if not course:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
@@ -40,6 +41,7 @@ def _get_owned_course(db: Session, course_id: int, teacher: User) -> Course:
 
 
 def _to_out(item: QuestionBankItem, db: Session) -> QuestionOut:
+    """Convert a QuestionBankItem row into QuestionOut (decodes payload, looks up CLO code)."""
     try:
         payload = json.loads(item.payload_json) or {}
     except (json.JSONDecodeError, TypeError):
@@ -82,6 +84,7 @@ def list_questions(
     db: Session = Depends(get_db),
     current_teacher: User = Depends(get_current_teacher),
 ):
+    """List this course's non-retired questions, with optional type/difficulty/concept/text filters."""
     _get_owned_course(db, course_id, current_teacher)
     q = db.query(QuestionBankItem).filter(
         QuestionBankItem.course_id == course_id,
@@ -105,6 +108,7 @@ def create_question(
     db: Session = Depends(get_db),
     current_teacher: User = Depends(get_current_teacher),
 ):
+    """Add a hand-written question after validating its answer key (and CLO, if given)."""
     course = _get_owned_course(db, course_id, current_teacher)
     try:
         clean = qb.validate_payload(payload.question_type, payload.payload)
@@ -142,6 +146,7 @@ def update_question(
     db: Session = Depends(get_db),
     current_teacher: User = Depends(get_current_teacher),
 ):
+    """Edit a question; a changed payload is re-validated against its type."""
     course = _get_owned_course(db, course_id, current_teacher)
     item = db.query(QuestionBankItem).filter(
         QuestionBankItem.id == question_id, QuestionBankItem.course_id == course_id

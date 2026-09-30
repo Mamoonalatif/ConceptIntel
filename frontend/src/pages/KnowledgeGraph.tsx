@@ -1,3 +1,8 @@
+// Interactive concept (knowledge) graph page, built on React Flow. Teachers can explore the
+// prerequisite graph, click concepts for details, propose edits (every edit goes through
+// coordinator approval), generate study material, tag concepts with CLOs, switch to the
+// CLO/PLO/GA outcomes view and export the graph. Students are redirected away and only
+// reach a search-only version of this screen.
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 
@@ -35,6 +40,7 @@ import {
   downloadConceptCsv, slugify, type ExportNode, type ExportEdge
 } from '../lib/graphExport';
 
+// A concept node as returned by the graph API.
 interface Concept {
   id: string;
   name: string;
@@ -45,6 +51,7 @@ interface Concept {
 }
 
 // ── Node Difficulty → Light Theme Badge Classes ──
+// Maps a difficulty label to the Tailwind classes used for node fill, border and badges.
 const getDifficultyStyles = (difficulty: string) => {
   switch (difficulty.toLowerCase()) {
     case 'easy':   return { border: 'border-emerald-400', badge: 'badge-easy',   glow: 'shadow-emerald-100', fill: 'bg-emerald-300 border-emerald-500 text-emerald-950' };
@@ -64,6 +71,8 @@ const getDifficultyStyles = (difficulty: string) => {
 // frame of a pan or zoom, and hoisting that into the page component would re-run
 // the whole 100-node tree continuously while dragging. Isolated here, only the
 // percentage label repaints.
+// Toolbar zoom buttons and live zoom percentage (kept as its own component for performance,
+// see the note above).
 const ZoomControls: React.FC = () => {
   const { zoomIn, zoomOut, fitView } = useReactFlow();
   const { zoom } = useViewport();
@@ -98,6 +107,7 @@ const ZoomControls: React.FC = () => {
 };
 
 // ── Inner component that uses useReactFlow ──
+// The page itself. Must be rendered inside ReactFlowProvider because it calls useReactFlow().
 const KnowledgeGraphInner: React.FC = () => {
   const { courseId } = useParams<{ courseId: string }>();
   const navigate = useNavigate();
@@ -209,6 +219,7 @@ const KnowledgeGraphInner: React.FC = () => {
   // arrowhead (markerStart, below) points back up at that prerequisite.
   // Algorithm lives in lib/graphLayout.ts (see the notes there on why plain
   // levelling wasn't enough); this just applies the result to the flow nodes.
+  // Computes x/y positions for every node using the layout helper and returns positioned nodes.
   const applyLevelLayout = useCallback((nodesList: any[], edgesList: any[]) => {
     const { positions } = layoutPrerequisiteGraph(nodesList, edgesList);
     return nodesList.map(node => ({ ...node, position: positions[node.id] }));
@@ -217,6 +228,8 @@ const KnowledgeGraphInner: React.FC = () => {
   // ── Load Graph Data ──
   // `force` bypasses the GET cache in services/api.ts - the Refresh button must
   // always mean "go and ask the server", never "hand me what you already had".
+  // Fetches the course, its CLOs and the graph, converts the API nodes/edges into React
+  // Flow nodes/edges (styled by difficulty), lays them out and stores them in state.
   const loadGraphData = async (force = false) => {
     try {
       if (force) clearApiCache();
@@ -305,6 +318,7 @@ const KnowledgeGraphInner: React.FC = () => {
     }
   }, [user, courseId]);
 
+  // Load the graph when the course id changes; load the list of PLOs once on mount.
   useEffect(() => { if (idNum) loadGraphData(); }, [courseId]);
   useEffect(() => { outcomesService.listPLOs().then(setPlos).catch(() => setPlos([])); }, []);
 
@@ -384,6 +398,7 @@ const KnowledgeGraphInner: React.FC = () => {
     return () => document.removeEventListener('fullscreenchange', sync);
   }, []);
 
+  // Enter or leave browser fullscreen for the whole page.
   const toggleFullscreen = async () => {
     try {
       if (document.fullscreenElement) await document.exitFullscreen();
@@ -428,6 +443,7 @@ const KnowledgeGraphInner: React.FC = () => {
   // The export redraws the graph from these positions rather than capturing the
   // canvas, so every concept lands in the file - not just the part currently
   // panned into view.
+  // Plain-data version of the current nodes/edges (positions, names, difficulty) for export.
   const exportPayload = useMemo(() => {
     const exportNodes: ExportNode[] = nodes.map(n => ({
       id: n.id,
@@ -440,6 +456,7 @@ const KnowledgeGraphInner: React.FC = () => {
     return { exportNodes, exportEdges };
   }, [nodes, edges]);
 
+  // Exports the graph as PNG, SVG, PDF (via print) or a CSV concept list.
   const handleExport = async (format: 'png' | 'svg' | 'pdf' | 'csv') => {
     setShowExportMenu(false);
     if (concepts.length === 0) { setError('There are no concepts to export yet.'); return; }
@@ -474,6 +491,7 @@ const KnowledgeGraphInner: React.FC = () => {
   };
 
   // ── Node Click: open a popup right at the click point, not the sidebar ──
+  // Opens the concept popup at the click position.
   const onNodeClick = (event: React.MouseEvent, node: Node) => {
     const concept = concepts.find(c => c.id === node.id);
     if (!concept) return;
@@ -486,6 +504,7 @@ const KnowledgeGraphInner: React.FC = () => {
     setPopupNode({ concept, x, y });
   };
 
+  // Moves from the popup to the side panel edit form for the same concept.
   const openEditFromPopup = () => {
     if (!popupNode) return;
     const concept = popupNode.concept;
@@ -497,11 +516,13 @@ const KnowledgeGraphInner: React.FC = () => {
   };
 
   // ── Search ──
+  // Concepts whose name contains the search text.
   const filteredConcepts = useMemo(() => {
     if (!searchQuery.trim()) return [];
     return concepts.filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase()));
   }, [searchQuery, concepts]);
 
+  // Picks a search result: highlights it, zooms the canvas to it and opens its side panel.
   const handleSearchSelect = (concept: Concept) => {
     setHighlightedId(concept.id);
     setSearchQuery('');
@@ -518,6 +539,7 @@ const KnowledgeGraphInner: React.FC = () => {
   };
 
   // ── Update Node ──
+  // Submits the edited name/description/difficulty (becomes an edit proposal for approval).
   const handleUpdateNode = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedNode) return;
@@ -535,6 +557,7 @@ const KnowledgeGraphInner: React.FC = () => {
   };
 
   // ── Delete Node ──
+  // Proposes deletion of the selected concept after confirmation.
   const handleDeleteNode = async () => {
     if (!selectedNode) return;
     if (!window.confirm(`Delete concept "${selectedNode.name}"? All prerequisite links will also be removed.`)) return;
@@ -552,6 +575,7 @@ const KnowledgeGraphInner: React.FC = () => {
   };
 
   // ── Generate/Refine Material (AI) ──
+  // Asks the AI to generate the node's detailed material (submitted for approval).
   const handleGenerateMaterial = async () => {
     if (!selectedNode || materialBusy) return;
     setMaterialBusy(true);
@@ -565,6 +589,7 @@ const KnowledgeGraphInner: React.FC = () => {
     }
   };
 
+  // Asks the AI to refine the node's material following the teacher's instruction.
   const handleEditMaterial = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedNode || materialBusy || !materialInstruction.trim()) return;
@@ -582,6 +607,7 @@ const KnowledgeGraphInner: React.FC = () => {
   };
 
   // ── Auto-extract CLOs from the course outline (AI) ──
+  // Extracts CLOs from the course outline with AI, then reloads CLOs and concept tags.
   const handleAutoExtractClos = async () => {
     if (autoExtractingClos) return;
     setAutoExtractingClos(true);
@@ -612,6 +638,7 @@ const KnowledgeGraphInner: React.FC = () => {
   };
 
   // ── Create Node ──
+  // Proposes a new concept from the Add Concept form.
   const handleCreateNode = async (e: React.FormEvent) => {
     e.preventDefault();
     if (creatingNode) return;   // guard against a double submit from a fast second click
@@ -630,6 +657,7 @@ const KnowledgeGraphInner: React.FC = () => {
   };
 
   // ── Create Edge ──
+  // Proposes a prerequisite link between two chosen concepts.
   const handleCreateEdge = async (e: React.FormEvent) => {
     e.preventDefault();
     if (creatingEdge) return;
@@ -649,6 +677,7 @@ const KnowledgeGraphInner: React.FC = () => {
   };
 
   // ── Delete Relationship ──
+  // Proposes removing a prerequisite link after confirmation.
   const handleDeleteRelationship = async (sourceId: string, targetId: string) => {
     if (!window.confirm('Remove this prerequisite connection?')) return;
     setRemovingLinkId(`${sourceId}->${targetId}`);
@@ -664,6 +693,7 @@ const KnowledgeGraphInner: React.FC = () => {
   };
 
   // ── Prerequisites of selected node ──
+  // Direct prerequisites of the selected node, derived from incoming edges.
   const prerequisites = useMemo(() => {
     if (!selectedNode) return [];
     return edges
@@ -685,6 +715,7 @@ const KnowledgeGraphInner: React.FC = () => {
     return concepts.find(c => c.id === parentEdge.source) ?? null;
   }, [popupNode, edges, concepts]);
 
+  // Generates study material (flashcards, MCQs, quiz, study guide) for the popup concept.
   const handleGenerateFromGraph = async () => {
     if (!popupNode) return;
     setGenBusy(true);
@@ -712,8 +743,10 @@ const KnowledgeGraphInner: React.FC = () => {
   // concept fades everything that isn't it or one hop away, so you can actually
   // trace what a concept depends on and what depends on it. Nothing is hidden -
   // dimmed, not removed - so the overall shape stays readable.
+  // Id of the concept currently in focus, used to dim unrelated nodes and edges.
   const focusId = popupNode?.concept.id ?? selectedNode?.id ?? highlightedId ?? null;
 
+  // Set containing the focused node and its direct neighbours (null when nothing is focused).
   const neighbourIds = useMemo(() => {
     if (!focusId) return null;
     const set = new Set<string>([focusId]);
@@ -724,6 +757,7 @@ const KnowledgeGraphInner: React.FC = () => {
     return set;
   }, [focusId, edges]);
 
+  // Nodes as actually rendered: adds highlight ring and fades non-neighbours.
   const displayNodes = useMemo(() => nodes.map(n => ({
     ...n,
     className: `${n.className} ${n.id === highlightedId ? 'ring-2 ring-primary ring-offset-2 scale-105' : ''}`,
@@ -734,6 +768,7 @@ const KnowledgeGraphInner: React.FC = () => {
     },
   })), [nodes, highlightedId, neighbourIds]);
 
+  // Edges as actually rendered: emphasises edges touching the focused node, fades the rest.
   const displayEdges = useMemo(() => edges.map(e => {
     const related = !focusId || e.source === focusId || e.target === focusId;
     return {
@@ -748,6 +783,7 @@ const KnowledgeGraphInner: React.FC = () => {
   }), [edges, focusId]);
 
   // ── Graph Analytics ──
+  // Counts and percentages of concepts per difficulty, plus link count, for the analytics bar.
   const analytics = useMemo(() => {
     const easy   = concepts.filter(c => c.difficulty.toLowerCase() === 'easy').length;
     const medium = concepts.filter(c => c.difficulty.toLowerCase() === 'medium').length;
@@ -1598,6 +1634,7 @@ const KnowledgeGraphInner: React.FC = () => {
 };
 
 // Wrap with ReactFlowProvider to allow useReactFlow() hook
+// Exported wrapper providing the React Flow context.
 const KnowledgeGraph: React.FC = () => (
   <ReactFlowProvider>
     <KnowledgeGraphInner />

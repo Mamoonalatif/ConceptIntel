@@ -50,6 +50,7 @@ logger = logging.getLogger("conceptintel.study")
 
 
 def _get_course_or_404(db: Session, course_id: int) -> Course:
+    """Fetch the course by id or raise a 404."""
     course = db.query(Course).filter(Course.id == course_id).first()
     if not course:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
@@ -57,6 +58,7 @@ def _get_course_or_404(db: Session, course_id: int) -> Course:
 
 
 def _get_studyable_content(db: Session, course_id: int, content_id: int, user: User) -> GeneratedContent:
+    """Load a content set in this course; students may only open Approved ones."""
     item = db.query(GeneratedContent).filter(
         GeneratedContent.id == content_id, GeneratedContent.course_id == course_id
     ).first()
@@ -71,6 +73,7 @@ def _get_studyable_content(db: Session, course_id: int, content_id: int, user: U
 
 
 def _require_student(user: User) -> None:
+    """Raise 403 unless the user is a student (study modes are student-only)."""
     if user.role.lower() != "student":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -79,6 +82,7 @@ def _require_student(user: User) -> None:
 
 
 def _make_token(content_id: int, seed: int) -> str:
+    """Encode (content_id, seed) as a URL-safe token so a test can be rebuilt at grading time."""
     raw = json.dumps({"c": content_id, "s": seed}, separators=(",", ":")).encode()
     return base64.urlsafe_b64encode(raw).decode().rstrip("=")
 
@@ -150,6 +154,7 @@ def get_learn_queue(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    """Return the next batch of cards/questions for the student to drill, plus progress."""
     course = _get_course_or_404(db, course_id)
     assert_course_access(db, course, current_user)
     _require_student(current_user)
@@ -177,6 +182,7 @@ def submit_learn_round(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    """Apply a whole Learn round: update each card's box, log the session, award points."""
     course = _get_course_or_404(db, course_id)
     assert_course_access(db, course, current_user)
     _require_student(current_user)
@@ -229,6 +235,7 @@ def start_test(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    """Build a one-off test from the set (answer key withheld) and return it with a seed token."""
     course = _get_course_or_404(db, course_id)
     assert_course_access(db, course, current_user)
     _require_student(current_user)
@@ -267,6 +274,7 @@ def submit_test(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    """Rebuild the same test from the token seed, grade the answers, record mastery and points."""
     course = _get_course_or_404(db, course_id)
     assert_course_access(db, course, current_user)
     _require_student(current_user)
@@ -332,6 +340,7 @@ def start_match(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    """Return term/definition pairs for a timed Match drill."""
     course = _get_course_or_404(db, course_id)
     assert_course_access(db, course, current_user)
     _require_student(current_user)
@@ -354,6 +363,7 @@ def submit_match(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    """Record a finished Match drill (clamping client-reported numbers) and award points."""
     course = _get_course_or_404(db, course_id)
     assert_course_access(db, course, current_user)
     _require_student(current_user)

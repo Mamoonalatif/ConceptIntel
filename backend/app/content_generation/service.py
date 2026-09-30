@@ -70,6 +70,7 @@ _DIFFICULTY_GUIDANCE = {
     ),
 }
 
+# Base system prompt for each kind of content (flashcard, mcq/quiz, study guide, assignment, ...).
 _SYSTEM_PROMPTS = {
     "flashcard": """You are an expert instructional designer creating flashcards for one specific
 concept in a university course. Each flashcard's "front" is a short, unambiguous
@@ -143,25 +144,41 @@ help) that:
 
 Respond ONLY with JSON: {"material": "... full markdown text ..."}""",
 
-    "assignment": """You are an experienced university instructor designing a graded assignment
-for one specific concept in a course - both the student-facing brief AND the
-grading rubric a teacher will use on every submission, together as one draft.
+    "assignment": """You are an experienced university instructor designing a formal, graded
+assignment for one specific concept in a course - both the student-facing brief AND the
+detailed grading rubric a teacher will use on every submission, together as one draft.
+It will be issued as a formal Word document in the style of a Pakistani university
+(Air University) assignment, so write it as a complete, self-contained handout.
 
 Write:
 - "title": a short, specific assignment title (not just the concept name).
-- "instructions": the full student-facing brief (2-5 sentences or a short numbered
-  list) - what to do, and what a strong submission demonstrates about this concept.
+- "objectives": 2-4 short learning objectives - what the student will demonstrate.
+- "instructions": the student-facing overview/brief (2-5 sentences) - context, what to
+  do overall, and what a strong submission demonstrates about this concept.
+- "tasks": 2-5 numbered questions/tasks. Each has a short "title", a full
+  "description" of exactly what the student must do/answer, and its "marks". The task
+  marks must sum to "points".
 - "points": total points the assignment is worth (a normal whole-course value,
   typically 20-100 - use your judgement from the concept's weight/difficulty).
+- "submission_guidelines": 3-5 short bullet rules (format, file type, referencing,
+  originality, what to include).
 - "criteria": 3-6 grading criteria that together sum to "points". Each needs a
   short title, a one-sentence description of what earns full marks, a point
   value, and - ONLY when it genuinely assesses one of the listed CLOs below -
-  that CLO's exact code. Leave clo_code null when no listed CLO fits.
+  that CLO's exact code. Leave clo_code null when no listed CLO fits. Each criterion
+  ALSO needs "levels": exactly four performance levels - "Excellent", "Good", "Fair",
+  "Poor" - each with "points" (Excellent = the criterion's max_points, then strictly
+  decreasing, Poor may be 0) and a one-sentence "description" of what earns that level.
 
 Respond ONLY with JSON:
-{"title": "...", "instructions": "...", "points": 50,
- "criteria": [{"title": "...", "description": "...", "max_points": 30, "clo_code": "CLO1"},
-              {"title": "...", "description": "...", "max_points": 20, "clo_code": null}]}""",
+{"title": "...", "objectives": ["..."], "instructions": "...", "points": 50,
+ "tasks": [{"title": "...", "description": "...", "marks": 25}],
+ "submission_guidelines": ["..."],
+ "criteria": [{"title": "...", "description": "...", "max_points": 30, "clo_code": "CLO1",
+               "levels": [{"label": "Excellent", "points": 30, "description": "..."},
+                          {"label": "Good", "points": 22, "description": "..."},
+                          {"label": "Fair", "points": 14, "description": "..."},
+                          {"label": "Poor", "points": 5, "description": "..."}]}]}""",
 }
 
 def _language_instruction(language: str) -> str:
@@ -186,6 +203,7 @@ def _language_instruction(language: str) -> str:
     )
 
 
+# Prompt fragments appended when relevant: supplied document, import existing questions, course scope, grounding.
 _SOURCE_TEXT_INSTRUCTION = (
     "\n\nSUPPLIED SOURCE:\n"
     "The teacher supplied the document below specifically for this generation. Treat "
@@ -265,6 +283,7 @@ def normalize_difficulty(value: Optional[str]) -> str:
 
 
 def _client_or_raise():
+    """Returns the shared AI client or raises a clear error if no API key is configured."""
     client = _get_client()
     if client is None:
         raise RuntimeError(
@@ -440,6 +459,7 @@ def generate_flashcards(
     source_text: str = "",
     clo: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
+    """Generates a set of flashcards for a concept; every card is validated against FlashcardOut."""
     system_prompt = _compose_system_prompt("flashcard", difficulty, bool(rag_context), bool(course_outline), language, bool(source_text))
     system_prompt += _target_clo_instruction(clo)
     user_content = _compose_user_content(
@@ -468,6 +488,7 @@ def generate_mcq(
     import_existing: bool = False,
     clo: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
+    """Generates (or imports from a supplied document) multiple-choice questions, validated against MCQOut."""
     system_prompt = _compose_system_prompt(
         "mcq", difficulty, bool(rag_context), bool(course_outline), language,
         bool(source_text), question_styles, import_existing,
@@ -502,6 +523,7 @@ def generate_study_guide(
     source_text: str = "",
     clo: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
+    """Generates a structured study guide for a concept, validated against StudyGuideOut."""
     system_prompt = _compose_system_prompt("study_guide", difficulty, bool(rag_context), bool(course_outline), language, bool(source_text))
     system_prompt += _target_clo_instruction(clo)
     user_content = _compose_user_content(
@@ -548,12 +570,14 @@ def generate_study_guide(
 
 
 def _clo_block(clos: List[Dict[str, str]]) -> str:
+    """Formats the course CLO list for the assignment prompt (or notes there are none)."""
     if not clos:
         return "(This course has no defined Course Learning Outcomes yet - leave clo_code null on every criterion.)"
     return "\n".join(f"- {c['code']}: {c['title']}" for c in clos)
 
 
 def _clo_line(clo: Dict[str, str]) -> str:
+    """Formats one CLO as "CODE: title - description" for prompts."""
     desc = f" - {clo['description']}" if clo.get("description") else ""
     return f"\"{clo['code']}: {clo['title']}\"{desc}"
 
@@ -634,8 +658,8 @@ def generate_assignment(
                 ],
                 response_format={"type": "json_object"},
                 temperature=0.35,
-                max_tokens=2500,
-                timeout=60.0,
+                max_tokens=6000,
+                timeout=120.0,
                 extra_body=_reasoning_extra_body(),
             )
             raw_content = response.choices[0].message.content
@@ -806,8 +830,11 @@ def refine_assignment_draft(current_draft: Dict[str, Any], instruction: str) -> 
         "the requested change, then return the FULL resulting draft in the same "
         "shape as the input.\n\n"
         "Respond ONLY with JSON in this exact format:\n"
-        '{"title": "...", "instructions": "...", "points": 50,\n'
-        ' "criteria": [{"title": "...", "description": "...", "max_points": 30, "clo_code": null}]}'
+        '{"title": "...", "objectives": ["..."], "instructions": "...", "points": 50,\n'
+        ' "tasks": [{"title": "...", "description": "...", "marks": 25}],\n'
+        ' "submission_guidelines": ["..."],\n'
+        ' "criteria": [{"title": "...", "description": "...", "max_points": 30, "clo_code": null,\n'
+        '   "levels": [{"label": "Excellent", "points": 30, "description": "..."}]}]}'
     )
     user_content = (
         f"Current draft:\n{json.dumps(current_draft, indent=2)}\n\n"
@@ -826,8 +853,8 @@ def refine_assignment_draft(current_draft: Dict[str, Any], instruction: str) -> 
                 ],
                 response_format={"type": "json_object"},
                 temperature=0.3,
-                max_tokens=2500,
-                timeout=60.0,
+                max_tokens=6000,
+                timeout=120.0,
                 extra_body=_reasoning_extra_body(),
             )
             raw_content = response.choices[0].message.content

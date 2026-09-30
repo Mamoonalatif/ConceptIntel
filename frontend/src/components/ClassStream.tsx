@@ -1,3 +1,5 @@
+// ClassStream: the course "stream" feed (like Google Classroom). Shows announcements, assignments, materials and meetings in one chronological list;
+// teachers can post announcements (edit/delete), post materials (file/link) and schedule meetings.
 import React, { useEffect, useState } from 'react';
 import {
   Megaphone, Send, Pencil, Trash2, X, Check, RefreshCw, User,
@@ -16,8 +18,10 @@ interface ClassStreamProps {
   isTeacher: boolean;
 }
 
+// Which extra composer (material or meeting form) is open; null means none.
 type ComposerKind = 'announcement' | 'material' | 'meeting' | null;
 
+// Badge label, icon and colour for each post type in the feed.
 const POST_TYPE_META: Record<string, { label: string; icon: React.ElementType; badgeClass: string }> = {
   announcement: { label: 'Announcement', icon: Megaphone, badgeClass: 'bg-primary-muted text-primary border-primary/20' },
   assignment: { label: 'Assignment', icon: ClipboardList, badgeClass: 'bg-secondary-muted text-secondary border-secondary/20' },
@@ -25,6 +29,7 @@ const POST_TYPE_META: Record<string, { label: string; icon: React.ElementType; b
   meeting: { label: 'Meeting', icon: Video, badgeClass: 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/20' },
 };
 
+// Main component: loads the merged stream for the course and renders the composers (teacher only) and the feed.
 export const ClassStream: React.FC<ClassStreamProps> = ({ courseId, isTeacher }) => {
   const [items, setItems] = useState<StreamItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -51,6 +56,7 @@ export const ClassStream: React.FC<ClassStreamProps> = ({ courseId, isTeacher })
   const [mtgDuration, setMtgDuration] = useState('');
   const [composerPosting, setComposerPosting] = useState(false);
 
+  // Fetch the stream; silent mode (auto-refresh) avoids the spinner/error.
   const fetchItems = async (silent = false) => {
     if (!silent) setLoading(true);
     try {
@@ -63,6 +69,7 @@ export const ClassStream: React.FC<ClassStreamProps> = ({ courseId, isTeacher })
     }
   };
 
+  // Load on mount / course change, and keep it fresh with periodic polling.
   useEffect(() => {
     fetchItems();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -70,6 +77,7 @@ export const ClassStream: React.FC<ClassStreamProps> = ({ courseId, isTeacher })
 
   useAutoRefresh(() => fetchItems(true));
 
+  // Post a new announcement (teacher) and reload the stream.
   const handlePost = async () => {
     if (!draft.trim()) return;
     setPosting(true);
@@ -85,6 +93,7 @@ export const ClassStream: React.FC<ClassStreamProps> = ({ courseId, isTeacher })
     }
   };
 
+  // Announcement editing: startEdit loads the text into the edit box, cancelEdit discards, saveEdit sends the update.
   const startEdit = (item: StreamItem) => {
     setEditingId(item.id);
     setEditDraft(item.content || '');
@@ -109,6 +118,7 @@ export const ClassStream: React.FC<ClassStreamProps> = ({ courseId, isTeacher })
     }
   };
 
+  // Delete handlers (announcement / material / meeting): confirm, call the matching service, then reload the stream.
   const handleDeleteAnnouncement = async (id: number) => {
     if (!window.confirm('Delete this announcement?')) return;
     try {
@@ -139,12 +149,14 @@ export const ClassStream: React.FC<ClassStreamProps> = ({ courseId, isTeacher })
     }
   };
 
+  // Close the material/meeting composer and clear all of its fields.
   const resetComposer = () => {
     setComposerKind(null);
     setMatTitle(''); setMatDescription(''); setMatLink(''); setMatFile(null);
     setMtgTitle(''); setMtgDescription(''); setMtgLink(''); setMtgScheduledAt(''); setMtgDuration('');
   };
 
+  // Post a class material (title, optional description, link and file).
   const handlePostMaterial = async () => {
     if (!matTitle.trim()) return;
     setComposerPosting(true);
@@ -165,6 +177,7 @@ export const ClassStream: React.FC<ClassStreamProps> = ({ courseId, isTeacher })
     }
   };
 
+  // Schedule a meeting (title, link and start time required; duration optional). The local date-time is converted to ISO/UTC for the server.
   const handlePostMeeting = async () => {
     if (!mtgTitle.trim() || !mtgLink.trim() || !mtgScheduledAt) return;
     setComposerPosting(true);
@@ -186,6 +199,7 @@ export const ClassStream: React.FC<ClassStreamProps> = ({ courseId, isTeacher })
     }
   };
 
+  // Render: header with Material/Meeting toggle buttons, error banner, composers (teacher), announcement box, then the feed.
   return (
     <div className="bg-surface rounded-2xl p-6 border border-border animate-fade-up">
       <div className="flex items-center justify-between mb-4">
@@ -351,11 +365,13 @@ export const ClassStream: React.FC<ClassStreamProps> = ({ courseId, isTeacher })
       ) : (
         <div className="space-y-4">
           {items.map((item) => {
+            // Per-post setup: badge metadata by type, and whether this announcement is currently being edited.
             const meta = POST_TYPE_META[item.post_type] || POST_TYPE_META.announcement;
             const Icon = meta.icon;
             const isOwner = isTeacher;
             const isEditingAnnouncement = item.post_type === 'announcement' && editingId === item.id;
 
+            // Each post card: author, badge, time, owner actions, then content by type (announcement text, assignment due info, material downloads/links, meeting join link).
             return (
               <div key={`${item.post_type}-${item.id}`} className="flex items-start gap-3 border-b border-border last:border-b-0 pb-4 last:pb-0">
                 <div className="w-9 h-9 rounded-full bg-secondary-muted flex items-center justify-center shrink-0">

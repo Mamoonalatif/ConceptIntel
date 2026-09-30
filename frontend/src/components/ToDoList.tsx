@@ -1,3 +1,4 @@
+// Purpose: student dashboard to-do list of assignments with sort (due date/course) and status filters, auto-refreshing.
 import React, { useEffect, useState } from 'react';
 import { ListChecks, Clock, AlertTriangle, CheckCircle2, RefreshCw, ArrowUpDown } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -8,9 +9,11 @@ import { parseUtc } from '../lib/time';
 import { EmptyStateIllustration } from './illustrations';
 import { apiErrorMessage } from '../lib/apiError';
 
+// Sort options sent to the API, and the filter tabs shown above the list.
 type SortKey = 'due_date' | 'course';
 type FilterKey = 'all' | 'upcoming' | 'missing' | 'done';
 
+// Tab definitions for the status filter row.
 const FILTER_TABS: { key: FilterKey; label: string }[] = [
   { key: 'all', label: 'All' },
   { key: 'upcoming', label: 'Upcoming' },
@@ -18,6 +21,7 @@ const FILTER_TABS: { key: FilterKey; label: string }[] = [
   { key: 'done', label: 'Done' },
 ];
 
+// Maps an assignment status (submitted / late / missing) to its badge label, colours and icon.
 function statusBadge(status: TodoItem['status']) {
   switch (status) {
     case 'submitted':
@@ -29,6 +33,7 @@ function statusBadge(status: TodoItem['status']) {
   }
 }
 
+// Lists the student's assignments as clickable cards; clicking one opens its course.
 export const ToDoList: React.FC = () => {
   const navigate = useNavigate();
   const [items, setItems] = useState<TodoItem[]>([]);
@@ -37,6 +42,7 @@ export const ToDoList: React.FC = () => {
   const [sort, setSort] = useState<SortKey>('due_date');
   const [filter, setFilter] = useState<FilterKey>('all');
 
+  // Loads to-do items for the current sort/filter. `silent` is used by the background refresh so the spinner/errors don't flicker.
   const fetchItems = async (silent = false) => {
     if (!silent) setLoading(true);
     try {
@@ -50,11 +56,13 @@ export const ToDoList: React.FC = () => {
     }
   };
 
+  // Reload whenever the sort or filter changes.
   useEffect(() => {
     fetchItems();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sort, filter]);
 
+  // Periodically re-fetch in the background to keep the list current.
   useAutoRefresh(() => fetchItems(true));
 
   return (
@@ -97,6 +105,7 @@ export const ToDoList: React.FC = () => {
         <div className="bg-red-50 border border-red-200 text-red-600 dark:bg-red-500/10 dark:border-red-500/20 dark:text-red-400 rounded-xl p-3 mb-4 text-xs">{error}</div>
       )}
 
+      {/* Three states: loading spinner, empty message, or the list of assignment cards. */}
       {loading ? (
         <div className="text-center py-8 text-sm text-text-muted">
           <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2" />

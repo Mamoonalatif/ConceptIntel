@@ -1,3 +1,5 @@
+// CourseSchedule: week-by-week course outline page. Students see the published schedule;
+// teachers can also generate one from the course outline, edit sessions and save/publish.
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 
@@ -15,6 +17,7 @@ import {
 // straight to the live schedule, visible to students immediately.
 const emptySession = (): ScheduleSessionItem => ({ week_label: '', title: '', topics: [] });
 
+/** Page component (route param :courseId): viewer for everyone, editor for teachers. */
 const CourseSchedule: React.FC = () => {
   const { courseId } = useParams<{ courseId: string }>();
   const idNum = Number(courseId);
@@ -35,6 +38,8 @@ const CourseSchedule: React.FC = () => {
   const [generating, setGenerating] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  // Loads the course name and its published schedule (none yet is a normal case);
+  // seeds the teacher's editable draft from the live sessions.
   const load = async () => {
     setLoading(true);
     setError('');
@@ -56,15 +61,18 @@ const CourseSchedule: React.FC = () => {
     }
   };
 
+  // Reload whenever the course id in the URL changes.
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [idNum]);
 
+  // Auto-dismiss the success banner after 4 seconds.
   useEffect(() => {
     if (success) { const t = setTimeout(() => setSuccess(''), 4000); return () => clearTimeout(t); }
   }, [success]);
 
+  // Asks the backend (AI) to build a schedule from the course outline; it is published immediately.
   const handleGenerate = async () => {
     setGenerating(true);
     setError('');
@@ -80,6 +88,7 @@ const CourseSchedule: React.FC = () => {
     }
   };
 
+  // Saves the teacher's edited draft as the live schedule.
   const handleSave = async () => {
     setSaving(true);
     setError('');
@@ -94,16 +103,20 @@ const CourseSchedule: React.FC = () => {
     }
   };
 
+  // Draft editing helpers: patch one session's fields.
   const updateDraftSession = (index: number, patch: Partial<ScheduleSessionItem>) => {
     setDraft((prev) => prev.map((s, i) => (i === index ? { ...s, ...patch } : s)));
   };
 
+  // Converts the comma-separated topics text box into a clean string array.
   const updateDraftTopics = (index: number, topicsText: string) => {
     updateDraftSession(index, { topics: topicsText.split(',').map((t) => t.trim()).filter(Boolean) });
   };
 
+  // Append a blank session / delete a session by index.
   const addSession = () => setDraft((prev) => [...prev, emptySession()]);
   const removeSession = (index: number) => setDraft((prev) => prev.filter((_, i) => i !== index));
+  // Swap a session with its neighbour (dir -1 = up, 1 = down); no-op at the ends.
   const moveSession = (index: number, dir: -1 | 1) => {
     setDraft((prev) => {
       const next = [...prev];

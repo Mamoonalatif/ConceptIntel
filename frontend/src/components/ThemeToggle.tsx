@@ -1,3 +1,4 @@
+// Purpose: icon button that switches the app between light and dark mode.
 import React from 'react';
 import { Sun, Moon } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';

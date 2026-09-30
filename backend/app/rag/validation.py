@@ -9,6 +9,7 @@ than producing false-positive rejections on legitimate files.
 """
 import magic
 
+# Per extension: substrings of the detected MIME type that we accept.
 _ALLOWED_MIME_SUBSTRINGS: dict[str, tuple[str, ...]] = {
     ".pdf": ("application/pdf",),
     ".docx": ("officedocument.wordprocessingml", "application/zip", "application/x-zip"),
@@ -22,6 +23,7 @@ _ALLOWED_MIME_SUBSTRINGS: dict[str, tuple[str, ...]] = {
 
 
 def sniff_mime(content: bytes) -> str:
+    """Detects the real MIME type from the file bytes using libmagic."""
     return magic.from_buffer(content, mime=True)
 
 

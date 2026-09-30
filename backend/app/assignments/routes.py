@@ -1,3 +1,6 @@
+# Assignments API: teachers create/edit assignments and rubrics and run the AI-grade ->
+# review -> approve workflow; students submit files and see only approved grades.
+# Downstream effects (mastery, CLO/PLO attainment, points, notifications) run on approval.
 import threading
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -15,7 +18,7 @@ from app.database.models import (
 )
 from app.assignments.schemas import (
     AssignmentResponse, AssignmentUpdate, SubmissionSummary, SubmissionResponse, ManualGradeUpdate,
-    RubricSaveRequest, RubricOut, RubricCriterionOut, RubricLevelOut, GradeApproveRequest,
+    RubricSaveRequest, RubricOut, RubricCriterionOut, RubricLevelOut, GradeApproveRequest, MisconceptionGroupOut,
 )
 from app.auth.routes import get_current_user, get_current_teacher, get_current_student
 from app.courses.access import assert_course_access
@@ -23,7 +26,7 @@ from app.upload.services import store_file, download_stored_file, delete_stored_
 from app.notifications.service import create_notification, notify_course_students
 from app.notifications.types import NotificationType
 from app.notifications.ai_summary import generate_posting_summary
-from app.assignments import grading_service, rubric_service
+from app.assignments import grading_service, rubric_service, similarity_service
 from app.knowledge_graph.services import neo4j_service, build_node_id
 from app.mastery import service as mastery_service
 from app.gamification import service as gamification_service
@@ -44,6 +47,7 @@ RUBRIC_SUM_TOLERANCE = 0.5
 
 
 def _get_course_or_404(db: Session, course_id: int) -> Course:
+    """Fetch the course by id or raise a 404."""
     course = db.query(Course).filter(Course.id == course_id).first()
     if not course:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
@@ -91,6 +95,7 @@ def _notify_assignment_posted_background(course_id: int, assignment_id: int) -> 
 
 
 def _read_and_validate_upload(file: UploadFile) -> tuple[bytes, str, str]:
+    """Check the file extension and 25MB limit; return (bytes, extension, safe filename)."""
     extension = Path(file.filename).suffix.lower()
     if extension not in SUPPORTED_EXTENSIONS:
         raise HTTPException(
@@ -115,10 +120,12 @@ def _student_facing_submission(sub: AssignmentSubmission) -> SubmissionSummary:
         grade=sub.grade if is_approved else None,
         feedback=sub.feedback if is_approved else None,
         grade_status=sub.grade_status,
+        misconceptions=(json.loads(sub.misconceptions_json) if (is_approved and sub.misconceptions_json) else None),
     )
 
 
 def _to_response(a: Assignment, current_user: User, is_oversight: bool) -> AssignmentResponse:
+    """Build AssignmentResponse; students get their own submission, staff get the submission count."""
     my_submission = None
     submission_count = None
 
@@ -145,6 +152,7 @@ def list_assignments(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    """All assignments in a course (soonest due first), shaped for the requesting user's role."""
     course = _get_course_or_404(db, course_id)
     assert_course_access(db, course, current_user)
     is_oversight = current_user.role.lower() in ("admin", "program_coordinator", "course_coordinator")
@@ -169,6 +177,7 @@ def create_assignment(
     db: Session = Depends(get_db),
     current_teacher: User = Depends(get_current_teacher),
 ):
+    """Teacher posts an assignment (optional attachment); the student notification is sent in the background."""
     course = _get_course_or_404(db, course_id)
     if course.teacher_id != current_teacher.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You are not the instructor of this course.")
@@ -203,6 +212,7 @@ def create_assignment(
 
 
 def _get_owned_assignment(db: Session, course_id: int, assignment_id: int, teacher_id: int) -> Assignment:
+    """Load an assignment in this course and require that this teacher owns it."""
     assignment = (
         db.query(Assignment)
         .filter(Assignment.id == assignment_id, Assignment.course_id == course_id)
@@ -223,6 +233,7 @@ def update_assignment(
     db: Session = Depends(get_db),
     current_teacher: User = Depends(get_current_teacher),
 ):
+    """Teacher edits title/description/due date/points (only fields sent)."""
     assignment = _get_owned_assignment(db, course_id, assignment_id, current_teacher.id)
     if payload.title is not None:
         assignment.title = payload.title
@@ -239,6 +250,7 @@ def update_assignment(
 
 
 def _rubric_to_out(rubric: Rubric, db: Session) -> RubricOut:
+    """Convert a Rubric row to RubricOut, resolving each criterion's CLO code and summing points."""
     clo_codes = {c.id: c.code for c in db.query(CLO).filter(
         CLO.id.in_([c.clo_id for c in rubric.criteria if c.clo_id])
     ).all()} if rubric.criteria else {}
@@ -339,6 +351,7 @@ def get_rubric(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    """Return the assignment's rubric (404 if none) to anyone with course access."""
     course = _get_course_or_404(db, course_id)
     assert_course_access(db, course, current_user)
     rubric = db.query(Rubric).filter(Rubric.assignment_id == assignment_id).first()
@@ -416,6 +429,7 @@ def delete_rubric(
     db: Session = Depends(get_db),
     current_teacher: User = Depends(get_current_teacher),
 ):
+    """Teacher deletes the assignment's rubric if one exists."""
     _get_owned_assignment(db, course_id, assignment_id, current_teacher.id)
     rubric = db.query(Rubric).filter(Rubric.assignment_id == assignment_id).first()
     if rubric:
@@ -431,6 +445,7 @@ def delete_assignment(
     db: Session = Depends(get_db),
     current_teacher: User = Depends(get_current_teacher),
 ):
+    """Delete an assignment, removing its stored attachment and submission files (best effort)."""
     assignment = _get_owned_assignment(db, course_id, assignment_id, current_teacher.id)
     if assignment.attachment_url:
         try:
@@ -454,6 +469,7 @@ def download_assignment_attachment(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    """Stream the assignment's attachment to anyone with course access."""
     course = _get_course_or_404(db, course_id)
     assert_course_access(db, course, current_user)
     assignment = db.query(Assignment).filter(Assignment.id == assignment_id, Assignment.course_id == course_id).first()
@@ -476,6 +492,7 @@ def submit_assignment(
     db: Session = Depends(get_db),
     current_student: User = Depends(get_current_student),
 ):
+    """Student uploads (or replaces) their submission, flags lateness, and notifies the teacher."""
     course = _get_course_or_404(db, course_id)
     assert_course_access(db, course, current_student)
 
@@ -512,6 +529,14 @@ def submit_assignment(
     db.commit()
     db.refresh(submission)
 
+    # A replaced file invalidates the cached text and the old similarity report.
+    submission.extracted_text = None
+    submission.similarity_json = None
+    db.commit()
+    # Similar-assignment check runs in the background (text extraction can be slow)
+    # so the student's upload returns immediately; the teacher sees the result later.
+    threading.Thread(target=similarity_service.refresh_similarity_background, args=(assignment_id,), daemon=True).start()
+
     try:
         create_notification(
             db, assignment.teacher_id, NotificationType.ASSIGNMENT_SUBMITTED,
@@ -532,6 +557,7 @@ def list_submissions(
     db: Session = Depends(get_db),
     current_teacher: User = Depends(get_current_teacher),
 ):
+    """Teacher lists every submission with real grade/feedback (no review-gate hiding)."""
     assignment = _get_owned_assignment(db, course_id, assignment_id, current_teacher.id)
     # Teachers see everything regardless of grade_status - they're the reviewer,
     # not the audience the review gate exists for. Only _student_facing_submission
@@ -547,6 +573,7 @@ def download_submission(
     db: Session = Depends(get_db),
     current_teacher: User = Depends(get_current_teacher),
 ):
+    """Teacher downloads a student's submitted file."""
     assignment = _get_owned_assignment(db, course_id, assignment_id, current_teacher.id)
     submission = next((s for s in assignment.submissions if s.id == submission_id), None)
     if not submission:
@@ -560,7 +587,46 @@ def download_submission(
     )
 
 
+@router.post("/{course_id}/assignments/{assignment_id}/similarity/check", response_model=List[SubmissionResponse])
+def check_similarity(
+    course_id: int,
+    assignment_id: int,
+    db: Session = Depends(get_db),
+    current_teacher: User = Depends(get_current_teacher),
+):
+    """Teacher re-runs the similar-assignment check for every submission of this
+    assignment right now and gets the refreshed submissions back."""
+    assignment = _get_owned_assignment(db, course_id, assignment_id, current_teacher.id)
+    similarity_service.refresh_similarity(db, assignment.id)
+    db.refresh(assignment)
+    return [_submission_to_response(s) for s in assignment.submissions]
+
+
+@router.get("/{course_id}/assignments/{assignment_id}/misconceptions", response_model=List[MisconceptionGroupOut])
+def list_misconceptions(
+    course_id: int,
+    assignment_id: int,
+    db: Session = Depends(get_db),
+    current_teacher: User = Depends(get_current_teacher),
+):
+    """Class-wide view of the misconceptions the AI found, grouped by concept and
+    sorted by how many students share them - the most widespread gaps come first."""
+    assignment = _get_owned_assignment(db, course_id, assignment_id, current_teacher.id)
+    groups: dict = {}
+    for s in assignment.submissions:
+        for m in (_submission_misconceptions(s) or []):
+            key = (m.get("concept_name") or "General").strip() or "General"
+            g = groups.setdefault(key, {"concept_name": key, "count": 0, "examples": []})
+            g["count"] += 1
+            g["examples"].append({
+                "student_name": s.student.full_name if s.student else None,
+                "misconception": m.get("misconception"), "correction": m.get("correction"),
+            })
+    return sorted(groups.values(), key=lambda g: -g["count"])
+
+
 def _get_submission_or_404(assignment: Assignment, submission_id: int) -> AssignmentSubmission:
+    """Find a submission within an assignment or raise a 404."""
     submission = next((s for s in assignment.submissions if s.id == submission_id), None)
     if not submission:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found")
@@ -579,7 +645,19 @@ def _submission_to_response(s: AssignmentSubmission) -> SubmissionResponse:
         grade=s.grade, feedback=s.feedback,
         rubric_scores=json.loads(s.rubric_scores_json) if s.rubric_scores_json else None,
         grade_status=s.grade_status,
+        similarity=json.loads(s.similarity_json) if s.similarity_json else None,
+        misconceptions=_submission_misconceptions(s),
     )
+
+
+def _submission_misconceptions(s: AssignmentSubmission) -> Optional[list]:
+    """Misconceptions for the teacher view: the approved list if the grade is approved,
+    otherwise whatever the still-pending AI draft found."""
+    if s.misconceptions_json:
+        return json.loads(s.misconceptions_json)
+    if s.pending_result_json:
+        return json.loads(s.pending_result_json).get("misconceptions") or None
+    return None
 
 
 def _acquire_grading_lock(db: Session, submission_id: int) -> bool:
@@ -606,6 +684,7 @@ def _acquire_grading_lock(db: Session, submission_id: int) -> bool:
 
 
 def _release_grading_lock(db: Session, submission_id: int) -> None:
+    """Clear the grading lock so the submission can be graded again."""
     db.query(AssignmentSubmission).filter(AssignmentSubmission.id == submission_id).update(
         {"grading_locked_at": None}, synchronize_session=False
     )
@@ -830,6 +909,7 @@ def approve_grade(
     submission.grade = result["overall_grade"]
     submission.feedback = grading_service.format_feedback_text(result)
     submission.rubric_scores_json = json.dumps(breakdown) if breakdown is not None else None
+    submission.misconceptions_json = json.dumps(result.get("misconceptions") or [])
     submission.grade_status = "Approved"
     submission.pending_result_json = None
 

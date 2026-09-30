@@ -1,3 +1,4 @@
+# Outbound email (Gmail SMTP): credentials, password reset, verification and notification emails.
 import logging
 import smtplib
 from email.mime.multipart import MIMEMultipart
@@ -13,6 +14,7 @@ SMTP_PORT = 465
 
 
 def is_configured() -> bool:
+    """True if Gmail SMTP credentials are set in settings."""
     return bool(settings.SMTP_EMAIL and settings.SMTP_APP_PASSWORD)
 
 
@@ -45,6 +47,7 @@ def send_email(to_email: str, subject: str, html_body: str) -> bool:
 
 
 def send_staff_credentials_email(to_email: str, full_name: str, role_label: str, temporary_password: str) -> bool:
+    """Email a newly admin-created teacher/staff user their temporary password."""
     subject = f"Your ConceptIntel {role_label} account"
     html_body = f"""
     <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
@@ -63,6 +66,7 @@ def send_staff_credentials_email(to_email: str, full_name: str, role_label: str,
 
 
 def send_password_reset_email(to_email: str, full_name: str, reset_link: str) -> bool:
+    """Email a password-reset link (valid 30 minutes)."""
     subject = "Reset your ConceptIntel password"
     html_body = f"""
     <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
@@ -77,6 +81,7 @@ def send_password_reset_email(to_email: str, full_name: str, reset_link: str) ->
 
 
 def send_verification_email(to_email: str, full_name: str, verify_link: str, code: str = "") -> bool:
+    """Email a verification link plus an optional code to confirm sign-up."""
     subject = "Verify your ConceptIntel email address"
     code_block = (
         '<p style="margin-top: 20px;">Or enter this verification code on the verification page:</p>'

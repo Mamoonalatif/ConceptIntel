@@ -1,7 +1,9 @@
+# Pydantic models for a user's notification on/off switches by category.
 from typing import Optional
 from pydantic import BaseModel
 
 
+# The user's current switches (one boolean per notification category).
 class NotificationPreferenceResponse(BaseModel):
     course_posts: bool
     assignment_updates: bool

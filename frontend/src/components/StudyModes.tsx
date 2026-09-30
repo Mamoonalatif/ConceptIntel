@@ -1,3 +1,5 @@
+// StudyModes: student drill surface over approved generated material. Lists study sets and launches one of three modes:
+// Learn (spaced-repetition queue), Test (scored single sitting that feeds mastery) and Match (timed term/definition pairing).
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Brain, ClipboardCheck, Shuffle, RefreshCw, ArrowLeft, Check, X,
@@ -10,6 +12,7 @@ import type {
 import { EmptyStateIllustration } from './illustrations';
 import { apiErrorMessage } from '../lib/apiError';
 
+// The three drill modes.
 type Mode = 'learn' | 'test' | 'match';
 
 interface StudyModesProps {
@@ -19,6 +22,7 @@ interface StudyModesProps {
   canSolve?: boolean;
 }
 
+// Maps a difficulty name to its global CSS badge class (badge-easy / badge-medium / badge-hard).
 const badgeClassFor = (d: string) => `badge-${(d || 'medium').toLowerCase()}`;
 
 /**
@@ -28,12 +32,14 @@ const badgeClassFor = (d: string) => `badge-${(d || 'medium').toLowerCase()}`;
  * a student does with it repeatedly. That is why they are instant and can be retried
  * without cost, which is exactly the property a drilling loop needs.
  */
+// Top-level component: loads the study-set overview and shows either the set list or the active runner (Learn/Test/Match) for the chosen set.
 export const StudyModes: React.FC<StudyModesProps> = ({ courseId, canSolve = true }) => {
   const [sets, setSets] = useState<StudyOverviewItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [active, setActive] = useState<{ set: StudyOverviewItem; mode: Mode } | null>(null);
 
+  // Fetch the student's study sets with mastery/due counts.
   const load = async () => {
     setLoading(true);
     try {
@@ -45,11 +51,13 @@ export const StudyModes: React.FC<StudyModesProps> = ({ courseId, canSolve = tru
     }
   };
 
+  // Load on mount / course change.
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [courseId]);
 
+  // When a drill is active (and the user may solve), show only that runner with a back button; otherwise fall through to the list.
   if (active && canSolve) {
     const back = () => { setActive(null); load(); };
     return (
@@ -161,6 +169,7 @@ export const StudyModes: React.FC<StudyModesProps> = ({ courseId, canSolve = tru
 
 /* ─────────────────────────────── Learn ─────────────────────────────── */
 
+// LearnRunner: walks through a server-built queue of due cards/questions; cards are self-graded, questions auto-checked. Results are submitted at the end so the server can schedule reviews.
 const LearnRunner: React.FC<{
   courseId: number; set: StudyOverviewItem; onDone: () => void;
 }> = ({ courseId, set, onDone }) => {
@@ -174,6 +183,7 @@ const LearnRunner: React.FC<{
   const [finished, setFinished] = useState<{ score: number; correct: number; total: number } | null>(null);
   const startedAt = useRef(Date.now());
 
+  // Fetch the learn queue for this set.
   useEffect(() => {
     (async () => {
       try {
@@ -186,9 +196,11 @@ const LearnRunner: React.FC<{
     })();
   }, [courseId, set.content_id]);
 
+  // Queue items and the one currently shown.
   const items = queue?.queue ?? [];
   const current: LearnQueueItem | undefined = items[pos];
 
+  // Send all answers for the round (plus time spent) to the server and show the score.
   const submitRound = async (all: { item_index: number; correct: boolean }[]) => {
     try {
       const res = await studyService.submitLearn(
@@ -200,6 +212,7 @@ const LearnRunner: React.FC<{
     }
   };
 
+  // Record the answer for the current item, reset the reveal state, and either move on or submit the round if it was the last item.
   const advance = (correct: boolean) => {
     if (!current) return;
     const next = [...answers, { item_index: current.index, correct }];
@@ -210,6 +223,7 @@ const LearnRunner: React.FC<{
     else setPos(pos + 1);
   };
 
+  // Render states: loading, error, round finished, empty queue ("nothing due"), otherwise the current card/question.
   if (loading) return <div className="glass-panel rounded-2xl p-8 border border-border text-center text-sm text-text-muted">Loading...</div>;
   if (error) return <ErrorCard message={error} />;
 
@@ -330,6 +344,7 @@ const LearnRunner: React.FC<{
 
 /* ──────────────────────────────── Test ─────────────────────────────── */
 
+// TestRunner: one-sitting multiple-choice test. The server issues an attempt token; answers are sent together and scored on the server.
 const TestRunner: React.FC<{ courseId: number; set: StudyOverviewItem; onDone: () => void }> = ({
   courseId, set, onDone,
 }) => {
@@ -340,6 +355,7 @@ const TestRunner: React.FC<{ courseId: number; set: StudyOverviewItem; onDone: (
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
+  // Start the test and initialise every answer to -1 (unanswered).
   useEffect(() => {
     (async () => {
       try {
@@ -354,6 +370,7 @@ const TestRunner: React.FC<{ courseId: number; set: StudyOverviewItem; onDone: (
     })();
   }, [courseId, set.content_id]);
 
+  // Submit all answers with the attempt token for grading.
   const submit = async () => {
     if (!test) return;
     setSubmitting(true);
@@ -407,6 +424,7 @@ const TestRunner: React.FC<{ courseId: number; set: StudyOverviewItem; onDone: (
     );
   }
 
+  // Count of answered questions (shown next to Submit).
   const answered = answers.filter((a) => a >= 0).length;
 
   return (
@@ -458,6 +476,7 @@ const TestRunner: React.FC<{ courseId: number; set: StudyOverviewItem; onDone: (
 
 /* ─────────────────────────────── Match ─────────────────────────────── */
 
+// MatchRunner: timed game where the student pairs each term with its definition; the result is reported to the server when all pairs are matched.
 const MatchRunner: React.FC<{
   courseId: number; set: StudyOverviewItem; onDone: () => void;
 }> = ({ courseId, set, onDone }) => {
@@ -472,6 +491,7 @@ const MatchRunner: React.FC<{
   const [done, setDone] = useState(false);
   const startedAt = useRef(Date.now());
 
+  // Load the pairs for this set.
   useEffect(() => {
     (async () => {
       try {
@@ -498,6 +518,7 @@ const MatchRunner: React.FC<{
     return [...data.pairs].sort((a, b) => (a.definition > b.definition ? 1 : -1));
   }, [data]);
 
+  // When every pair is solved, mark the game done and report pairs/duration to the server (failure is ignored).
   useEffect(() => {
     if (!data || done) return;
     if (solved.size > 0 && solved.size === data.pairs.length) {
@@ -511,6 +532,7 @@ const MatchRunner: React.FC<{
     }
   }, [solved, data, done, courseId, set.content_id]);
 
+  // Evaluate a term + definition selection: same index means a correct pair, otherwise flash "wrong" for half a second and clear the selection.
   useEffect(() => {
     if (selectedTerm === null || selectedDef === null) return;
     if (selectedTerm === selectedDef) {
@@ -541,6 +563,7 @@ const MatchRunner: React.FC<{
     );
   }
 
+  // Tile styling: hidden when solved, highlighted when selected (red if the last guess was wrong).
   const tileClass = (isSel: boolean, isSolved: boolean) =>
     `text-left text-xs rounded-xl border p-3 transition-all min-h-[64px] ${
       isSolved
@@ -594,6 +617,7 @@ const MatchRunner: React.FC<{
 
 /* ────────────────────────────── shared ─────────────────────────────── */
 
+// ErrorCard: small red error box shared by the runners.
 const ErrorCard: React.FC<{ message: string }> = ({ message }) => (
   <div className="bg-red-50 border border-red-200 text-red-600 dark:bg-red-500/10 dark:border-red-500/30 dark:text-red-400 rounded-xl p-4 flex items-start gap-3 text-sm">
     <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
@@ -601,6 +625,7 @@ const ErrorCard: React.FC<{ message: string }> = ({ message }) => (
   </div>
 );
 
+// ResultCard: end-of-drill summary (score, subtitle, note) with a back button; scoreSuffix lets Match show seconds instead of /100.
 const ResultCard: React.FC<{
   title: string; score: number; scoreSuffix?: string; subtitle: string; note: string; onDone: () => void;
 }> = ({ title, score, scoreSuffix, subtitle, note, onDone }) => (

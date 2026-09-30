@@ -1,3 +1,5 @@
+// StudentDashboard: student home. Shows mastery/enrollment stats, the enrolled-course
+// cards ("My Classes"), a To-Do tab, and a "Join a class" modal using an enrollment code.
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -15,6 +17,7 @@ import {
   TrendingUp, Award, BarChart3, ChevronRight, ListChecks, LayoutGrid
 } from 'lucide-react';
 
+// One enrollment row from the API: enrollment info plus the nested course.
 interface EnrollmentDetail {
   id: number;
   status: string;
@@ -30,6 +33,7 @@ interface EnrollmentDetail {
   };
 }
 
+/** Page component for the student dashboard. */
 const StudentDashboard: React.FC = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -47,6 +51,7 @@ const StudentDashboard: React.FC = () => {
     (location.state as { tab?: 'classes' | 'todo' } | null)?.tab || 'classes'
   );
 
+  // Loads the student's enrollments; `silent` skips spinner/error UI (used by auto-refresh).
   const fetchEnrollments = async (silent = false) => {
     try {
       if (!silent) setLoading(true);
@@ -59,12 +64,14 @@ const StudentDashboard: React.FC = () => {
     }
   };
 
+  // Initial load, then quiet periodic refresh via the shared auto-refresh hook.
   useEffect(() => {
     fetchEnrollments();
   }, []);
 
   useAutoRefresh(() => fetchEnrollments(true));
 
+  // Called by the join form after a successful enrollment: show message, close modal, reload list.
   const handleEnrolled = (message: string) => {
     setError('');
     setSuccess(message);
@@ -77,6 +84,7 @@ const StudentDashboard: React.FC = () => {
     ? Math.round(enrollments.reduce((sum, e) => sum + e.progress, 0) / enrollments.length)
     : 0;
 
+  // Text colour for a progress percentage: green (>=70), amber (>=40), red otherwise.
   const getDifficultyColor = (progress: number) => {
     if (progress >= 70) return 'text-emerald-600 dark:text-emerald-400';
     if (progress >= 40) return 'text-amber-600 dark:text-amber-400';

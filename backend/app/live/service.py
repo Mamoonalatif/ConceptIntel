@@ -26,9 +26,8 @@ import asyncio
 import json
 import logging
 import random
-import string
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set
 
 from sqlalchemy.orm import Session
 
@@ -63,6 +62,7 @@ def generate_access_code(db: Session) -> str:
 
 
 def session_question_ids(session: LiveQuizSession) -> List[int]:
+    """Parse the session's stored JSON list of question ids; any bad data yields []."""
     try:
         ids = json.loads(session.question_ids_json or "[]")
         return [int(i) for i in ids] if isinstance(ids, list) else []
@@ -71,6 +71,7 @@ def session_question_ids(session: LiveQuizSession) -> List[int]:
 
 
 def load_questions(db: Session, session: LiveQuizSession) -> List[QuestionBankItem]:
+    """Load the session's QuestionBankItems in their chosen play order (skipping deleted ones)."""
     ids = session_question_ids(session)
     if not ids:
         return []
@@ -80,6 +81,7 @@ def load_questions(db: Session, session: LiveQuizSession) -> List[QuestionBankIt
 
 
 def _payload(item: QuestionBankItem) -> Dict[str, Any]:
+    """Decode a question's JSON payload (options/answers); {} if missing or corrupt."""
     try:
         return json.loads(item.payload_json) or {}
     except (json.JSONDecodeError, TypeError):
@@ -87,6 +89,7 @@ def _payload(item: QuestionBankItem) -> Dict[str, Any]:
 
 
 def current_question(db: Session, session: LiveQuizSession) -> Optional[QuestionBankItem]:
+    """The question currently on screen, or None if the index is out of range."""
     questions = load_questions(db, session)
     if 0 <= session.current_index < len(questions):
         return questions[session.current_index]
@@ -112,6 +115,7 @@ def public_question(item: QuestionBankItem, index: int, total: int) -> Dict[str,
 
 
 def leaderboard(db: Session, session_id: int, limit: int = 20) -> List[Dict[str, Any]]:
+    """Top participants by score (ties broken by who joined first), with ranks."""
     rows = (
         db.query(LiveQuizParticipant)
         .filter(LiveQuizParticipant.session_id == session_id)
@@ -163,6 +167,7 @@ def answer_distribution(db: Session, session: LiveQuizSession, item: QuestionBan
 
 
 def _readable_answer(item: QuestionBankItem) -> str:
+    """Turn a question's stored correct answer into a human-readable string for the reveal."""
     payload = _payload(item)
     try:
         t = item.question_type
@@ -274,14 +279,17 @@ class LiveHub:
     """
 
     def __init__(self) -> None:
+        """Start with no rooms and a lock so concurrent joins/leaves do not corrupt the registry."""
         self._rooms: Dict[str, Set[Any]] = {}
         self._lock = asyncio.Lock()
 
     async def join(self, code: str, socket: Any) -> None:
+        """Register a websocket under the room's access code."""
         async with self._lock:
             self._rooms.setdefault(code, set()).add(socket)
 
     async def leave(self, code: str, socket: Any) -> None:
+        """Remove a websocket from its room, deleting the room once it is empty."""
         async with self._lock:
             room = self._rooms.get(code)
             if not room:
@@ -291,6 +299,7 @@ class LiveHub:
                 self._rooms.pop(code, None)
 
     async def broadcast(self, code: str, message: Dict[str, Any]) -> None:
+        """Send a JSON message to every socket in the room, dropping any that fail."""
         async with self._lock:
             sockets = list(self._rooms.get(code, ()))
         dead = []
@@ -305,7 +314,9 @@ class LiveHub:
             await self.leave(code, s)
 
     def room_size(self, code: str) -> int:
+        """Number of sockets currently connected to the room."""
         return len(self._rooms.get(code, ()))
 
 
+# Single shared hub instance used by the routes (hence the one-process limitation above).
 hub = LiveHub()

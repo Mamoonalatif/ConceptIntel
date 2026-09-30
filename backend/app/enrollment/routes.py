@@ -1,6 +1,7 @@
+# Enrollment endpoints: students join courses by code, list their courses, check prerequisites,
+# and drop; teachers list the students enrolled in their courses.
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from sqlalchemy import func
 from sqlalchemy.exc import SQLAlchemyError
 from typing import List
 from app.database.connection import get_db
@@ -19,10 +20,12 @@ router = APIRouter(prefix="/enrollment", tags=["Enrollments"])
 # script through the whole 8-character keyspace against this endpoint. 10 tries
 # per 5 minutes is generous for a real student (who has the code in an email/
 # announcement and mistypes at most a couple of times) but useless for guessing.
+# Max join attempts per student within the window below.
 JOIN_RATE_LIMIT = 10
 JOIN_RATE_LIMIT_WINDOW_SECONDS = 300
 
 
+# POST /enrollment/join - student joins a course with an enrollment code (see docstring).
 @router.post("/join", response_model=EnrollmentResponse)
 def join_course(
     req: EnrollmentJoinRequest,
@@ -78,6 +81,7 @@ def join_course(
     )
 
 
+# GET /enrollment/my-courses - the student's enrollments with course details.
 @router.get("/my-courses", response_model=List[EnrollmentDetailResponse])
 def get_student_courses(
     db: Session = Depends(get_db), 
@@ -87,6 +91,7 @@ def get_student_courses(
     return db.query(Enrollment).filter(Enrollment.student_id == current_student.id).all()
 
 
+# GET /enrollment/check-prerequisite/{id} - tells the student if they finished the course's prerequisite.
 @router.get("/check-prerequisite/{course_id}")
 def check_prerequisites(
     course_id: int, 
@@ -120,6 +125,7 @@ def check_prerequisites(
     }
 
 
+# GET /enrollment/teacher/course/{id}/students - roster of a course for its owning teacher.
 @router.get("/teacher/course/{course_id}/students")
 def get_enrolled_students(
     course_id: int, 
@@ -152,6 +158,7 @@ def get_enrolled_students(
     return students_list
 
 
+# DELETE /enrollment/{id} - the student (or course teacher) drops an enrollment; soft delete via status.
 @router.delete("/{id}", status_code=status.HTTP_204_NO_CONTENT)
 def drop_course(
     id: int, 

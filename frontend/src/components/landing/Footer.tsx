@@ -1,3 +1,4 @@
+// Purpose: shared footer (link columns + copyright) for the landing and About pages.
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 
@@ -11,6 +12,7 @@ export const Footer: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
 
+  // On the landing page scroll to the FAQ section; from any other page navigate home with the #faq anchor.
   const handleFaqClick = () => {
     if (location.pathname === '/') {
       document.getElementById('faq')?.scrollIntoView({ behavior: 'smooth' });
@@ -19,6 +21,7 @@ export const Footer: React.FC = () => {
     }
   };
 
+  // Shared Tailwind classes for every footer link button.
   const linkClass = 'text-text-secondary hover:text-primary hover:underline transition-colors text-left';
 
   return (

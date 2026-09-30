@@ -1,3 +1,5 @@
+// Root component: sets up providers (React Query, Auth) and defines every route,
+// with guards that enforce login and role/authority access.
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
@@ -34,16 +36,21 @@ import NotFoundPage from './pages/NotFoundPage';
 import { FoxSpinner } from './components/FoxSpinner';
 import { defaultDashboardFor } from './lib/roleNav';
 
+// Shared React Query client (server-state cache) for the whole app.
 const queryClient = new QueryClient();
 
+// Additive coordinator permissions a teacher account can hold.
 type Authority = 'program_coordinator' | 'course_coordinator';
 
+// True if the user holds the given coordinator authority (admins hold all).
 const hasAuthority = (user: { role: string; is_program_coordinator: boolean; is_course_coordinator: boolean }, authority: Authority) => {
   if (user.role === 'admin') return true; // admin always has every coordinator authority too
   return authority === 'program_coordinator' ? user.is_program_coordinator : user.is_course_coordinator;
 };
 
-// Route wrapper to check if user is authenticated
+// Route wrapper to check if user is authenticated.
+// Flow: wait for session load -> require token -> wait for user -> check role/authority,
+// redirecting to login or the user's own dashboard when a check fails.
 const PrivateRoute: React.FC<{
   children: React.ReactElement;
   requiredRole?: 'teacher' | 'student' | 'admin';
@@ -87,7 +94,7 @@ const PrivateRoute: React.FC<{
   return children;
 };
 
-// Route wrapper for guest pages (login/register)
+// Route wrapper for guest pages (login/register): logged-in users are redirected to their dashboard.
 const GuestRoute: React.FC<{ children: React.ReactElement }> = ({ children }) => {
   const { user, token, isLoading } = useAuth();
 
@@ -102,6 +109,7 @@ const GuestRoute: React.FC<{ children: React.ReactElement }> = ({ children }) =>
   return children;
 };
 
+// Declares the router and all routes (public, shared, and role-protected).
 const AppContent: React.FC = () => {
   return (
     <Router>
@@ -285,6 +293,7 @@ const AppContent: React.FC = () => {
   );
 };
 
+// App root: wraps the routes in the query-cache and auth providers.
 const App: React.FC = () => {
   return (
     <QueryClientProvider client={queryClient}>

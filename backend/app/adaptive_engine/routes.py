@@ -1,3 +1,5 @@
+# Adaptive Engine API: endpoints returning a personalised revision plan for a student
+# (own plan for students, any student's plan for teachers/oversight roles).
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -8,10 +10,12 @@ from app.adaptive_engine import service as adaptive_service
 from app.auth.routes import get_current_user, get_current_student
 from app.courses.access import assert_course_access
 
+# All routes are mounted under /courses so they read as /courses/{id}/adaptive/...
 router = APIRouter(prefix="/courses", tags=["Adaptive Engine"])
 
 
 def _get_course_or_404(db: Session, course_id: int) -> Course:
+    """Fetch the course by id or raise a 404 - shared guard for both endpoints."""
     course = db.query(Course).filter(Course.id == course_id).first()
     if not course:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")

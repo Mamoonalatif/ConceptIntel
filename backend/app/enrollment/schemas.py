@@ -1,11 +1,14 @@
+# Pydantic models for enrollment requests and responses.
 from pydantic import BaseModel
 from datetime import datetime
 from typing import Optional
 from app.courses.schemas import CourseResponse
 
+# Body of the join request: just the course's enrollment code.
 class EnrollmentJoinRequest(BaseModel):
     enrollment_code: str
 
+# Result of a successful join, including the course name/code for the UI.
 class EnrollmentResponse(BaseModel):
     id: int
     student_id: int
@@ -22,6 +25,7 @@ class EnrollmentResponse(BaseModel):
     class Config:
         from_attributes = True
 
+# An enrollment with its full nested course, used for the "my courses" list.
 class EnrollmentDetailResponse(BaseModel):
     id: int
     status: str

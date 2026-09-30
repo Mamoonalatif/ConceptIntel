@@ -1,8 +1,10 @@
+# Pydantic models for course meetings (live-session links).
 from datetime import datetime
 from typing import Optional
 from pydantic import BaseModel, Field
 
 
+# Payload for posting a meeting; title and link are required with length limits.
 class MeetingCreate(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     description: Optional[str] = None
@@ -11,6 +13,7 @@ class MeetingCreate(BaseModel):
     duration_minutes: Optional[int] = None
 
 
+# Partial edit payload; only supplied fields change.
 class MeetingUpdate(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
@@ -19,6 +22,7 @@ class MeetingUpdate(BaseModel):
     duration_minutes: Optional[int] = None
 
 
+# Meeting returned to clients, including the teacher's name.
 class MeetingResponse(BaseModel):
     id: int
     course_id: int

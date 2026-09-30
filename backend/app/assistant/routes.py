@@ -1,3 +1,4 @@
+# AI assistant chat routes (mounted at /assistant): list, send and clear the signed-in user's chat history.
 import logging
 from typing import List
 from fastapi import APIRouter, Depends, Query, status
@@ -11,6 +12,7 @@ from app.auth.routes import get_current_user
 
 logger = logging.getLogger("conceptintel.assistant")
 
+# One ongoing chat thread per user; every route needs a logged-in user.
 router = APIRouter(prefix="/assistant", tags=["AI Assistant"])
 
 

@@ -1,3 +1,4 @@
+# Pydantic request/response models for the GA -> PLO -> CLO outcomes chain and attainment reports.
 from datetime import datetime
 from typing import Optional
 from pydantic import BaseModel
@@ -5,12 +6,14 @@ from pydantic import BaseModel
 
 # ── Graduate Attributes (global) ──────────────────────────────────────────
 class GACreate(BaseModel):
+    """Payload to create a Graduate Attribute (institution-wide)."""
     code: str
     title: str
     description: Optional[str] = None
 
 
 class GAOut(BaseModel):
+    """A Graduate Attribute as returned by the API."""
     id: int
     code: str
     title: str
@@ -23,6 +26,7 @@ class GAOut(BaseModel):
 
 # ── Program Learning Outcomes ─────────────────────────────────────────────
 class PLOCreate(BaseModel):
+    """Payload to create a Program Learning Outcome under a program."""
     program_id: int
     code: str
     title: str
@@ -30,6 +34,7 @@ class PLOCreate(BaseModel):
 
 
 class PLOOut(BaseModel):
+    """A PLO with the ids of the GAs it maps to."""
     id: int
     program_id: int
     code: str
@@ -43,11 +48,13 @@ class PLOOut(BaseModel):
 
 
 class PLOGALinkRequest(BaseModel):
+    """Replace the set of GAs a PLO maps to."""
     ga_ids: list[int]  # full replace of this PLO's GA links
 
 
 # ── Course Learning Outcomes ──────────────────────────────────────────────
 class CLOCreate(BaseModel):
+    """Payload to create a Course Learning Outcome for a catalog subject."""
     catalog_id: int
     code: str
     title: str
@@ -55,6 +62,7 @@ class CLOCreate(BaseModel):
 
 
 class CLOOut(BaseModel):
+    """A CLO with the ids of the PLOs it maps to."""
     id: int
     catalog_id: int
     code: str
@@ -69,16 +77,19 @@ class CLOOut(BaseModel):
 
 
 class CLOPLOLinkRequest(BaseModel):
+    """Replace the set of PLOs a CLO maps to."""
     plo_ids: list[int]  # full replace of this CLO's PLO links
 
 
 class ConceptCLOLinkRequest(BaseModel):
+    """Replace the set of CLOs a graph concept addresses."""
     concept_node_id: str
     concept_name: str
     clo_ids: list[int]  # full replace of this concept's CLO links
 
 
 class ConceptCLOMapOut(BaseModel):
+    """The CLOs linked to one concept."""
     concept_node_id: str
     concept_name: str
     clo_ids: list[int]
@@ -94,6 +105,7 @@ class OutcomeChainNode(BaseModel):
 
 
 class CLOAttainmentOut(BaseModel):
+    """A student's attainment score on one CLO."""
     clo_id: int
     clo_code: str
     clo_title: str
@@ -102,6 +114,7 @@ class CLOAttainmentOut(BaseModel):
 
 
 class PLOAttainmentOut(BaseModel):
+    """A student's attainment score on one PLO (rolled up from its CLOs)."""
     plo_id: int
     plo_code: str
     plo_title: str

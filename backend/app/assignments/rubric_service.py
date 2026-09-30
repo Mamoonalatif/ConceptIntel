@@ -28,6 +28,7 @@ from app.observability import trace_ai_call
 
 logger = logging.getLogger("conceptintel.rubric")
 
+# Instructions for the model: write 3-6 criteria with levels, returned as strict JSON.
 SYSTEM_PROMPT = """You are an experienced university instructor writing a grading
 rubric for an assignment, before any student has submitted work.
 
@@ -70,6 +71,7 @@ Respond ONLY with valid JSON in this exact format:
 
 
 def _clo_block(clos: List[Dict[str, str]]) -> str:
+    """Format the course's CLOs as prompt lines (or a note saying none exist)."""
     if not clos:
         return "(This course has no defined Course Learning Outcomes yet - omit clo_code from every criterion.)"
     return "\n".join(f"- {c['code']}: {c['title']}" for c in clos)

@@ -1,9 +1,11 @@
+# Pydantic models for the course schedule API.
 from datetime import datetime
 from typing import List, Optional
 
 from pydantic import BaseModel
 
 
+# One row of the schedule: a week/session label, optional title and its list of topics.
 class ScheduleSessionItem(BaseModel):
     week_label: str
     title: Optional[str] = None

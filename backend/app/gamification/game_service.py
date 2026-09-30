@@ -218,6 +218,7 @@ def normalize_difficulty(value: Optional[str]) -> str:
 
 
 def _client_or_raise():
+    """Return the OpenRouter client, or raise a clear error if no API key is configured."""
     client = _get_client()
     if client is None:
         raise RuntimeError(
@@ -291,6 +292,8 @@ def _build_user_prompt(
     difficulty: str,
     rag_context: str,
 ) -> str:
+    """Fill the user-prompt template with the concept, optional description, difficulty
+    guidance and (if any) excerpts from the course's own material (RAG context)."""
     description_block = f"Description: {concept_description}\n" if concept_description else ""
     difficulty_block = _DIFFICULTY_GUIDANCE[normalize_difficulty(difficulty)]
     context_block = _GROUNDING_BLOCK.format(excerpts=rag_context) if rag_context else ""

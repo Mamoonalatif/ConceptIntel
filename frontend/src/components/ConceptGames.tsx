@@ -1,3 +1,5 @@
+// ConceptGames: AI-generated mini-games per concept. Anyone can generate a game; students can play it in a sandboxed iframe (score is recorded and
+// feeds mastery) or open it in a new tab (score not recorded).
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Gamepad2, Sparkles, RefreshCw, ExternalLink, Play, X, Search, AlertTriangle,
@@ -8,6 +10,7 @@ import { EmptyStateIllustration } from './illustrations';
 import { apiErrorMessage } from '../lib/apiError';
 import { timeAgo } from '../lib/time';
 
+// Difficulty choices for game generation.
 const DIFFICULTIES = ['Easy', 'Medium', 'Hard'] as const;
 type Difficulty = (typeof DIFFICULTIES)[number];
 
@@ -44,6 +47,7 @@ interface ConceptGamesProps {
  *    silently dropping it.
  */
 export const ConceptGames: React.FC<ConceptGamesProps> = ({ courseId, canSolve = true }) => {
+  // Games already generated, concepts available to build games from, and composer/player UI state.
   const [games, setGames] = useState<ConceptGame[]>([]);
   const [concepts, setConcepts] = useState<GeneratableConcept[]>([]);
   const [loading, setLoading] = useState(true);
@@ -59,6 +63,7 @@ export const ConceptGames: React.FC<ConceptGamesProps> = ({ courseId, canSolve =
   const [playingHtml, setPlayingHtml] = useState('');
   const [loadingPlay, setLoadingPlay] = useState(false);
 
+  // Load the course's games and its list of concepts in parallel (concept failure falls back to an empty list).
   const load = async () => {
     setLoading(true);
     try {
@@ -75,17 +80,20 @@ export const ConceptGames: React.FC<ConceptGamesProps> = ({ courseId, canSolve =
     }
   };
 
+  // Load on mount / course change.
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [courseId]);
 
+  // Filter the concept dropdown by the typed search text.
   const filteredConcepts = useMemo(() => {
     const q = conceptQuery.trim().toLowerCase();
     if (!q) return concepts;
     return concepts.filter((c) => c.name.toLowerCase().includes(q));
   }, [concepts, conceptQuery]);
 
+  // Ask the AI to build a game for the selected concept/difficulty and add it to the top of the list.
   const handleGenerate = async () => {
     if (!conceptId) return;
     setGenerating(true);
@@ -102,6 +110,7 @@ export const ConceptGames: React.FC<ConceptGamesProps> = ({ courseId, canSolve =
     }
   };
 
+  // "Play here": download the game's HTML and show it in the sandboxed player overlay.
   const handlePlayHere = async (game: ConceptGame) => {
     setLoadingPlay(true);
     setError('');
@@ -116,6 +125,7 @@ export const ConceptGames: React.FC<ConceptGamesProps> = ({ courseId, canSolve =
     }
   };
 
+  // "New tab": open the game page in its own tab (no score is recorded there).
   const handleNewTab = (game: ConceptGame) => {
     setError('');
     // Not checked for null: window.open() with `noopener` returns null by
@@ -149,6 +159,7 @@ export const ConceptGames: React.FC<ConceptGamesProps> = ({ courseId, canSolve =
     return () => window.removeEventListener('message', onMessage);
   }, [playing]);
 
+  // Render: error/notice banners, generator card, games library, and the sandboxed player overlay when a game is open.
   return (
     <div className="space-y-6">
       {error && (

@@ -1,3 +1,4 @@
+// Helper for downloading protected files from the API.
 // Assignment/submission download endpoints require the Authorization header (they're
 // not public URLs), so a plain <a href> won't work - fetch as a blob with the token
 // attached, then trigger a save via a throwaway object URL.

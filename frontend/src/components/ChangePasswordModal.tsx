@@ -1,3 +1,4 @@
+// Purpose: modal form for a logged-in user to change their password; signs them out afterwards because old tokens are revoked.
 import React, { useState } from 'react';
 import { authService } from '../services/api';
 import { apiErrorMessage } from '../lib/apiError';
@@ -5,6 +6,7 @@ import { useAuth } from '../context/AuthContext';
 import { PasswordChecklist, isPasswordValid } from './PasswordChecklist';
 import { X, Lock, Eye, EyeOff, AlertCircle, CheckCircle2, XCircle, RefreshCw } from 'lucide-react';
 
+// Props: onClose closes the modal.
 interface ChangePasswordModalProps {
   onClose: () => void;
 }
@@ -15,6 +17,7 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({ onClos
   // the one this very session is using - so the current session must sign itself
   // out right after, instead of silently 401ing on its next request.
   const { logout } = useAuth();
+  // Form field values, show/hide-password toggles, focus/touched flags (control when hints appear), and request status.
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -27,9 +30,12 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({ onClos
   const [success, setSuccess] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
+  // confirmMismatch: confirm field differs from the new password (shown as an error); confirmMatches: they agree.
   const confirmMismatch = confirmTouched && confirmPassword.length > 0 && confirmPassword !== newPassword;
   const confirmMatches = confirmPassword.length > 0 && confirmPassword === newPassword;
 
+  // Validates the new password and confirmation, then calls the API; shows the success screen or an error message.
+  // current_password is optional because Google-only accounts have no password yet.
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -70,6 +76,7 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({ onClos
           </button>
         </div>
 
+        {/* After success show a sign-in-again prompt; otherwise show the form. */}
         {success ? (
           <div className="p-6">
             <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-xl p-4 flex items-center gap-2 text-sm mb-4">
@@ -158,6 +165,7 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({ onClos
                   {showConfirm ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
+              {/* Live feedback: mismatch error, match confirmation, or nothing. */}
               {confirmMismatch ? (
                 <p className="flex items-center gap-1.5 text-xs text-red-600 mt-1.5">
                   <XCircle className="w-3.5 h-3.5 shrink-0" /> Passwords do not match

@@ -1,3 +1,5 @@
+# Content-processing API routes: trigger a graph-build pipeline for a course, poll job status,
+# fetch the resulting revision (diff), and let a teacher confirm or reject it.
 import logging
 from typing import List
 
@@ -21,10 +23,12 @@ from app.auth.routes import get_current_teacher, get_current_user
 
 logger = logging.getLogger("conceptintel.content_processing")
 
+# All routes here are mounted under /content-processing.
 router = APIRouter(prefix="/content-processing", tags=["Content Processing"])
 
 
 def _resolve_catalog_id(course: Course) -> int:
+    """Returns the shared catalog id for a course, falling back to the course id if it has none."""
     return course.catalog_id if course.catalog_id is not None else course.id
 
 
@@ -70,6 +74,7 @@ def trigger_pipeline(
             detail="Course not found or you are not the instructor."
         )
 
+    # Statuses meaning a run is still active; only one active run per course is allowed.
     NON_TERMINAL_STATUSES = ("Queued", "ExtractingText", "CleaningAndStructuring", "Diffing",
                              "AwaitingTeacherReview", "AwaitingCoordinatorApproval")
     existing = (
@@ -95,6 +100,7 @@ def trigger_pipeline(
     db.commit()
     db.refresh(job)
 
+    # Prefer Airflow; if unavailable run the pipeline in-process as a FastAPI background task.
     if _try_trigger_airflow(job.id):
         job.airflow_run_id = f"manual__job_{job.id}"
         db.commit()

@@ -1,3 +1,4 @@
+// Purpose: sticky top navigation bar for all public/marketing pages (desktop links + mobile hamburger menu).
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { ChevronRight, Menu, X, LayoutDashboard } from 'lucide-react';
@@ -22,10 +23,13 @@ export const Nav: React.FC<{ active?: 'about'; onBrandClick?: () => void }> = ({
   // to log in again - matches how GuestRoute already redirects /login itself
   // for a signed-in user, just without yanking them off a page they explicitly
   // navigated to.
+  // Signed-in flag: decides between showing Login/Signup or a Dashboard shortcut.
   const isSignedIn = Boolean(token && user);
+  // mobileMenuOpen = hamburger menu visibility; scrolled = page has moved down (turns the bar solid).
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
 
+  // Track scroll position so the header gets a background once the user scrolls past 20px; listener removed on unmount.
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 20);
     onScroll();
@@ -33,6 +37,7 @@ export const Nav: React.FC<{ active?: 'about'; onBrandClick?: () => void }> = ({
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
 
+  // Clicking the logo runs the page's custom handler if given, otherwise goes to the landing page.
   const handleBrandClick = () => {
     if (onBrandClick) {
       onBrandClick();
@@ -41,11 +46,13 @@ export const Nav: React.FC<{ active?: 'about'; onBrandClick?: () => void }> = ({
     }
   };
 
+  // Close the mobile menu and go to the landing page.
   const handleHomeClick = () => {
     setMobileMenuOpen(false);
     navigate('/');
   };
 
+  // Scroll to the FAQ section when already on '/', otherwise navigate to '/#faq'.
   const handleFaqClick = () => {
     setMobileMenuOpen(false);
     if (location.pathname === '/') {
@@ -70,6 +77,7 @@ export const Nav: React.FC<{ active?: 'about'; onBrandClick?: () => void }> = ({
           </div>
         </div>
 
+        {/* Desktop links (hidden on small screens) */}
         <div className="hidden md:flex items-center gap-3">
           <button
             onClick={handleHomeClick}
@@ -117,6 +125,7 @@ export const Nav: React.FC<{ active?: 'about'; onBrandClick?: () => void }> = ({
           )}
         </div>
 
+        {/* Mobile: theme toggle and hamburger button */}
         <div className="flex md:hidden items-center gap-1">
           <ThemeToggle />
           <button className="p-2 text-text-secondary hover:text-primary rounded-lg hover:bg-primary-muted transition-all"
@@ -126,6 +135,7 @@ export const Nav: React.FC<{ active?: 'about'; onBrandClick?: () => void }> = ({
         </div>
       </div>
 
+      {/* Mobile dropdown menu, only rendered while open */}
       {mobileMenuOpen && (
         <div className="md:hidden bg-surface/95 backdrop-blur-xl border-t border-border px-4 py-4 space-y-2 shadow-lg">
           <button

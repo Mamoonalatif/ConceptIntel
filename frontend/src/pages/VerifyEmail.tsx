@@ -11,6 +11,7 @@ import { AlertCircle, Loader2, CheckCircle2 } from 'lucide-react';
    backend/app/auth/routes.py verify_email / send_verification_email). Fires the
    confirmation automatically on load - there's nothing for the user to fill in,
    just a link they clicked. */
+/** Page component. status: 'loading' (verifying link), 'code' (manual 6-digit code entry, used when there is no token), 'success' or 'error'. */
 const VerifyEmail: React.FC = () => {
   const [searchParams] = useSearchParams();
   const token = searchParams.get('token') || '';
@@ -20,6 +21,7 @@ const VerifyEmail: React.FC = () => {
   const [code, setCode] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
+  // Manual fallback: verifies the account with email + 6-digit code instead of the link.
   const submitCode = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
@@ -34,6 +36,7 @@ const VerifyEmail: React.FC = () => {
     }
   };
 
+  // If the URL has a token, verify it automatically on load.
   useEffect(() => {
     if (!token) return;
     let cancelled = false;

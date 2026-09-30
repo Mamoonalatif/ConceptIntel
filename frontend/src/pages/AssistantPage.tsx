@@ -1,3 +1,5 @@
+// AssistantPage: chat UI for the AI assistant. Loads saved history, sends messages
+// to the backend, and shows the reply; the user's message is shown optimistically.
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AppShell, type NavItem } from '../components/AppShell';
@@ -27,6 +29,7 @@ const ROLE_ICONS: Record<string, React.ComponentType<{ className?: string }>> = 
 // finishes (or replaced entirely by the next full history refetch).
 let tempIdCounter = -1;
 
+/** Page component: message list, "thinking" indicator and composer box. */
 const AssistantPage: React.FC = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -42,6 +45,7 @@ const AssistantPage: React.FC = () => {
   // looks identical everywhere instead of collapsing to just the global links.
   const navItems: NavItem[] = getPrimaryNavItems(user, navigate);
 
+  // Loads the stored conversation from the backend.
   const fetchHistory = async () => {
     setLoading(true);
     try {
@@ -54,14 +58,18 @@ const AssistantPage: React.FC = () => {
     }
   };
 
+  // Load history once on mount.
   useEffect(() => {
     fetchHistory();
   }, []);
 
+  // Keep the newest message in view whenever messages change or a reply is pending.
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   }, [messages, sending]);
 
+  // Sends the typed message: shows it immediately, awaits the assistant's reply,
+  // and appends an error bubble if the request fails.
   const handleSend = async () => {
     const content = input.trim();
     if (!content || sending) return;
@@ -94,6 +102,7 @@ const AssistantPage: React.FC = () => {
     }
   };
 
+  // Enter sends; Shift+Enter inserts a newline.
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -101,6 +110,7 @@ const AssistantPage: React.FC = () => {
     }
   };
 
+  // "New conversation": deletes stored history on the backend and empties the list.
   const handleClear = async () => {
     if (clearing) return;
     setClearing(true);

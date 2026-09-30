@@ -1,5 +1,6 @@
+# Auth helpers: password hashing (bcrypt), JWT access/refresh tokens, TOTP 2FA and backup codes.
 from datetime import datetime, timedelta
-from typing import Union, Any, List
+from typing import Union, List
 import bcrypt
 import hashlib
 import json
@@ -53,6 +54,7 @@ def decode_access_token(token: str) -> Union[dict, None]:
         return None
 
 
+# The 2FA-pending token is deliberately short-lived (user must enter the code quickly).
 TWO_FA_PENDING_EXPIRE_MINUTES = 5
 
 
@@ -94,10 +96,12 @@ def verify_totp_code(secret: str, code: str) -> bool:
         return False
 
 
+# How many one-time backup codes are issued when 2FA is enabled.
 BACKUP_CODE_COUNT = 8
 
 
 def _hash_backup_code(code: str) -> str:
+    """SHA-256 hex digest of a backup code (only hashes are stored in the DB)."""
     return hashlib.sha256(code.encode("utf-8")).hexdigest()
 
 

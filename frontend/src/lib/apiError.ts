@@ -7,6 +7,7 @@
 // exceeds the 25MB size limit"). This surfaces that when it exists, and falls
 // back to a specific, non-alarming message per failure class when it doesn't.
 
+// Minimal shape of an axios error that we rely on (avoids importing axios types).
 interface ApiErrorLike {
   code?: string;
   message?: string;
@@ -37,6 +38,8 @@ const readDetail = (data: unknown): string | null => {
 };
 
 /**
+ * Main export: converts any caught error into a user-friendly message.
+ * Order: client-side failures (timeout/network) -> server `detail` -> per-status text.
  * @param error    whatever landed in the catch block
  * @param fallback what to say when the server gave no usable reason - write this
  *                 as the action that failed, e.g. "Could not save the concept."

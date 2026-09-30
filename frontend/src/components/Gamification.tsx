@@ -1,3 +1,5 @@
+// Gamification: course leaderboard and achievements panel. Shows the student's own points and day streak (students only), the full badge grid
+// (earned badges highlighted) and a ranked leaderboard with the current user highlighted.
 import React, { useEffect, useState } from 'react';
 import { Trophy, Flame, Award, Medal } from 'lucide-react';
 import { gamificationService } from '../services/api';
@@ -11,8 +13,10 @@ interface GamificationProps {
   isTeacher: boolean;
 }
 
+// Text colours for ranks 1-3 (gold, silver, bronze).
 const RANK_COLORS = ['text-amber-500', 'text-slate-400', 'text-orange-600'];
 
+// Main component: fetches leaderboard, the student's own summary (skipped for teachers) and the list of all badges in one go.
 export const Gamification: React.FC<GamificationProps> = ({ courseId, isTeacher }) => {
   const { user } = useAuth();
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
@@ -20,6 +24,7 @@ export const Gamification: React.FC<GamificationProps> = ({ courseId, isTeacher 
   const [allBadges, setAllBadges] = useState<BadgeItem[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Load all three data sets together; `mounted` prevents state updates after unmount, and failures are silently ignored (panel just stays empty).
   useEffect(() => {
     let mounted = true;
     Promise.all([
@@ -46,6 +51,7 @@ export const Gamification: React.FC<GamificationProps> = ({ courseId, isTeacher 
     );
   }
 
+  // Set of badge codes the student has earned, used to grey out the others.
   const earnedCodes = new Set((summary?.badges || []).map((b) => b.code));
 
   return (

@@ -31,6 +31,7 @@ def main():
     # Ensure tables exist first (creates `notification_preferences`, `chat_messages`,
     # etc. - all brand-new tables `create_all` can handle on its own; only the ALTER
     # below is something it can't do).
+    """Applies the schema change described in the module docstring to the existing database, then prints a summary."""
     models.Base.metadata.create_all(bind=engine)
 
     with engine.connect() as conn:

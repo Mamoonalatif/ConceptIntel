@@ -13,6 +13,7 @@
 //   .pdf  - printed through a hidden iframe, so the browser's own "Save as PDF"
 //           handles the PDF writing and we don't need a jsPDF-style dependency.
 
+// A positioned concept to draw (x/y come from the graph layout).
 export interface ExportNode {
   id: string;
   x: number;
@@ -21,6 +22,7 @@ export interface ExportNode {
   difficulty: string;
 }
 
+// A prerequisite link between two node ids.
 export interface ExportEdge {
   source: string;
   target: string;
@@ -43,9 +45,11 @@ const DIFFICULTY_COLORS: Record<string, { fill: string; stroke: string; text: st
   hard: { fill: '#fda4af', stroke: '#f43f5e', text: '#4c0519' },
 };
 
+// Picks the colour set for a difficulty (defaults to 'medium' if unknown).
 const colorsFor = (difficulty: string) =>
   DIFFICULTY_COLORS[difficulty?.toLowerCase()] ?? DIFFICULTY_COLORS.medium;
 
+// Escapes XML special characters so names can't break the SVG markup.
 const escapeXml = (value: string) =>
   value
     .replace(/&/g, '&amp;')
@@ -88,6 +92,8 @@ function wrapLabel(name: string, maxChars = 13, maxLines = 3): string[] {
   return lines.length ? lines : [name];
 }
 
+/** Builds the complete standalone SVG string: header, legend, prerequisite lines,
+ *  difficulty-coloured concept circles and footer. All other export formats derive from it. */
 export function buildGraphSvg(
   nodes: ExportNode[],
   edges: ExportEdge[],
@@ -98,6 +104,7 @@ export function buildGraphSvg(
     return `<svg xmlns="http://www.w3.org/2000/svg" width="600" height="200"><text x="300" y="100" text-anchor="middle" font-family="sans-serif" font-size="14" fill="#64748b">No concepts in this graph yet.</text></svg>`;
   }
 
+  // Work out the bounding box so the canvas fits every node.
   const minX = Math.min(...nodes.map(n => n.x));
   const minY = Math.min(...nodes.map(n => n.y));
   const maxX = Math.max(...nodes.map(n => n.x)) + NODE_SIZE;
@@ -131,6 +138,7 @@ export function buildGraphSvg(
     })
     .join('\n    ');
 
+  // One coloured circle with wrapped name text per concept.
   const nodeMarkup = nodes
     .map(n => {
       const c = colorsFor(n.difficulty);
@@ -148,6 +156,7 @@ export function buildGraphSvg(
     })
     .join('\n    ');
 
+  // Per-difficulty totals shown in the legend.
   const counts = {
     easy: nodes.filter(n => n.difficulty?.toLowerCase() === 'easy').length,
     medium: nodes.filter(n => n.difficulty?.toLowerCase() === 'medium').length,
@@ -184,6 +193,7 @@ export function buildGraphSvg(
 </svg>`;
 }
 
+// Saves a Blob as a file via a temporary <a download> link.
 function triggerDownload(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
@@ -195,6 +205,7 @@ function triggerDownload(blob: Blob, filename: string) {
   URL.revokeObjectURL(url);
 }
 
+/** Downloads the SVG string as a .svg file. */
 export function downloadSvg(svg: string, filename: string) {
   triggerDownload(new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }), filename);
 }
@@ -267,6 +278,7 @@ export function printGraphAsPdf(svg: string, documentTitle: string) {
 </head><body>${svg}</body></html>`);
   doc.close();
 
+  // Opens the print dialog once the iframe document is ready.
   const run = () => {
     iframe.contentWindow?.focus();
     iframe.contentWindow?.print();
@@ -287,6 +299,7 @@ export function downloadConceptCsv(
   descriptions: Record<string, string>,
   filename: string,
 ) {
+  // Map each concept to the names of its prerequisites for the CSV column.
   const nameById = new Map(nodes.map(n => [n.id, n.name]));
   const prereqsById = new Map<string, string[]>();
   edges.forEach(e => {
@@ -295,6 +308,7 @@ export function downloadConceptCsv(
     prereqsById.set(e.target, list);
   });
 
+  // Quote a CSV cell and double any embedded quotes.
   const cell = (value: string) => `"${(value ?? '').replace(/"/g, '""')}"`;
   const rows = [
     ['Concept', 'Difficulty', 'Description', 'Prerequisites'].map(cell).join(','),
@@ -314,5 +328,6 @@ export function downloadConceptCsv(
   triggerDownload(new Blob(['﻿' + rows.join('\r\n')], { type: 'text/csv;charset=utf-8' }), filename);
 }
 
+/** Makes a filename-safe slug from a course name (falls back to 'course'). */
 export const slugify = (value: string) =>
   value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'course';

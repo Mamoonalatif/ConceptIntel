@@ -36,6 +36,7 @@ logger = logging.getLogger("conceptintel.content_generation.jobs")
 
 
 def _set_stage(db, job: ContentGenerationJob, stage: str, status: Optional[str] = None) -> None:
+    """Writes the human-readable progress stage (and optionally status) and commits so pollers see it."""
     job.stage = stage
     if status:
         job.status = status
@@ -43,6 +44,7 @@ def _set_stage(db, job: ContentGenerationJob, stage: str, status: Optional[str] 
 
 
 def _fail(db, job: ContentGenerationJob, message: str) -> None:
+    """Marks the job Failed with a truncated reason and notifies the teacher (notification errors are swallowed)."""
     job.status = "Failed"
     job.stage = None
     job.error_message = message[:2000]

@@ -1,6 +1,7 @@
+# Student to-do list endpoint: one aggregated view of assignments across the student's courses.
 from datetime import datetime
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.database.connection import get_db
@@ -11,6 +12,7 @@ from app.auth.routes import get_current_student
 router = APIRouter(prefix="/students", tags=["Student To-Do"])
 
 
+# Maps a submission (or its absence) to "missing", "late" or "submitted".
 def _submission_status(assignment: Assignment, submission: Optional[AssignmentSubmission]) -> str:
     if submission is None:
         return "missing"
@@ -19,6 +21,7 @@ def _submission_status(assignment: Assignment, submission: Optional[AssignmentSu
     return "submitted"
 
 
+# GET /students/me/todo - builds the student's to-do list (see docstring for sort/filter).
 @router.get("/me/todo", response_model=List[TodoItem])
 def get_my_todo(
     sort: str = Query("due_date", pattern="^(due_date|course)$"),
@@ -31,6 +34,7 @@ def get_my_todo(
     Google-Classroom-style "To-do" view. `sort` controls ordering, `filter` narrows
     to upcoming (due in the future and not yet submitted), missing (past due and not
     submitted), or done (submitted, regardless of on-time/late)."""
+    # One query: assignments of Active enrollments, outer-joined to this student's own submission.
     rows = (
         db.query(Assignment, Course, AssignmentSubmission)
         .join(Course, Assignment.course_id == Course.id)
@@ -47,6 +51,7 @@ def get_my_todo(
 
     now = datetime.utcnow()
     items: List[TodoItem] = []
+    # Turn each joined row into a TodoItem with its computed status.
     for assignment, course, submission in rows:
         sub_status = _submission_status(assignment, submission)
         items.append(TodoItem(
@@ -61,6 +66,7 @@ def get_my_todo(
             grade=submission.grade if submission else None,
         ))
 
+    # Apply the optional filter, then the requested sort (items with no due date go last).
     if filter == "done":
         items = [i for i in items if i.status in ("submitted", "late")]
     elif filter == "missing":

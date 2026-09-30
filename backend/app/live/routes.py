@@ -20,7 +20,7 @@ socket that trusts a client-sent user id) is far worse.
 import json
 import logging
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
 from fastapi import (
     APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect, status,
@@ -33,7 +33,7 @@ from app.auth.utils import decode_access_token
 from app.courses.access import assert_course_access
 from app.database.connection import SessionLocal, get_db
 from app.database.models import (
-    Course, LiveQuizAnswer, LiveQuizParticipant, LiveQuizSession, QuestionBankItem, User,
+    Course, LiveQuizParticipant, LiveQuizSession, QuestionBankItem, User,
 )
 from app.live import service as live
 
@@ -42,6 +42,7 @@ logger = logging.getLogger("conceptintel.live")
 
 
 class CreateSessionRequest(BaseModel):
+    """Teacher's request to open a live quiz: title, chosen question ids, per-question timer and optional speed bonus."""
     title: str
     question_ids: List[int]
     seconds_per_question: int = 30
@@ -50,6 +51,7 @@ class CreateSessionRequest(BaseModel):
     @field_validator("title")
     @classmethod
     def non_empty(cls, v: str) -> str:
+        """Reject blank titles and trim whitespace."""
         if not (v or "").strip():
             raise ValueError("A live quiz needs a title.")
         return v.strip()
@@ -57,6 +59,7 @@ class CreateSessionRequest(BaseModel):
     @field_validator("question_ids")
     @classmethod
     def has_questions(cls, v: List[int]) -> List[int]:
+        """Require between 1 and 50 questions."""
         if not v:
             raise ValueError("Pick at least one question for the live quiz.")
         if len(v) > 50:
@@ -66,6 +69,7 @@ class CreateSessionRequest(BaseModel):
     @field_validator("seconds_per_question")
     @classmethod
     def sane_seconds(cls, v: int) -> int:
+        """Keep the per-question timer within the service's min/max limits."""
         if not (live.MIN_SECONDS_PER_QUESTION <= v <= live.MAX_SECONDS_PER_QUESTION):
             raise ValueError(
                 f"seconds_per_question must be between {live.MIN_SECONDS_PER_QUESTION} "
@@ -76,23 +80,27 @@ class CreateSessionRequest(BaseModel):
     @field_validator("speed_bonus_max")
     @classmethod
     def sane_bonus(cls, v: int) -> int:
+        """Keep the speed bonus between 0 and 100 points."""
         if not (0 <= v <= 100):
             raise ValueError("speed_bonus_max must be between 0 and 100")
         return v
 
 
 class JoinRequest(BaseModel):
+    """A player's request to join a lobby: room code and chosen nickname."""
     code: str
     nickname: str
 
     @field_validator("code")
     @classmethod
     def clean_code(cls, v: str) -> str:
+        """Normalise the code (trim, uppercase) so typing case does not matter."""
         return (v or "").strip().upper()
 
     @field_validator("nickname")
     @classmethod
     def clean_nickname(cls, v: str) -> str:
+        """Trim and enforce a 2-24 character nickname."""
         name = (v or "").strip()
         if not (2 <= len(name) <= 24):
             raise ValueError("Pick a nickname between 2 and 24 characters.")
@@ -100,6 +108,7 @@ class JoinRequest(BaseModel):
 
 
 class SessionOut(BaseModel):
+    """Summary of a live session returned to the host."""
     id: int
     code: str
     title: str
@@ -111,6 +120,7 @@ class SessionOut(BaseModel):
 
 
 class JoinOut(BaseModel):
+    """What a player gets back after joining: ids, code, title and nickname."""
     session_id: int
     participant_id: int
     code: str
@@ -120,6 +130,7 @@ class JoinOut(BaseModel):
 
 
 def _to_session_out(db: Session, s: LiveQuizSession) -> SessionOut:
+    """Convert a LiveQuizSession row into SessionOut (adds question and participant counts)."""
     return SessionOut(
         id=s.id, code=s.access_code, title=s.title, status=s.status,
         question_count=len(live.session_question_ids(s)),
@@ -180,6 +191,7 @@ def list_sessions(
     db: Session = Depends(get_db),
     current_teacher: User = Depends(get_current_teacher),
 ):
+    """The teacher's 25 most recent live sessions for a course."""
     rows = db.query(LiveQuizSession).filter(
         LiveQuizSession.course_id == course_id
     ).order_by(LiveQuizSession.created_at.desc()).limit(25).all()
@@ -295,6 +307,9 @@ async def live_socket(
     token: str = Query(...),
     participant_id: Optional[int] = Query(None),
 ):
+    """The game-loop WebSocket: authenticates via the JWT query token, registers the socket
+in the room, then handles host controls (start/next/end), player answers and pings,
+broadcasting fresh state after every change."""
     code = code.strip().upper()
     payload = decode_access_token(token)
     if not payload or not payload.get("user_id"):

@@ -1,3 +1,4 @@
+// Purpose: thin wrapper that reuses the shared ConceptIntel logo on the marketing pages.
 import React from 'react';
 import { ConceptIntelLogo as SharedConceptIntelLogo } from '../ConceptIntelLogo';
 

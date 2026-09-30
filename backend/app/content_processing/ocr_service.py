@@ -1,6 +1,7 @@
+# OCR service: extracts text from scanned PDFs and image files using PyMuPDF (page rendering),
+# pypdf (normal text layer) and EasyOCR (recognition). Called at upload time.
 import logging
 from pathlib import Path
-from typing import Optional
 
 import fitz  # PyMuPDF
 import pypdf

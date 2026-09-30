@@ -1,13 +1,15 @@
+// Purpose: viewers for each kind of generated content (flashcard deck, study guide, answer key, quiz player, assignment draft).
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Check, CheckCircle2, XCircle, RotateCcw, RefreshCw, Shuffle, Star,
   ChevronLeft, ChevronRight, Play, Pause, Maximize2, Minimize2, Lightbulb,
-  AlertTriangle, Sigma, Link2, ListChecks, Volume2, Filter, ClipboardCheck, Target, ArrowRight, Sparkles,
+  AlertTriangle, Sigma, Link2, ListChecks, Volume2, Filter, ClipboardCheck, Target, ArrowRight, Sparkles, Download,
 } from 'lucide-react';
 import { contentGenerationService } from '../../services/api';
 import type { GeneratedContentItem, QuizResult } from '../../services/api';
 import { apiErrorMessage } from '../../lib/apiError';
+import { downloadAuthenticated } from '../../lib/download';
 
 /**
  * The renderers for every generated content type, shared by the library, the
@@ -18,6 +20,7 @@ import { apiErrorMessage } from '../../lib/apiError';
  * it from would be a bug, not a feature.
  */
 
+// Data shapes of the content payloads returned by the API (card, multiple-choice question, study guide, assignment draft).
 export interface Flashcard { front: string; back: string }
 export interface MCQ {
   question: string; options: string[]; correct_index: number; explanation: string;
@@ -35,7 +38,14 @@ export interface AssignmentDraft {
   title: string;
   instructions: string;
   points: number;
-  criteria: Array<{ title: string; description?: string | null; max_points: number; clo_code?: string | null }>;
+  // Extra detail for the formal Word handout; absent on drafts made before it existed.
+  objectives?: string[];
+  tasks?: Array<{ title: string; description: string; marks?: number | null }>;
+  submission_guidelines?: string[];
+  criteria: Array<{
+    title: string; description?: string | null; max_points: number; clo_code?: string | null;
+    levels?: Array<{ label: string; points: number; description?: string | null }>;
+  }>;
 }
 
 /* ─────────────────────────── flashcards ─────────────────────────── */
@@ -103,6 +113,7 @@ const useSpeech = (language: string) => {
 export const FlashcardViewer: React.FC<{
   cards: Flashcard[]; compact?: boolean; language?: string;
 }> = ({ cards, compact = false, language = 'English' }) => {
+  // Deck state: card order (for shuffle), current position, flip state, known/starred card sets, filters, autoplay, fullscreen, hint visibility.
   const [order, setOrder] = useState<number[]>(() => cards.map((_, i) => i));
   const [pos, setPos] = useState(0);
   const [flipped, setFlipped] = useState(false);
@@ -114,13 +125,16 @@ export const FlashcardViewer: React.FC<{
   const [starred, setStarred] = useState<Set<number>>(new Set());
   const speech = useSpeech(language);
 
+  // Cards currently in play (all, or only the ones not yet marked known).
   const visible = useMemo(
     () => (onlyUnknown ? order.filter((i) => !known.has(i)) : order),
     [order, onlyUnknown, known]
   );
+  // Index of the card on screen in the original deck, and the card itself.
   const cardIndex = visible[Math.min(pos, Math.max(0, visible.length - 1))];
   const card = cards[cardIndex];
 
+  // Move to the next/previous card (wrapping around); flips face-down first so the answer is not revealed mid-turn.
   const go = useCallback((delta: number) => {
     setFlipped(false);
     setHinted(false);
@@ -135,6 +149,7 @@ export const FlashcardViewer: React.FC<{
     }, 150);
   }, [visible.length]);
 
+  // Keyboard shortcuts: arrows navigate, Space/Enter flips, Escape leaves fullscreen.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'ArrowRight') { e.preventDefault(); go(1); }
@@ -154,6 +169,7 @@ export const FlashcardViewer: React.FC<{
     return () => clearTimeout(t);
   }, [autoplay, flipped, pos, go, visible.length]);
 
+  // Empty-deck and all-known states.
   if (!cards.length) return <p className="text-xs text-text-muted">This set has no cards.</p>;
 
   if (visible.length === 0) {
@@ -168,6 +184,7 @@ export const FlashcardViewer: React.FC<{
     );
   }
 
+  // Per-card flags and layout size for the current card.
   const isKnown = known.has(cardIndex);
   const isStarred = starred.has(cardIndex);
   const height = fullscreen ? 'min-h-[58vh]' : compact ? 'min-h-[200px]' : 'min-h-[320px]';
@@ -434,6 +451,7 @@ export const StudyGuideViewer: React.FC<{ guide: StudyGuide }> = ({ guide }) => 
   </div>
 );
 
+// Titled block with an icon, used for each part of a study guide.
 const Section: React.FC<{ icon: React.ElementType; title: string; children: React.ReactNode }> = ({
   icon: Icon, title, children,
 }) => (
@@ -486,14 +504,17 @@ export const QuizPlayer: React.FC<{
   onSubmitted?: (result: QuizResult) => void;
 }> = ({ item, courseId, instantFeedback = false, onSubmitted }) => {
   const questions = (item.payload?.questions || []) as MCQ[];
+  // answers[i] = chosen option for question i (-1 = unanswered); revealed = questions whose feedback is shown; result = score after submitting.
   const [answers, setAnswers] = useState<number[]>(() => new Array(questions.length).fill(-1));
   const [revealed, setRevealed] = useState<Set<number>>(new Set());
   const [result, setResult] = useState<QuizResult | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
+  // How many questions have been answered so far.
   const answered = answers.filter((a) => a >= 0).length;
 
+  // Sends all answers to the server for marking and shows the result screen.
   const handleSubmit = async () => {
     setSubmitting(true);
     setError('');
@@ -510,6 +531,7 @@ export const QuizPlayer: React.FC<{
 
   if (!questions.length) return <p className="text-xs text-text-muted">This set has no questions.</p>;
 
+  // Result screen: score, then per-question feedback with a "Try again" button.
   if (result) {
     const pct = Math.round(result.score);
     return (
@@ -571,6 +593,7 @@ export const QuizPlayer: React.FC<{
         </div>
       )}
       {questions.map((q, qi) => {
+        // Whether to colour this question's options as right/wrong (instant-feedback mode, after answering).
         const show = instantFeedback && revealed.has(qi);
         return (
           <div key={qi} className="bg-background border border-border rounded-xl p-4">
@@ -628,38 +651,38 @@ export const QuizPlayer: React.FC<{
 };
 
 /**
- * An AI-drafted assignment: brief + rubric together, exactly what
- * generate_assignment produced. A teacher reviews it here like any other
- * generated item, then "Create Assignment" is the approve step - it turns
- * this draft into a real Assignment + Published Rubric (see
- * app/content_generation/routes.py create_assignment_from_content) that
- * appears in Classwork and is what grading actually uses. Once created, the
- * button becomes a link straight to it instead of a second, duplicate one.
+ * An AI-drafted assignment shown as a formal handout: objectives, overview, numbered
+ * tasks, submission guidelines and the detailed rubric grid (criteria x performance
+ * levels) - the same content as the Word document the teacher downloads here and that
+ * students later receive. The teacher can refine it with AI and download the .docx.
+ * Posting it to students is done from the course's Assignments tab ("Create"
+ * lists the generated drafts), so this view only links there; once it has been
+ * posted it links straight to the live assignment instead.
  */
 const AssignmentDraftView: React.FC<{
   item: GeneratedContentItem; courseId: number; isTeacher: boolean;
 }> = ({ item: initialItem, courseId, isTeacher }) => {
   const navigate = useNavigate();
-  // Local override so a "Refine with AI" round trip updates what's on screen
-  // immediately, without the parent list needing its own refresh plumbing.
+  // Local copy of the draft so AI refinement shows immediately; plus request flags and refine-box state.
   const [item, setItem] = useState(initialItem);
   const draft = item.payload as AssignmentDraft;
-  const [creating, setCreating] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState('');
-  // Driven by item.assignment_id, NOT item.status - status alone can't tell
-  // "was a real Assignment actually created?" apart from "marked Approved by
-  // some other path with no Assignment behind it" (see the field's own comment
-  // in services/api.ts). A draft stuck in the latter state used to have no way
-  // back to the Create Assignment button that could fix it.
-  const [createdAssignmentId, setCreatedAssignmentId] = useState<number | null>(
-    item.assignment_id ?? null
-  );
+  // Driven by item.assignment_id (the real Assignment created from this draft, if any).
+  const postedAssignmentId = item.assignment_id ?? null;
   const [refineOpen, setRefineOpen] = useState(false);
   const [refineInstruction, setRefineInstruction] = useState('');
   const [refining, setRefining] = useState(false);
 
+  // Sum of rubric criteria points, shown in the rubric heading.
   const totalPoints = (draft.criteria || []).reduce((sum, c) => sum + (c.max_points || 0), 0);
+  // Level column headings (best -> worst) taken from the first criterion that has levels.
+  const levelLabels = useMemo(() => {
+    const withLevels = (draft.criteria || []).find((c) => c.levels && c.levels.length > 0);
+    return withLevels ? [...withLevels.levels!].sort((x, y) => y.points - x.points).map((l) => l.label) : [];
+  }, [draft]);
 
+  // Asks the AI to revise the draft according to the teacher's instruction and swaps in the updated version.
   const handleRefine = async () => {
     if (!refineInstruction.trim()) return;
     setRefining(true);
@@ -676,54 +699,141 @@ const AssignmentDraftView: React.FC<{
     }
   };
 
-  const handleCreate = async () => {
-    setCreating(true);
+  // Downloads the formal Word document (assignment handout + detailed rubric).
+  const handleDownload = async () => {
+    setDownloading(true);
     setError('');
     try {
-      const res = await contentGenerationService.createAssignmentFromContent(courseId, item.id);
-      setCreatedAssignmentId(res.assignment_id);
+      await downloadAuthenticated(
+        contentGenerationService.assignmentDocxUrl(courseId, item.id),
+        `${(draft.title || 'Assignment').replace(/[^\w \-]/g, '_')}.docx`,
+      );
     } catch (err) {
-      setError(apiErrorMessage(err, 'Could not create the assignment.'));
+      setError(apiErrorMessage(err, 'Could not download the Word document.'));
     } finally {
-      setCreating(false);
+      setDownloading(false);
     }
   };
 
   return (
     <div className="space-y-4">
-      <div>
-        <h3 className="text-base font-bold text-text-primary">{draft.title}</h3>
-        <p className="text-sm text-text-secondary mt-1.5 whitespace-pre-wrap leading-relaxed">{draft.instructions}</p>
-        <p className="text-xs font-semibold text-text-muted mt-2">Worth {draft.points} points</p>
+      {/* Handout header: university, title and marks. */}
+      <div className="text-center border-b border-border pb-3">
+        <p className="text-[11px] font-bold tracking-[0.2em] text-primary">AIR UNIVERSITY</p>
+        <h3 className="text-base font-bold text-text-primary mt-1">{draft.title}</h3>
+        <p className="text-xs font-semibold text-text-muted mt-1">Total marks: {draft.points}</p>
       </div>
 
+      {(draft.objectives || []).length > 0 && (
+        <div>
+          <h4 className="text-xs font-bold text-text-secondary uppercase tracking-wider mb-1.5">Learning objectives</h4>
+          <ul className="list-disc pl-5 space-y-0.5 text-sm text-text-secondary">
+            {draft.objectives!.map((o, i) => <li key={i}>{o}</li>)}
+          </ul>
+        </div>
+      )}
+
+      <div>
+        <h4 className="text-xs font-bold text-text-secondary uppercase tracking-wider mb-1.5">Assignment overview</h4>
+        <p className="text-sm text-text-secondary whitespace-pre-wrap leading-relaxed">{draft.instructions}</p>
+      </div>
+
+      {(draft.tasks || []).length > 0 && (
+        <div>
+          <h4 className="text-xs font-bold text-text-secondary uppercase tracking-wider mb-2">Tasks / questions</h4>
+          <div className="space-y-2">
+            {draft.tasks!.map((t, i) => (
+              <div key={i} className="bg-background border border-border rounded-lg p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-semibold text-text-primary">Task {i + 1}: {t.title}</span>
+                  {t.marks != null && <span className="text-xs font-bold text-text-muted shrink-0">{t.marks} marks</span>}
+                </div>
+                <p className="text-xs text-text-secondary mt-1 whitespace-pre-wrap">{t.description}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {(draft.submission_guidelines || []).length > 0 && (
+        <div>
+          <h4 className="text-xs font-bold text-text-secondary uppercase tracking-wider mb-1.5">Submission guidelines</h4>
+          <ul className="list-disc pl-5 space-y-0.5 text-sm text-text-secondary">
+            {draft.submission_guidelines!.map((g, i) => <li key={i}>{g}</li>)}
+          </ul>
+        </div>
+      )}
+
+      {/* Detailed rubric: criteria as rows, performance levels as columns (falls back to a simple list for older drafts). */}
       <div>
         <h4 className="text-xs font-bold text-text-secondary uppercase tracking-wider mb-2">
           Grading rubric ({totalPoints} pts)
         </h4>
-        <div className="space-y-2">
-          {(draft.criteria || []).map((c, i) => (
-            <div key={i} className="bg-background border border-border rounded-lg p-3">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-sm font-semibold text-text-primary">{c.title}</span>
-                <span className="text-xs font-bold text-text-muted shrink-0">{c.max_points} pts</span>
+        {levelLabels.length > 0 ? (
+          <div className="overflow-x-auto border border-border rounded-lg">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="bg-background text-text-secondary">
+                  <th className="text-left p-2 font-bold">Criterion</th>
+                  {levelLabels.map((l) => <th key={l} className="text-left p-2 font-bold">{l}</th>)}
+                  <th className="p-2 font-bold">Max</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(draft.criteria || []).map((c, i) => {
+                  const byLabel = new Map((c.levels || []).map((l) => [l.label, l]));
+                  return (
+                    <tr key={i} className="border-t border-border align-top">
+                      <td className="p-2 min-w-[140px]">
+                        <div className="font-semibold text-text-primary">{c.title}</div>
+                        {c.description && <div className="text-text-secondary mt-0.5">{c.description}</div>}
+                        {c.clo_code && (
+                          <span className="inline-flex items-center gap-1 mt-1 text-[11px] font-semibold rounded-full px-2 py-0.5 border text-primary bg-primary-muted border-primary/20">
+                            <Target className="w-3 h-3" /> {c.clo_code}
+                          </span>
+                        )}
+                      </td>
+                      {levelLabels.map((l) => {
+                        const lv = byLabel.get(l);
+                        return (
+                          <td key={l} className="p-2 min-w-[110px] text-text-secondary">
+                            {lv ? <><span className="font-bold text-text-primary">({lv.points})</span> {lv.description}</> : '-'}
+                          </td>
+                        );
+                      })}
+                      <td className="p-2 text-center font-bold text-text-primary">{c.max_points}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {(draft.criteria || []).map((c, i) => (
+              <div key={i} className="bg-background border border-border rounded-lg p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-semibold text-text-primary">{c.title}</span>
+                  <span className="text-xs font-bold text-text-muted shrink-0">{c.max_points} pts</span>
+                </div>
+                {c.description && <p className="text-xs text-text-secondary mt-1">{c.description}</p>}
+                {c.clo_code && (
+                  <span className="inline-flex items-center gap-1 mt-1.5 text-[11px] font-semibold rounded-full px-2 py-0.5 border text-primary bg-primary-muted border-primary/20">
+                    <Target className="w-3 h-3" /> {c.clo_code}
+                  </span>
+                )}
               </div>
-              {c.description && <p className="text-xs text-text-secondary mt-1">{c.description}</p>}
-              {c.clo_code && (
-                <span className="inline-flex items-center gap-1 mt-1.5 text-[11px] font-semibold rounded-full px-2 py-0.5 border text-primary bg-primary-muted border-primary/20">
-                  <Target className="w-3 h-3" /> {c.clo_code}
-                </span>
-              )}
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {error && <p className="text-xs text-rose-500">{error}</p>}
 
-      {isTeacher && createdAssignmentId === null && (
+      {/* Teacher actions: refine box, Word download, and the next step (posting happens on the Assignments tab). */}
+      {isTeacher && (
         <div className="space-y-2">
-          {refineOpen && (
+          {refineOpen && postedAssignmentId === null && (
             <div className="space-y-2 bg-background border border-border rounded-lg p-3">
               <textarea
                 rows={2}
@@ -742,28 +852,28 @@ const AssignmentDraftView: React.FC<{
               </button>
             </div>
           )}
-          <div className="flex gap-2">
-            <button
-              onClick={() => setRefineOpen((v) => !v)}
-              className="btn-secondary text-sm"
-            >
-              <Sparkles className="w-4 h-4" /> Refine with AI
+          <div className="flex flex-wrap gap-2">
+            {postedAssignmentId === null && (
+              <button onClick={() => setRefineOpen((v) => !v)} className="btn-secondary text-sm">
+                <Sparkles className="w-4 h-4" /> Refine with AI
+              </button>
+            )}
+            <button onClick={handleDownload} disabled={downloading} className="btn-secondary text-sm disabled:opacity-60">
+              {downloading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+              Download Word (.docx)
             </button>
-            <button onClick={handleCreate} disabled={creating} className="btn-primary text-sm disabled:opacity-60">
-              {creating ? <RefreshCw className="w-4 h-4 animate-spin" /> : <ClipboardCheck className="w-4 h-4" />}
-              Create Assignment
+            <button onClick={() => navigate(`/course/${courseId}?tab=classwork`)} className="btn-primary text-sm">
+              {postedAssignmentId === null ? <ClipboardCheck className="w-4 h-4" /> : <CheckCircle2 className="w-4 h-4" />}
+              {postedAssignmentId === null ? 'Go to Assignments' : 'View in Classwork'}
+              <ArrowRight className="w-4 h-4" />
             </button>
           </div>
+          {postedAssignmentId === null && (
+            <p className="text-xs text-text-muted">
+              To publish this to students: open the course, go to <strong>Assignments → Create</strong> and select this assignment.
+            </p>
+          )}
         </div>
-      )}
-
-      {isTeacher && createdAssignmentId !== null && (
-        <button
-          onClick={() => navigate(`/course/${courseId}?tab=classwork`)}
-          className="btn-primary text-sm"
-        >
-          <CheckCircle2 className="w-4 h-4" /> View in Classwork <ArrowRight className="w-4 h-4" />
-        </button>
       )}
     </div>
   );

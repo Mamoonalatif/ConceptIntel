@@ -1,3 +1,5 @@
+// QuestionBank: teacher's library of reusable exam questions (five types). Questions can be AI-generated, imported from approved study sets, filtered,
+// tagged with a CLO, deleted, and (in `selectable` mode) used as a checkbox picker inside the exam builder.
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Library, Sparkles, RefreshCw, Trash2, Search, Filter, Download, AlertTriangle,
@@ -16,6 +18,7 @@ interface QuestionBankProps {
   onToggleSelect?: (id: number) => void;
 }
 
+// Icon shown for each question type.
 const TYPE_ICONS: Record<QuestionType, React.ElementType> = {
   single_choice: ListChecks,
   multi_select: ListChecks,
@@ -24,7 +27,9 @@ const TYPE_ICONS: Record<QuestionType, React.ElementType> = {
   matching: Shuffle,
 };
 
+// Difficulty levels offered for filtering/generation.
 const DIFFICULTIES = ['Easy', 'Medium', 'Hard'] as const;
+// Maps a difficulty name to its global CSS badge class.
 const badgeClassFor = (d: string) => `badge-${(d || 'medium').toLowerCase()}`;
 
 /**
@@ -36,6 +41,7 @@ const badgeClassFor = (d: string) => `badge-${(d || 'medium').toLowerCase()}`;
  * five types, imported wholesale from an already-approved study set, or written by
  * hand - and every one is stored with a validated answer key.
  */
+// Main component: loads questions, question types, concepts, generated sets and CLOs, and renders the filters, generator, importer and list.
 export const QuestionBank: React.FC<QuestionBankProps> = ({
   courseId, selectable = false, selectedIds = [], onToggleSelect,
 }) => {
@@ -48,10 +54,12 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({
   const [notice, setNotice] = useState('');
   const [expanded, setExpanded] = useState<number | null>(null);
 
+  // Filter state (type, difficulty, free-text search).
   const [fType, setFType] = useState('');
   const [fDiff, setFDiff] = useState('');
   const [fSearch, setFSearch] = useState('');
 
+  // AI question-generation form state.
   const [showGen, setShowGen] = useState(false);
   const [genConcept, setGenConcept] = useState('');
   const [genType, setGenType] = useState<QuestionType>('single_choice');
@@ -67,6 +75,7 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({
   const [clos, setClos] = useState<CLO[]>([]);
   const [savingCloFor, setSavingCloFor] = useState<number | null>(null);
 
+  // Load questions and the available question types in parallel (types fall back to an empty list on failure).
   const load = async () => {
     setLoading(true);
     try {
@@ -83,6 +92,7 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({
     }
   };
 
+  // On mount / course change: load questions, then concepts and generated sets (for generating/importing) and the course's CLOs via its catalog id.
   useEffect(() => {
     load();
     contentGenerationService.listConcepts(courseId).then(setConcepts).catch(() => {});
@@ -94,6 +104,7 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [courseId]);
 
+  // Save or clear the CLO tag of one question and update it in the list.
   const handleSetClo = async (q: BankQuestion, cloId: string) => {
     setSavingCloFor(q.id);
     try {
@@ -107,6 +118,7 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({
     }
   };
 
+  // Apply the type / difficulty / search filters to the question list.
   const filtered = useMemo(() => {
     const s = fSearch.trim().toLowerCase();
     return questions.filter((q) =>
@@ -116,6 +128,7 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({
     );
   }, [questions, fType, fDiff, fSearch]);
 
+  // Ask the AI to generate questions for the chosen concept/type/count/difficulty and prepend them to the list.
   const handleGenerate = async () => {
     if (!genConcept) return;
     setGenerating(true);
@@ -135,6 +148,7 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({
     }
   };
 
+  // Import all questions from an already approved study set, then reload the bank.
   const handleImport = async (contentId: number) => {
     setImporting(true);
     setError('');
@@ -150,6 +164,7 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({
     }
   };
 
+  // Delete a question from the bank after confirmation.
   const handleDelete = async (q: BankQuestion) => {
     if (!window.confirm('Remove this question from the bank?')) return;
     try {
@@ -160,8 +175,10 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({
     }
   };
 
+  // Generated sets that can be imported (study guides have no questions).
   const importable = sets.filter((s) => s.content_type !== 'study_guide');
 
+  // Render: messages, then (manager mode only) the generate and import panels, then filters and the expandable question list.
   return (
     <div className="space-y-4">
       {error && (

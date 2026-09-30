@@ -1,3 +1,4 @@
+// Purpose: the course Content Library; browse, filter, sort, review (approve/reject), edit, export and delete generated study content.
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Library, Search, Filter, ExternalLink, Download, Printer, FileJson, Trash2,
@@ -11,11 +12,13 @@ import { downloadContentHtml, downloadContentJson, printContent } from '../../li
 import { apiErrorMessage } from '../../lib/apiError';
 import { ContentEditor } from './ContentEditor';
 
+// Props: course id, and whether the viewer is a teacher/manager (students only see approved items and fewer controls).
 interface ContentLibraryProps {
   courseId: number;
   canManage: boolean;
 }
 
+// Label, icon and colour for each content type.
 const TYPE_META: Record<string, { label: string; icon: React.ElementType; tint: string }> = {
   flashcard: { label: 'Flashcards', icon: Layers, tint: 'text-sky-600 dark:text-sky-400 bg-sky-50 dark:bg-sky-500/10 border-sky-200 dark:border-sky-500/20' },
   mcq: { label: 'Practice MCQs', icon: ListChecks, tint: 'text-violet-600 dark:text-violet-400 bg-violet-50 dark:bg-violet-500/10 border-violet-200 dark:border-violet-500/20' },
@@ -24,16 +27,20 @@ const TYPE_META: Record<string, { label: string; icon: React.ElementType; tint: 
   assignment: { label: 'Assignment', icon: ClipboardCheck, tint: 'text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-orange-500/10 border-orange-200 dark:border-orange-500/20' },
 };
 
+// Badge colours for each review status.
 const STATUS_TINT: Record<string, string> = {
   Approved: 'text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/10 border-emerald-200 dark:border-emerald-500/20',
   PendingReview: 'text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-500/10 border-amber-200 dark:border-amber-500/20',
   Rejected: 'text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-500/10 border-rose-200 dark:border-rose-500/20',
 };
 
+// Numeric ordering of difficulty levels, used for sorting.
 const DIFF_ORDER: Record<string, number> = { Easy: 0, Medium: 1, Hard: 2 };
 
+// CSS class for a difficulty badge (defaults to medium).
 const badgeClassFor = (d: string) => `badge-${(d || 'medium').toLowerCase()}`;
 
+// Short human-readable size of an item (cards, points, rubric criteria or questions).
 const itemSize = (item: GeneratedContentItem): string => {
   const p = item.payload || {};
   if (item.content_type === 'flashcard') return `${(p.cards || []).length} cards`;
@@ -42,6 +49,7 @@ const itemSize = (item: GeneratedContentItem): string => {
   return `${(p.questions || []).length} questions`;
 };
 
+// Available sort orders.
 type SortKey = 'newest' | 'oldest' | 'title' | 'concept' | 'difficulty';
 
 /**
@@ -55,6 +63,7 @@ type SortKey = 'newest' | 'oldest' | 'title' | 'concept' | 'difficulty';
  * library's filters cluttered the composer.
  */
 export const ContentLibrary: React.FC<ContentLibraryProps> = ({ courseId, canManage }) => {
+  // Data and UI state: items from the server, loading/error, item being edited, filters, sort order, grid/list view, and bulk-selection.
   const [items, setItems] = useState<GeneratedContentItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -71,6 +80,7 @@ export const ContentLibrary: React.FC<ContentLibraryProps> = ({ courseId, canMan
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
 
+  // Fetches all content items for this course.
   const load = async () => {
     setLoading(true);
     try {
@@ -82,16 +92,19 @@ export const ContentLibrary: React.FC<ContentLibraryProps> = ({ courseId, canMan
     }
   };
 
+  // Load the library on mount and when the course changes.
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [courseId]);
 
+  // Distinct concept names present in the library (feeds the concept filter dropdown).
   const concepts = useMemo(
     () => Array.from(new Set(items.map((i) => i.concept_name).filter(Boolean))).sort(),
     [items]
   );
 
+  // Applies search text and filters, then sorts; recomputed only when its inputs change.
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     const list = items.filter((i) =>
@@ -129,6 +142,7 @@ export const ContentLibrary: React.FC<ContentLibraryProps> = ({ courseId, canMan
     });
   }, [filtered]);
 
+  // Summary numbers for the tiles at the top.
   const counts = useMemo(() => ({
     total: items.length,
     approved: items.filter((i) => i.status === 'Approved').length,
@@ -136,6 +150,7 @@ export const ContentLibrary: React.FC<ContentLibraryProps> = ({ courseId, canMan
     ungrounded: items.filter((i) => !i.grounded_excerpts).length,
   }), [items]);
 
+  // Adds/removes one item from the selection.
   const toggleSelect = (id: number) =>
     setSelected((prev) => {
       const next = new Set(prev);
@@ -143,8 +158,10 @@ export const ContentLibrary: React.FC<ContentLibraryProps> = ({ courseId, canMan
       return next;
     });
 
+  // True when every currently visible item is selected (drives the "All" checkbox).
   const allVisibleSelected = filtered.length > 0 && filtered.every((i) => selected.has(i.id));
 
+  // Approves or rejects one item on the server and updates it in the list.
   const review = async (item: GeneratedContentItem, approve: boolean) => {
     try {
       const updated = await contentGenerationService.review(courseId, item.id, approve);
@@ -154,6 +171,7 @@ export const ContentLibrary: React.FC<ContentLibraryProps> = ({ courseId, canMan
     }
   };
 
+  // Deletes one item after a confirmation prompt.
   const remove = async (item: GeneratedContentItem) => {
     if (!window.confirm(`Delete "${item.title}"? This cannot be undone.`)) return;
     try {
@@ -212,9 +230,11 @@ export const ContentLibrary: React.FC<ContentLibraryProps> = ({ courseId, canMan
     if (failed) setError(`${failed} of ${targets.length} item(s) could not be deleted.`);
   };
 
+  // Opens the full content viewer for an item in a new browser tab.
   const openInNewTab = (item: GeneratedContentItem) =>
     window.open(`/content/${courseId}/${item.id}`, '_blank', 'noopener,noreferrer');
 
+  // While an item is being edited, show the editor instead of the library.
   if (editing) {
     return (
       <ContentEditor
@@ -229,10 +249,12 @@ export const ContentLibrary: React.FC<ContentLibraryProps> = ({ courseId, canMan
     );
   }
 
+  // Whether any filter is set (shows the "Clear filters" line).
   const filtersActive = !!(search || fType || fDiff || fStatus || fConcept);
 
   return (
     <div className="space-y-5">
+      {/* Error banner */}
       {error && (
         <div className="bg-red-50 border border-red-200 text-red-600 dark:bg-red-500/10 dark:border-red-500/30 dark:text-red-400 rounded-xl p-4 flex items-start gap-3 text-sm animate-fade-in">
           <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />{error}
@@ -426,6 +448,7 @@ export const ContentLibrary: React.FC<ContentLibraryProps> = ({ courseId, canMan
 
 /* ─────────────────────────── row renderers ─────────────────────────── */
 
+// Props shared by the grid card and the list row renderers.
 interface RowProps {
   item: GeneratedContentItem;
   canManage: boolean;
@@ -437,6 +460,7 @@ interface RowProps {
   onReview: (approve: boolean) => void;
 }
 
+// Small badge showing whether the content was written from course material ("grounded") and how many excerpts were used.
 const GroundingChip: React.FC<{ item: GeneratedContentItem }> = ({ item }) => (
   <span
     className={`text-[11px] font-semibold rounded-full px-2 py-0.5 border flex items-center gap-1 ${
@@ -453,6 +477,7 @@ const GroundingChip: React.FC<{ item: GeneratedContentItem }> = ({ item }) => (
   </span>
 );
 
+// Card view of one content item: title, badges, export buttons, edit/delete and review actions.
 const GridCard: React.FC<RowProps> = ({
   item, canManage, selected, onToggleSelect, onOpen, onEdit, onDelete, onReview,
 }) => {
@@ -558,6 +583,7 @@ const GridCard: React.FC<RowProps> = ({
   );
 };
 
+// Compact table-row view of one content item with the same actions as the card.
 const ListRow: React.FC<RowProps> = ({
   item, canManage, selected, onToggleSelect, onOpen, onEdit, onDelete, onReview,
 }) => {

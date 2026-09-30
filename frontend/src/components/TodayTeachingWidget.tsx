@@ -1,9 +1,11 @@
+// Purpose: dashboard card listing, per course, the topics scheduled for today (teacher: what to teach, student: what to revise).
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { CalendarCheck2, ChevronRight } from 'lucide-react';
 import { scheduleService } from '../services/api';
 import type { TodayTopics } from '../services/api';
 
+// Minimal course shape this widget needs.
 interface CourseLite {
   id: number;
   name: string;
@@ -31,9 +33,12 @@ interface TodayTeachingWidgetProps {
  */
 export const TodayTeachingWidget: React.FC<TodayTeachingWidgetProps> = ({ courses, role }) => {
   const navigate = useNavigate();
+  // hits = courses that have topics today; loaded = fetch finished (avoids flashing an empty card).
   const [hits, setHits] = useState<Array<{ course: CourseLite; today: TodayTopics }>>([]);
   const [loaded, setLoaded] = useState(false);
 
+  // Fetch today's topics for every course in parallel; failed lookups are ignored.
+  // `cancelled` stops state updates if the component unmounts or the course list changes mid-request.
   useEffect(() => {
     if (courses.length === 0) { setLoaded(true); return; }
     let cancelled = false;
@@ -50,6 +55,7 @@ export const TodayTeachingWidget: React.FC<TodayTeachingWidgetProps> = ({ course
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [courses.map((c) => c.id).join(',')]);
 
+  // Render nothing until loaded, and nothing if no course has topics today.
   if (!loaded || hits.length === 0) return null;
 
   return (

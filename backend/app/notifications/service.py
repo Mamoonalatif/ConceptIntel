@@ -1,3 +1,5 @@
+# Notification helpers: create in-app notifications (respecting each user's preferences) and
+# also email them in a background thread. Bulk helpers target many users, a course's students or admins.
 import threading
 from typing import List, Optional
 from sqlalchemy.orm import Session
@@ -65,6 +67,7 @@ def _is_notification_allowed(db: Session, user_id: int, type: str) -> bool:
     return bool(getattr(pref, field, True))
 
 
+# Creates one notification for a user (unless they opted out of its category) and emails them.
 def create_notification(
     db: Session,
     user_id: int,
@@ -135,6 +138,7 @@ def notify_many(
     return notifs
 
 
+# Notifies every student with an Active enrollment in the course.
 def notify_course_students(
     db: Session,
     course_id: int,
@@ -153,6 +157,7 @@ def notify_course_students(
     return notify_many(db, student_ids, type, title, message, link, priority)
 
 
+# Notifies every user with the admin role.
 def notify_admins(
     db: Session,
     type: str,

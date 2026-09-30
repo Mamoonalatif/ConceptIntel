@@ -1,6 +1,8 @@
+// Role-based navigation helpers: where each role lands and which sidebar links it sees.
 import { LayoutGrid, ListChecks, BookOpen, ShieldCheck, Network, Users, UserPlus, GraduationCap, ClipboardList } from 'lucide-react';
 import type { NavItem } from '../components/AppShell';
 
+// The subset of the user object needed to decide navigation.
 interface RoleNavUser {
   role: string;
   is_program_coordinator?: boolean;

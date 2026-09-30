@@ -65,6 +65,7 @@ CALC_NAME, CALC_CODE = "Calculus", "MTH101"
 
 
 def upsert_catalog(db) -> dict:
+    """Renames the old catalog entries and ensures the PF, OOP and Calculus catalog entries exist; returns them by name."""
     for old_name, (new_name, new_code) in RENAME_MAP.items():
         row = db.query(CourseCatalog).filter(CourseCatalog.name == old_name).first()
         if row:
@@ -74,6 +75,7 @@ def upsert_catalog(db) -> dict:
     db.flush()
 
     def get_or_create(name: str, code: str) -> CourseCatalog:
+        """Returns the catalog entry with this name, creating it if missing."""
         row = db.query(CourseCatalog).filter(CourseCatalog.name == name).first()
         if row:
             return row
@@ -147,6 +149,7 @@ CALCULUS_CONCEPTS = [
 
 
 def seed_concept_graph(catalog_id: int, concepts: list[dict], label: str) -> None:
+    """Validates the concept list (every prerequisite must exist), then writes the concepts and prerequisite links to Neo4j."""
     names = {c["name"] for c in concepts}
     for c in concepts:
         for prereq in c["prerequisites"]:
@@ -193,6 +196,7 @@ CALCULUS_CLOS = [
 
 
 def seed_outcomes(db, calculus: CourseCatalog) -> None:
+    """Seeds the Calculus CLO -> PLO -> graduate-attribute outcome chain under the Computer Science program."""
     admin = db.query(User).filter(User.role == "admin").first() or db.query(User).first()
     if not admin:
         print("WARNING: no users exist yet - skipping CLO/PLO/GA seed (CLO.created_by_id needs a real user).")
@@ -256,6 +260,7 @@ def seed_outcomes(db, calculus: CourseCatalog) -> None:
 
 
 def main():
+    """Runs the whole demo seed: catalog, concept graph, then outcomes."""
     db = SessionLocal()
     try:
         catalogs = upsert_catalog(db)

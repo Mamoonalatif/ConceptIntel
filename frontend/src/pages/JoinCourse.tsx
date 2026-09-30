@@ -1,3 +1,5 @@
+// JoinCourse: landing page for /join/:code links; previews the course and lets a
+// logged-in student enroll.
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -24,6 +26,7 @@ const JoinCourse: React.FC = () => {
   const [error, setError] = useState('');
   const [joined, setJoined] = useState<string | null>(null);
 
+  // Look up the course by its join code to show a preview (or "invalid link").
   useEffect(() => {
     if (!code) return;
     courseService.lookupByCode(code.toUpperCase())
@@ -32,6 +35,7 @@ const JoinCourse: React.FC = () => {
       .finally(() => setLoadingPreview(false));
   }, [code]);
 
+  // Enrolls the current student using the code from the URL.
   const handleJoin = async () => {
     if (!code) return;
     setJoining(true);

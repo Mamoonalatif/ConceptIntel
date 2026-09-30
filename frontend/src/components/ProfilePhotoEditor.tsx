@@ -1,3 +1,4 @@
+// Purpose: clickable avatar with a camera badge that lets the logged-in user upload a new profile photo.
 import React, { useRef, useState } from 'react';
 import { Camera, Loader2 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -5,6 +6,7 @@ import { authService } from '../services/api';
 import { apiErrorMessage } from '../lib/apiError';
 import { Avatar } from './Avatar';
 
+// Props: avatar size, badge diameter, and an optional callback to report upload errors to the parent page.
 interface ProfilePhotoEditorProps {
   size?: 'sm' | 'md' | 'lg';
   /** Camera-button badge diameter in px. Defaults to a size that fits a 'lg' avatar. */
@@ -22,10 +24,13 @@ interface ProfilePhotoEditorProps {
  * `Avatar` is what actually reads `user.avatar_url` from AuthContext).
  */
 export const ProfilePhotoEditor: React.FC<ProfilePhotoEditorProps> = ({ size = 'lg', badgeSizePx = 28, onError }) => {
+  // user and refreshUser come from AuthContext; busy disables the button while uploading; fileInputRef targets the hidden file input.
   const { user, refreshUser } = useAuth();
   const [busy, setBusy] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Uploads the chosen image, then refreshes the user so every Avatar in the app shows the new photo.
+  // The input value is cleared first so picking the same file twice still triggers onChange.
   const handlePhotoSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
@@ -41,6 +46,7 @@ export const ProfilePhotoEditor: React.FC<ProfilePhotoEditorProps> = ({ size = '
     }
   };
 
+  // Nothing to edit when nobody is logged in.
   if (!user) return null;
 
   return (

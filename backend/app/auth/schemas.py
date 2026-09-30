@@ -1,3 +1,4 @@
+# Pydantic request/response models and validators for the auth routes.
 import re
 from email_validator import validate_email, EmailNotValidError
 from pydantic import BaseModel, EmailStr, field_validator
@@ -25,6 +26,7 @@ def validate_deliverable_email(value: str) -> str:
 
 
 def validate_full_name(value: str) -> str:
+    """Trim the name and require letters and single spaces only."""
     value = value.strip()
     if not value:
         raise ValueError("Full name is required")
@@ -34,6 +36,7 @@ def validate_full_name(value: str) -> str:
 
 
 def validate_password_strength(value: str) -> str:
+    """Enforce the password policy: 8+ chars with upper, lower, digit and special character."""
     if len(value) < 8:
         raise ValueError("Password must be at least 8 characters long")
     if not re.search(r"[A-Z]", value):
@@ -48,6 +51,7 @@ def validate_password_strength(value: str) -> str:
 
 
 class UserCreate(BaseModel):
+    """Self-registration payload (students only); validators enforce email, name and password rules."""
     email: EmailStr
     password: str
     full_name: str
@@ -70,6 +74,7 @@ class UserCreate(BaseModel):
 
 
 class UserLogin(BaseModel):
+    """Email + password login payload."""
     email: EmailStr
     password: str
 
@@ -88,15 +93,18 @@ class ChangePasswordRequest(BaseModel):
 
 
 class VerifyEmailRequest(BaseModel):
+    """Email verification by the token in the emailed link."""
     token: str
 
 
 class VerifyEmailCodeRequest(BaseModel):
+    """Email verification by the short code typed in by the user."""
     email: EmailStr
     code: str
 
 
 class ResendVerificationRequest(BaseModel):
+    """Ask for the verification email to be sent again."""
     email: EmailStr
 
 
@@ -106,10 +114,12 @@ class GoogleAuthRequest(BaseModel):
 
 
 class ForgotPasswordRequest(BaseModel):
+    """Start a password reset for this email."""
     email: EmailStr
 
 
 class ResetPasswordRequest(BaseModel):
+    """Finish a password reset: reset token plus the new (validated) password."""
     token: str
     new_password: str
 
@@ -120,6 +130,7 @@ class ResetPasswordRequest(BaseModel):
 
 
 class UserResponse(BaseModel):
+    """Public user profile returned by the API (never includes password data)."""
     id: int
     email: str
     full_name: str
@@ -197,6 +208,7 @@ class StaffAuthoritiesUpdate(BaseModel):
 
 
 class Token(BaseModel):
+    """Login response: access/refresh tokens, role and (optionally) the full profile."""
     access_token: str
     refresh_token: str
     token_type: str
@@ -212,15 +224,18 @@ class Token(BaseModel):
 
 
 class RefreshRequest(BaseModel):
+    """Payload to exchange a refresh token for a new access token."""
     refresh_token: str
 
 
 class RefreshResponse(BaseModel):
+    """New access token returned from the refresh endpoint."""
     access_token: str
     token_type: str
 
 
 class TokenData(BaseModel):
+    """Fields decoded from a JWT payload."""
     user_id: Optional[int] = None
     email: Optional[str] = None
     role: Optional[str] = None
@@ -275,12 +290,14 @@ class TwoFactorDisableRequest(BaseModel):
 
 
 class TwoFactorStatusResponse(BaseModel):
+    """Whether 2FA is currently enabled for the user."""
     is_2fa_enabled: bool
 
 
 # --- Teacher provisioning ---
 
 class AdminCreateTeacher(BaseModel):
+    """Admin payload to create a teacher account (a temporary password is generated)."""
     email: EmailStr
     full_name: str
 
@@ -296,6 +313,7 @@ class AdminCreateTeacher(BaseModel):
 
 
 class TeacherCredentialsResponse(BaseModel):
+    """Returned after teacher creation, including the generated temporary password."""
     id: int
     email: str
     full_name: str
@@ -304,6 +322,7 @@ class TeacherCredentialsResponse(BaseModel):
 
 
 class TeacherRequestCreate(BaseModel):
+    """Public request asking the admin to create a teacher account."""
     email: EmailStr
     full_name: str
     reason: Optional[str] = None
@@ -320,6 +339,7 @@ class TeacherRequestCreate(BaseModel):
 
 
 class TeacherRequestResponse(BaseModel):
+    """A teacher-account request and its review status."""
     id: int
     email: str
     full_name: str

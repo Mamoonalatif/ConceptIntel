@@ -1,3 +1,4 @@
+# Calendar endpoint: assignment due dates and meeting times across the user's courses.
 from typing import List
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
@@ -21,10 +22,12 @@ def _student_course_ids(db: Session, user: User) -> List[int]:
     ]
 
 
+# IDs of courses the user teaches.
 def _teacher_course_ids(db: Session, user: User) -> List[int]:
     return [row[0] for row in db.query(Course.id).filter(Course.teacher_id == user.id).all()]
 
 
+# Builds date-sorted CalendarEvents (assignment due dates and meetings) for the given courses.
 def _events_for_course_ids(db: Session, course_ids: List[int]) -> List[CalendarEvent]:
     if not course_ids:
         return []
@@ -69,6 +72,7 @@ def _events_for_course_ids(db: Session, course_ids: List[int]) -> List[CalendarE
     return events
 
 
+# GET /calendar/me - events for the student's enrollments or the staff user's taught courses.
 @router.get("/me", response_model=List[CalendarEvent])
 def get_my_calendar(
     db: Session = Depends(get_db),

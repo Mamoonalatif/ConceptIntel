@@ -1,3 +1,5 @@
+# Pydantic request/response models for courses, the course catalog and admin course edits.
+# Pydantic validates incoming JSON automatically and rejects bad data with a 422 error.
 from datetime import date
 from pydantic import BaseModel, field_validator, model_validator
 from typing import Optional
@@ -6,6 +8,7 @@ DESCRIPTION_MIN_WORDS = 5
 DESCRIPTION_MAX_WORDS = 250
 
 
+# Validates that a course description is between the min and max word counts.
 def check_description_word_count(v: str) -> str:
     word_count = len(v.split())
     if not (DESCRIPTION_MIN_WORDS <= word_count <= DESCRIPTION_MAX_WORDS):
@@ -25,6 +28,7 @@ def check_positive_max_students(v: Optional[int]) -> Optional[int]:
 
 # --- Course Catalog (predefined offerings; admin-managed) ---
 
+# Payload for an admin adding a predefined course offering (name + code) to a program.
 class CourseCatalogCreate(BaseModel):
     name: str
     code: str
@@ -34,6 +38,7 @@ class CourseCatalogCreate(BaseModel):
     prerequisite_catalog_id: Optional[int] = None
 
 
+# Partial update for a catalog entry; every field is optional.
 class CourseCatalogUpdate(BaseModel):
     name: Optional[str] = None
     code: Optional[str] = None
@@ -41,6 +46,7 @@ class CourseCatalogUpdate(BaseModel):
     prerequisite_catalog_id: Optional[int] = None
 
 
+# Catalog entry returned to clients (built from the ORM object via from_attributes).
 class CourseCatalogResponse(BaseModel):
     id: int
     name: str
@@ -67,16 +73,19 @@ class CourseCreate(BaseModel):
     end_date: date
     max_students: Optional[int] = None
 
+    # Runs the word-count rule on the description field.
     @field_validator("description")
     @classmethod
     def check_description_length(cls, v: str) -> str:
         return check_description_word_count(v)
 
+    # Runs the positive-capacity rule on max_students.
     @field_validator("max_students")
     @classmethod
     def check_max_students(cls, v: Optional[int]) -> Optional[int]:
         return check_positive_max_students(v)
 
+    # Cross-field rule: enrollment window and course dates must be in a sensible, non-past order.
     @model_validator(mode="after")
     def check_date_ordering(self):
         if self.enrollment_start < date.today():
@@ -107,6 +116,7 @@ class CourseUpdate(BaseModel):
     status: Optional[str] = None  # "Draft", "Open", "Closed"
     theme_color: Optional[str] = None  # one of frontend's fixed palette keys, e.g. "rose", "amber"
 
+    # Same word-count rule, skipped when the description is not being updated.
     @field_validator("description")
     @classmethod
     def check_description_length(cls, v: Optional[str]) -> Optional[str]:
@@ -114,11 +124,13 @@ class CourseUpdate(BaseModel):
             return v
         return check_description_word_count(v)
 
+    # Runs the positive-capacity rule on max_students.
     @field_validator("max_students")
     @classmethod
     def check_max_students(cls, v: Optional[int]) -> Optional[int]:
         return check_positive_max_students(v)
 
+    # Checks date ordering only between fields supplied in this partial update.
     @model_validator(mode="after")
     def check_date_ordering(self):
         # Only validate orderings where both sides of the comparison are present on
@@ -144,6 +156,7 @@ class CourseLookupResponse(BaseModel):
     code: Optional[str] = None
 
 
+# Full course shape returned by the API; ORM-compatible.
 class CourseResponse(BaseModel):
     id: int
     name: str
@@ -183,6 +196,7 @@ class AdminCourseUpdate(BaseModel):
     status: Optional[str] = None
     prerequisite_course_id: Optional[int] = None
 
+    # Runs the positive-capacity rule on max_students.
     @field_validator("max_students")
     @classmethod
     def check_max_students(cls, v: Optional[int]) -> Optional[int]:

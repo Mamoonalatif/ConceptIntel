@@ -1,3 +1,4 @@
+# Announcement endpoints: teachers post/edit/delete course announcements; course members read them.
 import threading
 from typing import List
 from datetime import datetime
@@ -15,6 +16,7 @@ from app.notifications.ai_summary import generate_posting_summary
 router = APIRouter(prefix="/courses", tags=["Class Stream"])
 
 
+# Converts an Announcement ORM row into the API response model (adds teacher name).
 def _to_response(a: Announcement) -> AnnouncementResponse:
     return AnnouncementResponse(
         id=a.id,
@@ -27,6 +29,7 @@ def _to_response(a: Announcement) -> AnnouncementResponse:
     )
 
 
+# Fetches a course by ID or raises 404.
 def _get_course_or_404(db: Session, course_id: int) -> Course:
     course = db.query(Course).filter(Course.id == course_id).first()
     if not course:
@@ -68,6 +71,7 @@ def _notify_announcement_posted_background(course_id: int, announcement_id: int)
         bg_db.close()
 
 
+# GET /courses/{id}/announcements - newest-first list for users with course access.
 @router.get("/{course_id}/announcements", response_model=List[AnnouncementResponse])
 def list_announcements(
     course_id: int,
@@ -88,6 +92,8 @@ def list_announcements(
     return [_to_response(a) for a in announcements]
 
 
+# POST /courses/{id}/announcements - the course teacher posts; students are notified in a
+# background thread so the request returns quickly.
 @router.post("/{course_id}/announcements", response_model=AnnouncementResponse, status_code=status.HTTP_201_CREATED)
 def create_announcement(
     course_id: int,
@@ -110,6 +116,7 @@ def create_announcement(
     return _to_response(announcement)
 
 
+# Loads an announcement in this course and checks the caller posted it (404/403 otherwise).
 def _get_owned_announcement(db: Session, course_id: int, announcement_id: int, teacher_id: int) -> Announcement:
     announcement = (
         db.query(Announcement)
@@ -123,6 +130,7 @@ def _get_owned_announcement(db: Session, course_id: int, announcement_id: int, t
     return announcement
 
 
+# PATCH .../announcements/{id} - owner edits the text.
 @router.patch("/{course_id}/announcements/{announcement_id}", response_model=AnnouncementResponse)
 def update_announcement(
     course_id: int,
@@ -139,6 +147,7 @@ def update_announcement(
     return _to_response(announcement)
 
 
+# DELETE .../announcements/{id} - owner deletes it.
 @router.delete("/{course_id}/announcements/{announcement_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_announcement(
     course_id: int,

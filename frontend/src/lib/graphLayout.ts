@@ -13,6 +13,7 @@
 //      leaves each row in arbitrary insertion order, which is what produced the
 //      fan of long edges crossing the whole canvas from a single hub concept.
 
+// Minimal node/edge shapes the layout needs.
 export interface LayoutNode { id: string }
 export interface LayoutEdge { source: string; target: string }
 
@@ -21,8 +22,10 @@ export interface LayoutEdge { source: string; target: string }
 export const H_SPACING = 210;
 export const V_SPACING = 220;
 
+// Number of down+up ordering sweeps; a few is enough to settle.
 const BARYCENTER_PASSES = 4;
 
+// Output: x/y per node id, the level (row) per node id, and the ordered rows.
 export interface LayoutResult {
   positions: Record<string, { x: number; y: number }>;
   levels: Record<string, number>;
@@ -30,10 +33,13 @@ export interface LayoutResult {
   rows: string[][];
 }
 
+/** Computes node positions: assigns rows by longest prerequisite path, orders each row
+ *  to reduce edge crossings, then centres rows on a shared axis. */
 export function layoutPrerequisiteGraph(
   nodes: LayoutNode[],
   edges: LayoutEdge[],
 ): LayoutResult {
+  // Build adjacency (children), parents and in-degree lookups.
   const ids = nodes.map(n => n.id);
 
   const adj: Record<string, string[]> = {};
@@ -66,12 +72,14 @@ export function layoutPrerequisiteGraph(
   // Anything unreached (only possible inside a cycle) is pinned to the top row.
   ids.forEach(id => { if (levels[id] === undefined) levels[id] = 0; });
 
+  // Group node ids by level (row).
   const groups: Record<number, string[]> = {};
   ids.forEach(id => { (groups[levels[id]] ||= []).push(id); });
 
   const levelKeys = Object.keys(groups).map(Number).sort((a, b) => a - b);
   const indexIn = (lvl: number, id: string) => groups[lvl].indexOf(id);
 
+  // Reorders one row by the average position of each node's neighbours in the adjacent row.
   const sortByBarycenter = (
     lvl: number,
     neighbourLvl: number,
@@ -89,6 +97,7 @@ export function layoutPrerequisiteGraph(
     groups[lvl] = [...groups[lvl]].sort((a, b) => scores.get(a)! - scores.get(b)!);
   };
 
+  // Stage 2: alternate top-down (using parents) and bottom-up (using children) sweeps.
   for (let pass = 0; pass < BARYCENTER_PASSES; pass++) {
     for (let i = 1; i < levelKeys.length; i++) {
       sortByBarycenter(levelKeys[i], levelKeys[i - 1], parents);
@@ -103,6 +112,7 @@ export function layoutPrerequisiteGraph(
   const widestRow = Math.max(...levelKeys.map(k => groups[k].length));
   const canvasCentre = ((widestRow - 1) * H_SPACING) / 2 + 120;
 
+  // Convert level/slot into pixel coordinates.
   const positions: Record<string, { x: number; y: number }> = {};
   ids.forEach(id => {
     const lvl = levels[id];

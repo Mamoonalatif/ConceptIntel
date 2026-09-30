@@ -15,6 +15,7 @@ from app.auth.routes import get_current_user, get_current_admin, get_current_pro
 from app.outcomes import schemas, services
 from app.content_processing.pipeline_service import get_course_outline_text
 
+# Shared by all outcome endpoints; mounted under /outcomes.
 router = APIRouter(prefix="/outcomes", tags=["Outcomes (CLO/PLO/GA)"])
 
 
@@ -32,11 +33,13 @@ def get_current_curriculum_editor(current_user: User = Depends(get_current_user)
 # ── Graduate Attributes (global, admin-managed) ───────────────────────────
 @router.get("/gas", response_model=list[schemas.GAOut])
 def list_gas(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """All Graduate Attributes, ordered by code."""
     return db.query(GraduateAttribute).order_by(GraduateAttribute.code.asc()).all()
 
 
 @router.post("/gas", response_model=schemas.GAOut, status_code=status.HTTP_201_CREATED)
 def create_ga(payload: schemas.GACreate, db: Session = Depends(get_db), _admin: User = Depends(get_current_admin)):
+    """Admin creates a Graduate Attribute (unique code) and mirrors it to Neo4j (best effort)."""
     if db.query(GraduateAttribute).filter(GraduateAttribute.code == payload.code).first():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"A GA with code '{payload.code}' already exists.")
     ga = GraduateAttribute(code=payload.code, title=payload.title, description=payload.description)
@@ -52,6 +55,7 @@ def create_ga(payload: schemas.GACreate, db: Session = Depends(get_db), _admin: 
 
 @router.delete("/gas/{ga_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_ga(ga_id: int, db: Session = Depends(get_db), _admin: User = Depends(get_current_admin)):
+    """Admin deletes a GA, its PLO links, and its Neo4j node."""
     ga = db.query(GraduateAttribute).filter(GraduateAttribute.id == ga_id).first()
     if not ga:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Graduate Attribute not found")
@@ -67,6 +71,7 @@ def delete_ga(ga_id: int, db: Session = Depends(get_db), _admin: User = Depends(
 
 # ── Program Learning Outcomes ─────────────────────────────────────────────
 def _plo_to_out(plo: PLO, db: Session) -> schemas.PLOOut:
+    """Build a PLOOut including the ids of the GAs it maps to."""
     ga_ids = [m.ga_id for m in db.query(PLOGAMap).filter(PLOGAMap.plo_id == plo.id).all()]
     return schemas.PLOOut(
         id=plo.id, program_id=plo.program_id, code=plo.code, title=plo.title,
@@ -76,6 +81,7 @@ def _plo_to_out(plo: PLO, db: Session) -> schemas.PLOOut:
 
 @router.get("/plos", response_model=list[schemas.PLOOut])
 def list_plos(program_id: Optional[int] = None, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """List PLOs, optionally only those of one program."""
     q = db.query(PLO)
     if program_id is not None:
         q = q.filter(PLO.program_id == program_id)
@@ -84,6 +90,7 @@ def list_plos(program_id: Optional[int] = None, db: Session = Depends(get_db), c
 
 @router.post("/plos", response_model=schemas.PLOOut, status_code=status.HTTP_201_CREATED)
 def create_plo(payload: schemas.PLOCreate, db: Session = Depends(get_db), scope=Depends(get_current_program_coordinator)):
+    """Program coordinator creates a PLO (only within programs they coordinate); synced to Neo4j."""
     if scope.program_ids is not None and payload.program_id not in scope.program_ids:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You are not a coordinator of this program.")
     if db.query(PLO).filter(PLO.program_id == payload.program_id, PLO.code == payload.code).first():
@@ -101,6 +108,7 @@ def create_plo(payload: schemas.PLOCreate, db: Session = Depends(get_db), scope=
 
 @router.put("/plos/{plo_id}/gas", response_model=schemas.PLOOut)
 def set_plo_gas(plo_id: int, payload: schemas.PLOGALinkRequest, db: Session = Depends(get_db), scope=Depends(get_current_program_coordinator)):
+    """Replace which GAs a PLO maps to (coordinator-scoped), in Postgres then Neo4j."""
     plo = db.query(PLO).filter(PLO.id == plo_id).first()
     if not plo:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="PLO not found")
@@ -120,6 +128,7 @@ def set_plo_gas(plo_id: int, payload: schemas.PLOGALinkRequest, db: Session = De
 
 @router.delete("/plos/{plo_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_plo(plo_id: int, db: Session = Depends(get_db), scope=Depends(get_current_program_coordinator)):
+    """Delete a PLO along with its GA and CLO links (coordinator-scoped) and its Neo4j node."""
     plo = db.query(PLO).filter(PLO.id == plo_id).first()
     if not plo:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="PLO not found")
@@ -138,6 +147,7 @@ def delete_plo(plo_id: int, db: Session = Depends(get_db), scope=Depends(get_cur
 
 # ── Course Learning Outcomes ──────────────────────────────────────────────
 def _clo_to_out(clo: CLO, db: Session) -> schemas.CLOOut:
+    """Build a CLOOut including the ids of the PLOs it maps to."""
     plo_ids = [m.plo_id for m in db.query(CLOPLOMap).filter(CLOPLOMap.clo_id == clo.id).all()]
     return schemas.CLOOut(
         id=clo.id, catalog_id=clo.catalog_id, code=clo.code, title=clo.title,
@@ -156,6 +166,7 @@ def list_clos(catalog_id: int, db: Session = Depends(get_db), current_user: User
 
 @router.post("/clos", response_model=schemas.CLOOut, status_code=status.HTTP_201_CREATED)
 def create_clo(payload: schemas.CLOCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_curriculum_editor)):
+    """A curriculum editor creates a CLO (code unique per catalog subject); synced to Neo4j."""
     if db.query(CLO).filter(CLO.catalog_id == payload.catalog_id, CLO.code == payload.code).first():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"CLO code '{payload.code}' already exists for this course.")
     clo = CLO(
@@ -174,6 +185,7 @@ def create_clo(payload: schemas.CLOCreate, db: Session = Depends(get_db), curren
 
 @router.put("/clos/{clo_id}/plos", response_model=schemas.CLOOut)
 def set_clo_plos(clo_id: int, payload: schemas.CLOPLOLinkRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_curriculum_editor)):
+    """Replace which PLOs a CLO maps to, in Postgres then Neo4j."""
     clo = db.query(CLO).filter(CLO.id == clo_id).first()
     if not clo:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="CLO not found")
@@ -191,6 +203,7 @@ def set_clo_plos(clo_id: int, payload: schemas.CLOPLOLinkRequest, db: Session = 
 
 @router.delete("/clos/{clo_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_clo(clo_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_curriculum_editor)):
+    """Delete a CLO with its PLO and concept links, and its Neo4j node."""
     clo = db.query(CLO).filter(CLO.id == clo_id).first()
     if not clo:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="CLO not found")

@@ -1,3 +1,5 @@
+# File upload endpoints for course material: upload, list, semantic search, download, replace, delete
+# and re-process. Uploaded files are parsed and fed to the RAG pipeline by a background task.
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks, status
 from fastapi.responses import FileResponse
 from fastapi import Response
@@ -5,7 +7,6 @@ from sqlalchemy.orm import Session
 from typing import List
 from pathlib import Path
 
-from app.config import settings
 from app.database.connection import get_db, SessionLocal
 from app.database.models import UploadedFile, Course, User
 from app.upload.schemas import UploadedFileResponse
@@ -14,7 +15,6 @@ from app.upload.services import (
     download_file_from_supabase,
     download_file_from_s3,
     store_file,
-    download_stored_file,
     delete_stored_file,
     get_content_type
 )
@@ -27,6 +27,7 @@ from app.notifications.types import NotificationType
 
 router = APIRouter(prefix="/files", tags=["Content Upload"])
 
+# Allowed upload file types (checked by extension, then verified by content sniffing).
 SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".pptx", ".ppt", ".txt", ".jpg", ".jpeg", ".png"}
 MAX_FILE_SIZE = 25 * 1024 * 1024  # 25 MB
 
@@ -50,6 +51,7 @@ def process_uploaded_file_task(file_id: int):
     teacher review -> coordinator approval before anything reaches Neo4j. Auto-firing
     the old direct-write extraction here would let every upload silently bypass that
     review gate."""
+    # Background tasks run outside a request, so they open (and later close) their own DB session.
     db: Session = SessionLocal()
     temp_filepath = None
     try:
@@ -64,6 +66,7 @@ def process_uploaded_file_task(file_id: int):
         is_s3 = file_url.startswith("s3://")
         is_supabase = file_url.startswith("supabase://")
 
+        # Remote files are downloaded to a temp file so the extractors can read them from disk.
         if is_s3 or is_supabase:
             # Download to a temporary file. Kept around (not deleted immediately)
             # since the RAG pipeline's image extraction also needs to read the
@@ -79,6 +82,7 @@ def process_uploaded_file_task(file_id: int):
         else:
             filepath = Path(file_url)
 
+        # Step 1: extract raw text (OCR for scanned PDFs/images) and mark the file Completed.
         extracted_text, used_ocr = extract_text_from_file(filepath, file_record.file_type)
 
         file_record.extracted_text = extracted_text
@@ -87,6 +91,7 @@ def process_uploaded_file_task(file_id: int):
         db.commit()
 
         try:
+            # Step 2: tell the teacher and students the file is ready (best-effort).
             course = db.query(Course).filter(Course.id == file_record.course_id).first()
             if course:
                 create_notification(
@@ -110,6 +115,7 @@ def process_uploaded_file_task(file_id: int):
         # over it), so it's wrapped separately. rag_status is what actually records
         # the outcome now - `status` above only ever meant "text extraction done".
         try:
+            # Step 3: RAG ingestion. Outlines are skipped (never embedded); normal materials are chunked and embedded.
             from app.rag.pipeline import process_file_for_rag
             course = db.query(Course).filter(Course.id == file_record.course_id).first()
             if file_record.material_kind == "outline":
@@ -188,6 +194,8 @@ def process_uploaded_file_task(file_id: int):
         db.close()
 
 
+# POST /files/upload/{course_id} - teacher uploads a file; validated, stored, saved as a record, and
+# processed in the background (see docstring for material_kind).
 @router.post("/upload/{course_id}", response_model=UploadedFileResponse, status_code=status.HTTP_201_CREATED)
 def upload_file(
     course_id: int,
@@ -288,6 +296,7 @@ def upload_file(
     return new_file
 
 
+# GET /files/course/{id}/search - semantic (vector) search over the course's chunks.
 @router.get("/course/{course_id}/search")
 def search_course_content(
     course_id: int,
@@ -308,6 +317,7 @@ def search_course_content(
     return retrieve(db, course_id, q)
 
 
+# GET /files/course/{id} - metadata for every file in a course.
 @router.get("/course/{course_id}", response_model=List[UploadedFileResponse])
 def list_course_files(
     course_id: int,
@@ -325,6 +335,7 @@ def list_course_files(
     return db.query(UploadedFile).filter(UploadedFile.course_id == course_id).all()
 
 
+# GET /files/{id} - streams a file from S3, Supabase or local disk after an access check.
 @router.get("/{id}")
 def download_file(
     id: int,
@@ -383,6 +394,7 @@ def download_file(
     )
 
 
+# DELETE /files/{id} - owner deletes the stored file and its metadata row.
 @router.delete("/{id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_file(
     id: int,
@@ -410,6 +422,7 @@ def delete_file(
     return None
 
 
+# PUT /files/{id} - owner swaps in a new file and re-queues processing.
 @router.put("/{id}", response_model=UploadedFileResponse)
 def replace_file(
     id: int,
@@ -491,6 +504,7 @@ def replace_file(
     return file_record
 
 
+# POST /files/{id}/process - owner re-runs text extraction and RAG ingestion.
 @router.post("/{id}/process", response_model=UploadedFileResponse)
 def reprocess_file(
     id: int,

@@ -13,7 +13,7 @@ being stored and only failing later when a student sits the exam.
 import json
 import logging
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from app.config import settings
 from app.content_processing.generation_service import _get_client, openrouter_payment_error_message, _reasoning_extra_body
@@ -22,6 +22,7 @@ from app.question_bank import service as qb
 
 logger = logging.getLogger("conceptintel.question_bank.generation")
 
+# Prompt rules common to every question type.
 _SHARED_RULES = """You are an expert university exam writer producing questions on ONE concept.
 
 Rules that apply to every question:
@@ -33,6 +34,7 @@ Rules that apply to every question:
 - Never refer to "the text", "the excerpt" or "the passage" - the student cannot see them.
 """
 
+# One prompt per question type, each specifying the exact JSON shape the model must return.
 _TYPE_PROMPTS = {
     "single_choice": """Produce multiple-choice questions with EXACTLY 4 options and exactly one correct
 answer. Each wrong option must be a specific, plausible misconception a real student
@@ -75,6 +77,7 @@ Respond ONLY with JSON:
 {"questions": [{"prompt": "Match each term to its definition.", "pairs": [{"left": "...", "right": "..."}], "explanation": "..."}]}""",
 }
 
+# Extra instruction appended to the system prompt depending on requested difficulty.
 _DIFFICULTY_GUIDANCE = {
     "Easy": "TARGET DIFFICULTY: EASY - recall and recognition of the core definition, one step, no traps.",
     "Medium": "TARGET DIFFICULTY: MEDIUM - apply the concept to a concrete situation or relate it to a neighbouring idea.",

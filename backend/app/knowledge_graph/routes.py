@@ -1,7 +1,10 @@
+# Concept-graph API routes (mounted at /graph): view the graph, approve/reject it, and propose edits.
+# Every change is only a *proposal* stored in the DB; a course coordinator must approve it before it is
+# written to Neo4j (see revision_service.py).
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from app.database.connection import get_db
-from app.database.models import Course, CourseCatalog, UploadedFile, User, GraphRevision, GraphBuildJob, GraphEditProposal, CLO, ConceptCLOMap
+from app.database.models import Course, CourseCatalog, User, GraphRevision, GraphBuildJob, GraphEditProposal, CLO, ConceptCLOMap
 from app.knowledge_graph.schemas import (
     ConceptNodeCreate, ConceptNodeUpdate, RelationshipCreate, GraphResponse,
     CourseGraphStatusResponse, EditProposalResponse, MaterialGenerateRequest, MaterialEditRequest,
@@ -144,6 +147,7 @@ def reject_course_graph(
 
 
 def _get_owned_course(db: Session, course_id: int, current_teacher: User) -> Course:
+    """Loads the course only if the current teacher owns it, else 404."""
     course = db.query(Course).filter(Course.id == course_id, Course.teacher_id == current_teacher.id).first()
     if not course:
         raise HTTPException(

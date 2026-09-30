@@ -18,6 +18,7 @@ import tiktoken
 
 _ENCODER = tiktoken.get_encoding("cl100k_base")
 
+# Chunk sizing knobs: ideal size, minimum/maximum size, and fraction shared between neighbours.
 TARGET_TOKENS = 450
 MIN_TOKENS = 100
 MAX_TOKENS = 900
@@ -27,6 +28,7 @@ _SENTENCE_SPLIT = re.compile(r'(?<=[.!?])\s+(?=[A-Z0-9"\'])')
 _PARAGRAPH_SPLIT = re.compile(r"\n\s*\n")
 
 
+# One retrievable piece of a document plus the metadata needed to cite and dedup it.
 @dataclass
 class Chunk:
     text: str
@@ -39,19 +41,23 @@ class Chunk:
     def __post_init__(self):
         # Hash the normalized text (not raw) so trivial whitespace differences don't
         # produce a different hash for otherwise-identical content.
+        """Computes chunk_hash automatically after the dataclass is constructed."""
         normalized = " ".join(self.text.split()).lower()
         self.chunk_hash = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
 def count_tokens(text: str) -> int:
+    """Returns how many tokens (cl100k_base encoding) the text contains."""
     return len(_ENCODER.encode(text))
 
 
 def _split_sentences(paragraph: str) -> list[str]:
+    """Splits a paragraph into sentences at . ! ? followed by a capital/digit/quote."""
     return [s.strip() for s in _SENTENCE_SPLIT.split(paragraph) if s.strip()]
 
 
 def _split_paragraphs(text: str) -> list[str]:
+    """Splits text into paragraphs on blank lines."""
     return [p.strip() for p in _PARAGRAPH_SPLIT.split(text) if p.strip()]
 
 

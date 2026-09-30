@@ -43,6 +43,7 @@ from app.database.models import ContentChunk, Course, UploadedFile
 from app.rag.embeddings import embed_query
 from app.rag.metadata import build_citation
 
+# System prompt forcing answers to stay within the retrieved excerpts (hallucination guard).
 GROUNDED_ANSWER_SYSTEM_PROMPT = (
     "Answer using ONLY the provided course material excerpts. If the excerpts don't "
     "contain enough information to answer, say \"I couldn't find this in the uploaded "
@@ -51,6 +52,7 @@ GROUNDED_ANSWER_SYSTEM_PROMPT = (
 )
 
 
+# Core similarity search: embeds the query, runs a pgvector cosine query, applies the threshold, builds citations.
 def retrieve(
     db: Session,
     course_id: Optional[int] = None,

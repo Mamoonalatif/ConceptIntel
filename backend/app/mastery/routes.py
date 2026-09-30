@@ -1,3 +1,5 @@
+# Mastery API: read-only endpoints exposing per-student, per-concept mastery scores
+# (written by graders in service.py) to students and to teachers/coordinators/admins.
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 

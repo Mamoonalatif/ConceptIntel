@@ -80,6 +80,7 @@ def _detect_image_mime(image_bytes: bytes) -> str:
 
 
 def extract_images_from_pptx(filepath: Path) -> list[bytes]:
+    """Collects embedded picture blobs from every slide, skipping tiny images, up to MAX_IMAGES_PER_FILE."""
     from pptx import Presentation
     from pptx.enum.shapes import MSO_SHAPE_TYPE
 
@@ -100,6 +101,7 @@ def extract_images_from_pptx(filepath: Path) -> list[bytes]:
 
 
 def extract_images_from_pdf(filepath: Path) -> list[bytes]:
+    """Collects embedded image blobs from every PDF page via PyMuPDF, skipping tiny ones, up to the cap."""
     import fitz  # PyMuPDF
 
     images = []
@@ -148,6 +150,7 @@ def extract_images_from_docx(filepath: Path) -> list[bytes]:
 
 
 def extract_images(filepath: Path, file_type: str) -> list[bytes]:
+    """Dispatches to the right image extractor for the file type; other types yield no images."""
     if file_type == "pptx":
         return extract_images_from_pptx(filepath)
     if file_type == "pdf":
@@ -157,6 +160,7 @@ def extract_images(filepath: Path, file_type: str) -> list[bytes]:
     return []
 
 
+# Instruction sent to the vision model alongside each image.
 CAPTION_PROMPT_TEMPLATE = """This image is from a {course_name} lecture slide/document. \
 Describe it in 1-3 sentences, focused on the academic concept it illustrates \
 (e.g. a diagram, formula, or chart). If it's purely decorative (logo, background), \

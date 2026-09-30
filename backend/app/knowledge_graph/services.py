@@ -1,3 +1,5 @@
+# Neo4j graph service: stores and queries the concept graph (Concept nodes joined by PREREQUISITE edges).
+# Everything is keyed by catalog_id so all sections of one catalog course share a single graph.
 import re
 import time
 import logging
@@ -8,6 +10,7 @@ from app.config import settings
 import os
 import certifi
 
+# Point the TLS stack at certifi CA certificates so the Neo4j Aura (neo4j+s://) connection verifies.
 os.environ["SSL_CERT_FILE"] = certifi.where()
 
 logger = logging.getLogger("conceptintel.graph")
@@ -26,6 +29,7 @@ def build_node_id(catalog_id: int, name: str) -> str:
     return f"{catalog_id}_{name.lower().strip().replace(' ', '_')}"
 
 
+# Wrapper around the Neo4j driver with lazy connection, automatic reconnect and graceful empty results.
 class Neo4jService:
     """
     All Concept nodes/relationships are keyed by `catalog_id` (CourseCatalog.id), not
@@ -95,10 +99,12 @@ class Neo4jService:
         self._connect()
 
     def close(self):
+        """Closes the underlying driver connection if one is open."""
         if self.driver:
             self.driver.close()
 
     def get_session(self):
+        """Returns a new Neo4j session, raising ConnectionError if the database is unreachable."""
         self._ensure_connected()
         if not self.driver:
             raise ConnectionError("Neo4j database connection is not available.")
@@ -137,6 +143,7 @@ class Neo4jService:
                 raise ConnectionError(f"Neo4j query failed: {e}") from e
             return []
 
+    # Single-item writes (MERGE creates the node/edge if missing, otherwise updates it).
     def create_concept_node(self, catalog_id: int, name: str, description: str, difficulty: str,
                             importance_score: int = 5, learning_outcomes: str = "", material: str = ""):
         """Merge/Create a Concept node in the graph with extended properties."""
@@ -431,6 +438,7 @@ class Neo4jService:
         )
 
 
+# Shared singleton used by every route/service; it connects lazily on first use.
 # Initialize global Neo4j service instance
 neo4j_service = Neo4jService()
 
@@ -462,27 +470,3 @@ def _find_existing_match(name: str, existing_names: List[str], threshold: int = 
         if len(norm_new) >= 4 and (norm_ex.startswith(norm_new) or norm_new.startswith(norm_ex)):
             return existing
     return None
-
-
-# ─────────────────────────────────────────────
-#  MOCK GRAPH (Neo4j offline fallback)
-# ─────────────────────────────────────────────
-
-def get_mock_graph_data(catalog_id: int) -> Dict[str, List[Dict[str, Any]]]:
-    """Generates complete mock node/edge graph data when Neo4j is offline."""
-    nodes = [
-        {"id": f"{catalog_id}_fundamentals",    "name": "Fundamentals of Programming",   "description": "Variables, operations, control flows, and basic syntax elements.",                             "difficulty": "Easy",   "catalog_id": catalog_id, "importance_score": 9, "learning_outcomes": "Understand basic programming constructs."},
-        {"id": f"{catalog_id}_functions",        "name": "Functions & Modularity",        "description": "Declaring functions, parameters, return types, and local/global scope.",                      "difficulty": "Easy",   "catalog_id": catalog_id, "importance_score": 8, "learning_outcomes": "Design modular, reusable functions."},
-        {"id": f"{catalog_id}_oop_concepts",     "name": "Object-Oriented Design",        "description": "Classes, objects, attributes, methods, encapsulation, and access control.",                   "difficulty": "Medium", "catalog_id": catalog_id, "importance_score": 9, "learning_outcomes": "Implement OOP principles in code."},
-        {"id": f"{catalog_id}_inheritance",      "name": "Inheritance & Polymorphism",    "description": "Deriving sub-classes, method overriding, super calls, and interface polymorphism.",           "difficulty": "Medium", "catalog_id": catalog_id, "importance_score": 7, "learning_outcomes": "Apply inheritance for code reuse."},
-        {"id": f"{catalog_id}_data_structures",  "name": "Basic Data Structures",         "description": "Arrays, Lists, Maps, Queues, Stacks, and introductory complexity analysis.",                 "difficulty": "Hard",   "catalog_id": catalog_id, "importance_score": 8, "learning_outcomes": "Select appropriate data structures for problems."},
-        {"id": f"{catalog_id}_algorithms",       "name": "Sorting & Searching Algorithms","description": "Bubble sort, merge sort, binary search, and Big-O notation fundamentals.",                   "difficulty": "Hard",   "catalog_id": catalog_id, "importance_score": 7, "learning_outcomes": "Analyze algorithm efficiency using Big-O."},
-    ]
-    edges = [
-        {"id": f"{catalog_id}_fund->func",      "source": f"{catalog_id}_fundamentals",   "target": f"{catalog_id}_functions"},
-        {"id": f"{catalog_id}_func->oop",       "source": f"{catalog_id}_functions",       "target": f"{catalog_id}_oop_concepts"},
-        {"id": f"{catalog_id}_oop->inherit",    "source": f"{catalog_id}_oop_concepts",    "target": f"{catalog_id}_inheritance"},
-        {"id": f"{catalog_id}_oop->ds",         "source": f"{catalog_id}_oop_concepts",    "target": f"{catalog_id}_data_structures"},
-        {"id": f"{catalog_id}_ds->algo",        "source": f"{catalog_id}_data_structures", "target": f"{catalog_id}_algorithms"},
-    ]
-    return {"nodes": nodes, "edges": edges}

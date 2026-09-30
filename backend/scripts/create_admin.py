@@ -29,6 +29,7 @@ from app.supabase_auth import is_supabase_auth_configured, create_supabase_user
 
 
 def main():
+    """Reads email, full name and password from CLI flags or env vars, ensures tables exist and creates the admin user."""
     parser = argparse.ArgumentParser(description="Seed an admin user.")
     parser.add_argument("--email", default=os.environ.get("ADMIN_EMAIL"))
     parser.add_argument("--full-name", default=os.environ.get("ADMIN_FULL_NAME"))

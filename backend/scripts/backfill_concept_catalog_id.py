@@ -35,6 +35,7 @@ ID_PREFIX_RE = re.compile(r"^(\d+)_")
 
 
 def main():
+    """Finds Concept nodes whose catalog_id is NULL and sets it from the catalog id encoded in their id property."""
     neo4j_service._ensure_connected()
     if not neo4j_service.driver:
         print("Could not connect to Neo4j - aborting.")

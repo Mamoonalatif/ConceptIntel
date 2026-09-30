@@ -4,6 +4,7 @@ unmatched frontend icon) and so a future admin-facing "notification settings"
 screen has one place to enumerate all possible types."""
 
 
+# String constants for every notification type; the comment on each line says who receives it.
 class NotificationType:
     ENROLLMENT_JOINED = "enrollment_joined"                # -> student
     ENROLLMENT_NEW_STUDENT = "enrollment_new_student"       # -> teacher
@@ -38,6 +39,7 @@ class NotificationType:
 
 
 # priority drives icon/color on the frontend: "info" | "success" | "warning" | "error"
+# Default priority (icon/colour) for each notification type.
 DEFAULT_PRIORITY = {
     NotificationType.ENROLLMENT_JOINED: "success",
     NotificationType.ENROLLMENT_NEW_STUDENT: "info",

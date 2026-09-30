@@ -1,3 +1,6 @@
+// ContentViewerPage: full-page viewer for one AI-generated item (flashcards, quiz, study
+// guide) at /content/:courseId/:contentId. Teachers also get the answer key, a solve
+// preview, student attempt stats and export buttons.
 import React, { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
@@ -14,10 +17,12 @@ import { apiErrorMessage } from '../lib/apiError';
 import { EmptyStateIllustration } from '../components/illustrations';
 import { FoxSpinner } from '../components/FoxSpinner';
 
+// Icon shown in the header for each content type.
 const TYPE_ICON: Record<string, React.ElementType> = {
   flashcard: Layers, mcq: ListChecks, quiz: ListChecks, study_guide: BookOpen,
 };
 
+// Maps a difficulty string to its CSS badge class (defaults to "medium").
 const badgeClassFor = (d: string) => `badge-${(d || 'medium').toLowerCase()}`;
 
 /**
@@ -44,6 +49,7 @@ export const ContentViewerPage: React.FC = () => {
   // exactly as a student sees it before publishing.
   const [mode, setMode] = useState<'key' | 'solve'>('key');
 
+  // Fetch the content item from the URL params.
   useEffect(() => {
     (async () => {
       try {
@@ -58,11 +64,13 @@ export const ContentViewerPage: React.FC = () => {
 
   const isQuiz = item?.content_type === 'mcq' || item?.content_type === 'quiz';
 
+  // Teachers only: load the list of student attempts for quiz-type content.
   useEffect(() => {
     if (!isTeacher || !isQuiz || !item) return;
     contentGenerationService.attempts(cId, item.id).then(setAttempts).catch(() => setAttempts([]));
   }, [isTeacher, isQuiz, item, cId]);
 
+  // Summary numbers (attempt count, distinct students, average/best/worst score) from the attempts list.
   const stats = useMemo(() => {
     if (!attempts?.length) return null;
     const scores = attempts.map((a) => a.score);

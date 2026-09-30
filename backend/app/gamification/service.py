@@ -15,6 +15,7 @@ from app.database.models import (
 
 
 def _get_or_create_points_row(db: Session, student_id: int, course_id: int) -> StudentPoints:
+    """Return the student's StudentPoints row for the course, creating a zeroed one if missing."""
     row = (
         db.query(StudentPoints)
         .filter(StudentPoints.student_id == student_id, StudentPoints.course_id == course_id)
@@ -62,6 +63,8 @@ def award_points(
 
 
 def _award_if_new(db: Session, student_id: int, course_id: int, badge_code: str) -> None:
+    """Give a badge (and its bonus points) only if the student has not already earned it
+    in this course."""
     badge = db.query(Badge).filter(Badge.code == badge_code).first()
     if not badge:
         return  # catalog not seeded yet - fails safe rather than crashing grading
@@ -136,6 +139,7 @@ def check_and_award_badges(db: Session, student_id: int, course_id: int) -> None
 
 
 def get_leaderboard(db: Session, course_id: int, limit: int = 10) -> List[StudentPoints]:
+    """Top `limit` StudentPoints rows for a course, highest total points first."""
     return (
         db.query(StudentPoints)
         .filter(StudentPoints.course_id == course_id)
@@ -146,6 +150,7 @@ def get_leaderboard(db: Session, course_id: int, limit: int = 10) -> List[Studen
 
 
 def get_student_badges(db: Session, student_id: int, course_id: int = None) -> List[StudentBadge]:
+    """A student's earned badges (optionally for one course), newest first."""
     query = db.query(StudentBadge).filter(StudentBadge.student_id == student_id)
     if course_id is not None:
         query = query.filter(StudentBadge.course_id == course_id)

@@ -1,3 +1,5 @@
+// SettingsPage: account settings. Profile photo, change password, two-factor
+// authentication on/off, and per-type notification preferences (saved on toggle).
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AppShell, type NavItem } from '../components/AppShell';
@@ -81,6 +83,7 @@ const PREFERENCE_FIELDS: { key: keyof NotificationPreferences; title: string; de
   },
 ];
 
+/** Page component: owns notification prefs, 2FA status and modal visibility state. */
 const SettingsPage: React.FC = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -94,6 +97,7 @@ const SettingsPage: React.FC = () => {
   const [show2faSetup, setShow2faSetup] = useState(false);
   const [show2faDisable, setShow2faDisable] = useState(false);
 
+  // On mount, load notification preferences and the 2FA status in parallel.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -119,6 +123,7 @@ const SettingsPage: React.FC = () => {
     };
   }, []);
 
+  // Flips one notification preference and saves it to the backend.
   const handleToggle = async (key: keyof NotificationPreferences, next: boolean) => {
     if (!prefs) return;
     const previous = prefs;

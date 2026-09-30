@@ -1,3 +1,5 @@
+// Register: student self-signup page with client-side validation (name, email, password
+// rules, confirmation). Teachers cannot self-register; they use Request Teacher Access.
 import React, { useState } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -9,6 +11,7 @@ import { FoxMascot } from '../components/FoxMascot';
 import type { MascotRole } from '../components/FoxMascot';
 import { Lock, Mail, User, AlertCircle, Loader2, Eye, EyeOff, CheckCircle2, XCircle, ArrowLeft } from 'lucide-react';
 
+// Data for the decorative left panel's role tabs (mascot role/pose, tagline, blurb).
 type RegPanelTab = 'student' | 'teacher' | 'admin';
 
 const REG_PANEL_TABS: { id: RegPanelTab; label: string; tagline: string; desc: string; role: MascotRole; pose: 'focused' | 'confident' | 'happy' }[] = [
@@ -17,6 +20,7 @@ const REG_PANEL_TABS: { id: RegPanelTab; label: string; tagline: string; desc: s
   { id: 'admin', label: 'For Admins', tagline: 'Institutional\nOversight, Simplified', desc: 'Platform-wide control over programs, staff accounts, and access requests.', role: 'admin', pose: 'happy' },
 ];
 
+/** Decorative left panel: role tabs that switch the fox mascot and blurb (purely visual). */
 const RegLeftPanel: React.FC = () => {
   const [active, setActive] = useState<RegPanelTab>('student');
   const tab = REG_PANEL_TABS.find(t => t.id === active)!;
@@ -54,9 +58,11 @@ const RegLeftPanel: React.FC = () => {
   );
 };
 
+// Full name: letters separated by single spaces. The second pattern flags any other character while typing.
 const FULL_NAME_PATTERN = /^[A-Za-z]+(?: [A-Za-z]+)*$/;
 const ILLEGAL_NAME_CHAR_PATTERN = /[^A-Za-z ]/;
 
+/** Page component: the registration form. */
 const Register: React.FC = () => {
   const { register } = useAuth();
   const navigate = useNavigate();
@@ -79,12 +85,14 @@ const Register: React.FC = () => {
   const confirmMatches = confirmPassword.length > 0 && confirmPassword === password;
   const emailInvalid = email.length > 0 && !isValidEmail(email);
 
+  // Checks the name is non-empty and letters/spaces only; sets the inline error and returns validity.
   const validateFullName = (value: string) => {
     if (!value.trim()) { setFullNameError('Full name is required'); return false; }
     if (!FULL_NAME_PATTERN.test(value.trim())) { setFullNameError('Only letters and spaces are allowed'); return false; }
     setFullNameError(''); return true;
   };
 
+  // Live feedback while typing the name: flags illegal characters immediately.
   const handleFullNameChange = (value: string) => {
     setFullName(value);
     if (ILLEGAL_NAME_CHAR_PATTERN.test(value)) {
@@ -92,6 +100,7 @@ const Register: React.FC = () => {
     } else if (fullNameError) { validateFullName(value); }
   };
 
+  // Validates every field, then registers a student account and sends the user to login.
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');

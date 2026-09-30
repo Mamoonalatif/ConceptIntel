@@ -15,14 +15,13 @@ inventing a new signal:
   (see Content Generation module) if any exist, so the plan is actionable, not
   just a list of weak points.
 """
-from typing import Optional
-
 from sqlalchemy.orm import Session
 
 from app.database.models import Course, GeneratedContent
 from app.mastery import service as mastery_service
 from app.knowledge_graph.services import neo4j_service
 
+# Mastery score (0-100) below which a concept counts as a "weak" one worth revising.
 WEAK_MASTERY_THRESHOLD = 65.0
 
 
@@ -34,6 +33,9 @@ def _dependents_count(edges: list[dict], concept_node_id: str) -> int:
 
 
 def build_revision_plan(db: Session, student_id: int, course_id: int, course: Course) -> dict:
+    """Build the ordered revision plan: find weak concepts, flag foundational ones via the
+    graph's prerequisite edges, attach approved materials, and sort (foundational first,
+    then lowest mastery). Returns a dict matching RevisionPlanOut."""
     overall_progress = mastery_service.get_course_average_progress(db, student_id, course_id)
 
     weak_concepts = mastery_service.get_weakest_concepts(

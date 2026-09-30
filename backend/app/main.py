@@ -1,3 +1,4 @@
+# Application entry point: builds the FastAPI app, runs startup seeding, configures CORS and mounts every router.
 import os
 import uvicorn
 import logging
@@ -74,7 +75,7 @@ if not (settings.AWS_ACCESS_KEY_ID and settings.AWS_SECRET_ACCESS_KEY and settin
         "or redeploy. Set SUPABASE_URL+SUPABASE_KEY (or AWS_*) before going live."
     )
 
-# Automatically create PostgreSQL tables on startup
+# Startup step 1: create the PostgreSQL tables (and pgvector extension) if missing
 # Wrapped in try-except so app can still boot even if DB is temporarily unavailable
 try:
     # ContentChunk.embedding is a pgvector column - the `vector` type must exist in
@@ -85,6 +86,13 @@ try:
         conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         conn.commit()
     models.Base.metadata.create_all(bind=engine)
+    # create_all() cannot add columns to an existing table, so the similar-assignment /
+    # misconception columns are ensured here too (idempotent; same as
+    # scripts/add_similarity_misconception_columns.py) - otherwise an existing database
+    # would error on every submission query until that script was run by hand.
+    with engine.begin() as conn:
+        for _col in ("extracted_text", "similarity_json", "misconceptions_json"):
+            conn.execute(text(f"ALTER TABLE assignment_submissions ADD COLUMN IF NOT EXISTS {_col} TEXT"))
     logger.info("Database tables created/verified successfully.")
 except Exception as e:
     logger.error(f"WARNING: Could not create database tables: {e}")
@@ -132,11 +140,13 @@ def seed_course_catalog():
         db.close()
 
 
+# Startup step 2: seed the predefined course catalog
 try:
     seed_course_catalog()
 except Exception as e:
     logger.error(f"WARNING: Course catalog seeding failed: {e}")
 
+# Startup step 3: seed the gamification badge catalog
 try:
     from app.database.connection import SessionLocal as _SessionLocal
     from app.gamification.seed import seed_badges
@@ -149,6 +159,7 @@ try:
 except Exception as e:
     logger.error(f"WARNING: Badge catalog seeding failed: {e}")
 
+# The FastAPI application object; uvicorn serves this as app.main:app
 app = FastAPI(
     title="ConceptIntel API",
     description="Concept Graph-Based Concept Intelligence Platform — Air University, Islamabad",
@@ -160,6 +171,7 @@ app = FastAPI(
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    # Custom 422 handler: flattens Pydantic errors into one readable string (details below).
     """FastAPI's default 422 response shape for a body/query validation failure is
     `{"detail": [{"type", "loc", "msg", "input", "ctx", "url"}, ...]}` - a list of
     structured error OBJECTS, not the plain string every other error response in
@@ -193,7 +205,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Register all routers
+# Register all feature routers; each module owns its own URL paths, all mounted under /api
 app.include_router(auth_router, prefix="/api")
 app.include_router(courses_router, prefix="/api")
 app.include_router(enrollment_router, prefix="/api")
@@ -263,6 +275,7 @@ def _keep_db_pool_warm():
 
 @app.on_event("startup")
 def _start_db_keepalive() -> None:
+    """Startup hook: launch the DB keep-alive and Google-certs prewarm in background daemon threads."""
     threading.Thread(target=_keep_db_pool_warm, daemon=True).start()
     # Same cold-start problem, different resource: see _prewarm_google_certs_cache's
     # own docstring (app/auth/routes.py) for why this also needs to happen at boot
@@ -272,6 +285,7 @@ def _start_db_keepalive() -> None:
 
 @app.get("/")
 def read_root():
+    """Root endpoint: basic API info, handy as a smoke test."""
     return {
         "name": "ConceptIntel API",
         "status": "healthy",

@@ -29,12 +29,14 @@ sys.path.insert(0, "/opt/airflow/backend")
 
 
 def _extract_text(**context):
+    """Airflow task 1: gathers the extracted text for the job (passed as dag_run.conf["job_id"]); result goes to XCom."""
     from app.content_processing.pipeline_service import stage_extract_text
     job_id = context["dag_run"].conf["job_id"]
     return stage_extract_text(job_id)
 
 
 def _clean_and_structure(**context):
+    """Airflow task 2: reads task 1's text from XCom and runs AI cleaning/concept extraction."""
     from app.content_processing.pipeline_service import stage_clean_and_structure
     job_id = context["dag_run"].conf["job_id"]
     combined_text = context["ti"].xcom_pull(task_ids="extract_text")
@@ -42,12 +44,15 @@ def _clean_and_structure(**context):
 
 
 def _diff_and_propose(**context):
+    """Airflow task 3: reads task 2's extractions from XCom, diffs them against the live graph and saves the revision for review."""
     from app.content_processing.pipeline_service import stage_diff_and_propose
     job_id = context["dag_run"].conf["job_id"]
     chunk_extractions = context["ti"].xcom_pull(task_ids="clean_and_structure")
     return stage_diff_and_propose(job_id, chunk_extractions)
 
 
+# DAG definition: three PythonOperator tasks chained extract_text >> clean_and_structure >> diff_and_propose.
+# schedule=None because the backend triggers it on demand through the REST API.
 with DAG(
     dag_id="content_graph_pipeline",
     description="OCR'd text -> AI cleaning/structuring -> diff against the shared catalog graph",

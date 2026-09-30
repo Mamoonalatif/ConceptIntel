@@ -31,6 +31,7 @@ logger = logging.getLogger("conceptintel.exams")
 
 
 def _get_course_or_404(db: Session, course_id: int) -> Course:
+    """Fetch the course by id or raise a 404."""
     course = db.query(Course).filter(Course.id == course_id).first()
     if not course:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
@@ -38,6 +39,7 @@ def _get_course_or_404(db: Session, course_id: int) -> Course:
 
 
 def _get_owned_course(db: Session, course_id: int, teacher: User) -> Course:
+    """Fetch the course and require that this teacher is its instructor (403 otherwise)."""
     course = _get_course_or_404(db, course_id)
     if course.teacher_id != teacher.id:
         raise HTTPException(
@@ -47,6 +49,7 @@ def _get_owned_course(db: Session, course_id: int, teacher: User) -> Course:
 
 
 def _require_student(user: User) -> None:
+    """Raise 403 unless the user is a student (only students sit exams)."""
     if user.role.lower() != "student":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -55,6 +58,7 @@ def _require_student(user: User) -> None:
 
 
 def _to_out(db: Session, exam: Exam) -> ExamOut:
+    """Convert an Exam row into ExamOut, adding question/missing counts and total points."""
     ids = exam_service.exam_question_ids(exam)
     questions = exam_service.load_questions(db, ids)
     return ExamOut(
@@ -98,6 +102,7 @@ def create_exam(
     db: Session = Depends(get_db),
     current_teacher: User = Depends(get_current_teacher),
 ):
+    """Teacher creates a Draft exam from chosen bank questions (ids filtered to this course)."""
     _get_owned_course(db, course_id, current_teacher)
     ids = _validate_question_ids(db, course_id, payload.question_ids)
     exam = Exam(
@@ -138,6 +143,8 @@ def update_exam(
     db: Session = Depends(get_db),
     current_teacher: User = Depends(get_current_teacher),
 ):
+    """Teacher edits an exam; questions and pass mark are locked once anyone has submitted.
+    Publishing requires at least one question."""
     _get_owned_course(db, course_id, current_teacher)
     exam = db.query(Exam).filter(Exam.id == exam_id, Exam.course_id == course_id).first()
     if not exam:
@@ -193,6 +200,7 @@ def delete_exam(
     db: Session = Depends(get_db),
     current_teacher: User = Depends(get_current_teacher),
 ):
+    """Delete an exam and its unsubmitted attempts; refused if students have already sat it."""
     _get_owned_course(db, course_id, current_teacher)
     exam = db.query(Exam).filter(Exam.id == exam_id, Exam.course_id == course_id).first()
     if not exam:
@@ -305,6 +313,9 @@ def submit_exam_attempt(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    """Grade a student's attempt on the server, then feed the result into mastery evidence,
+    CLO/PLO attainment and gamification points (the evidence steps are best-effort and
+    never fail the submission)."""
     course = _get_course_or_404(db, course_id)
     assert_course_access(db, course, current_user)
     _require_student(current_user)
@@ -339,6 +350,7 @@ def submit_exam_attempt(
         logger.warning("Could not record mastery for exam %s: %s", exam.id, e)
 
     try:
+        # Roll each CLO score into the running CLO attainment average, then recompute PLOs.
         touched_clo_ids: set = set()
         for c in result.get("clo_scores", []):
             clo_id = c["clo_id"]

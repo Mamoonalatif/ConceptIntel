@@ -58,6 +58,7 @@ VALID_MODES = ("learn", "test", "match")
 
 
 def _payload(item: GeneratedContent) -> Dict[str, Any]:
+    """Decode the content's JSON payload; {} (with a warning) if it is corrupt."""
     try:
         return json.loads(item.payload_json) or {}
     except (json.JSONDecodeError, TypeError):
@@ -106,6 +107,7 @@ def extract_items(item: GeneratedContent) -> List[Dict[str, Any]]:
 
 
 def _state_map(db: Session, student_id: int, content_id: int) -> Dict[int, StudyCardState]:
+    """Map card index -> this student's saved Leitner state for the content set."""
     rows = db.query(StudyCardState).filter(
         StudyCardState.student_id == student_id,
         StudyCardState.content_id == content_id,

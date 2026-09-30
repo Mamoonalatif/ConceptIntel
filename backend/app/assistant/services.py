@@ -40,8 +40,10 @@ from app.rag.retrieval import format_excerpts, retrieve
 
 logger = logging.getLogger("conceptintel.assistant")
 
+# Text shown when no AI provider could answer.
 FALLBACK_MESSAGE = "The AI assistant isn't configured right now - ask your instructor or check back later."
 
+# Persona and formatting rules given to the model on every chat turn.
 SYSTEM_PROMPT = """You are the AI assistant built into ConceptIntel, a knowledge-graph based
 concept intelligence platform for university courses. You help students and teachers with:
 - Explaining course concepts and answering study questions in plain language.
@@ -69,10 +71,12 @@ fine for warmth, but don't overuse them."""
 HISTORY_WINDOW = 20
 
 
+# Name of the provider every other provider falls back to.
 OPENROUTER_PROVIDER = "openrouter"
 
 
 def _provider() -> str:
+    """Returns the configured AI provider name, lowercased (default openai)."""
     return (settings.AI_PROVIDER or "openai").strip().lower()
 
 
@@ -162,6 +166,7 @@ def _require_content(response) -> str:
 
 
 def _generate_openai_reply(history: List[ChatMessage], new_user_content: str) -> str:
+    """Gets a reply from OpenAI chat completions."""
     client = OpenAI(api_key=settings.OPENAI_API_KEY, timeout=60.0)
 
     response = client.chat.completions.create(

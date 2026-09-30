@@ -13,6 +13,7 @@ import {
 // rejection was completely silent. This shows every submission with its status
 // timeline, the coordinator's reasoning, and the proposed graph itself.
 
+// Label, colour classes and icon for each approval status a graph submission can have.
 const STATUS_STYLES: Record<string, { label: string; className: string; Icon: React.ElementType }> = {
   PendingTeacherReview: { label: 'Awaiting your review', className: 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-500/10 dark:text-amber-400 dark:border-amber-500/30', Icon: Clock },
   PendingCoordinatorApproval: { label: 'Awaiting coordinator approval', className: 'bg-sky-50 text-sky-700 border-sky-200 dark:bg-sky-500/10 dark:text-sky-400 dark:border-sky-500/30', Icon: Clock },
@@ -21,6 +22,7 @@ const STATUS_STYLES: Record<string, { label: string; className: string; Icon: Re
   Rejected: { label: 'Rejected', className: 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-500/10 dark:text-rose-400 dark:border-rose-500/30', Icon: XCircle },
 };
 
+// Friendly names for the manual graph-edit operations a teacher can propose.
 const OPERATION_LABELS: Record<string, string> = {
   create_node: 'New concept',
   update_node: 'Concept update',
@@ -29,12 +31,14 @@ const OPERATION_LABELS: Record<string, string> = {
   delete_relationship: 'Remove prerequisite link',
 };
 
+// Format an ISO timestamp as a readable local date/time (null if missing).
 const formatWhen = (iso: string | null) => {
   if (!iso) return null;
   const d = new Date(iso);
   return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 };
 
+// StatusBadge: coloured pill showing a submission's status (falls back to the raw status text if unknown).
 const StatusBadge: React.FC<{ status: string }> = ({ status }) => {
   const s = STATUS_STYLES[status] || {
     label: status,
@@ -71,6 +75,7 @@ const Timeline: React.FC<{ steps: { label: string; when: string | null; note?: s
   </ol>
 );
 
+// RevisionRow: expandable row for one draft-graph submission: status, timeline of decisions, the proposed graph preview and a concept list.
 const RevisionRow: React.FC<{ revision: GraphRevision }> = ({ revision }) => {
   const [open, setOpen] = useState(false);
   const concepts = revision.diff?.concepts || [];
@@ -145,6 +150,7 @@ const RevisionRow: React.FC<{ revision: GraphRevision }> = ({ revision }) => {
   );
 };
 
+// ProposalRow: one manual graph edit proposal (create/update/delete concept or link) with its status and the coordinator's notes.
 const ProposalRow: React.FC<{ proposal: GraphEditProposal }> = ({ proposal }) => {
   const p = proposal.payload || {};
   const summary = proposal.operation.includes('relationship')
@@ -181,17 +187,20 @@ const ProposalRow: React.FC<{ proposal: GraphEditProposal }> = ({ proposal }) =>
   );
 };
 
+// Props: optional courseId; omitted means all of the teacher's submissions across courses.
 interface GraphSubmissionLogProps {
   /** Omit to show every submission this teacher has made, across all their courses. */
   courseId?: number;
 }
 
+// GraphSubmissionLog: lists the teacher's draft graph submissions and manual edit proposals, loading them from the server.
 export const GraphSubmissionLog: React.FC<GraphSubmissionLogProps> = ({ courseId }) => {
   const [revisions, setRevisions] = useState<GraphRevision[]>([]);
   const [proposals, setProposals] = useState<GraphEditProposal[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
+  // Fetch the submissions; `cancelled` ignores results after unmount, and aborted requests are not reported as errors.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -214,6 +223,7 @@ export const GraphSubmissionLog: React.FC<GraphSubmissionLogProps> = ({ courseId
     return () => { cancelled = true; };
   }, [courseId]);
 
+  // True when there is nothing to show (used for the empty message).
   const isEmpty = revisions.length === 0 && proposals.length === 0;
 
   return (

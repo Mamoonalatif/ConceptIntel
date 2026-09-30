@@ -1,3 +1,5 @@
+// GamePlayerPage: hosts one generated concept game in a sandboxed iframe and records
+// the score the game posts back via postMessage (students only are saved).
 import React, { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { Gamepad2, AlertTriangle, CheckCircle2 } from 'lucide-react';
@@ -41,6 +43,7 @@ export const GamePlayerPage: React.FC = () => {
   // inflate mastery, so only the first score of a session is recorded.
   const recorded = useRef(false);
 
+  // Fetch the game's HTML text from the backend.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -56,6 +59,7 @@ export const GamePlayerPage: React.FC = () => {
     return () => { cancelled = true; };
   }, [id]);
 
+  // Listen for the game's "complete" message, validate/clamp the score and record it once.
   useEffect(() => {
     const onMessage = (e: MessageEvent) => {
       // The frame is sandboxed without allow-same-origin, so its origin serializes to

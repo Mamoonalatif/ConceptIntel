@@ -8,7 +8,6 @@ unset, tracing is a no-op - no call site needs to know or care whether it's
 configured, matching every other optional integration in this codebase (email,
 Google sign-in, image captioning).
 """
-import os
 import logging
 
 from app.config import settings

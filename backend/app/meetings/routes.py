@@ -1,3 +1,4 @@
+# Meeting endpoints: teachers post/edit/delete live-session links for a course; course members list them.
 import threading
 from datetime import datetime
 from typing import List
@@ -16,6 +17,7 @@ from app.notifications.ai_summary import generate_posting_summary
 router = APIRouter(prefix="/courses", tags=["Meetings"])
 
 
+# Converts a Meeting ORM row into the API response model (adds teacher name).
 def _to_response(m: Meeting) -> MeetingResponse:
     return MeetingResponse(
         id=m.id,
@@ -32,6 +34,7 @@ def _to_response(m: Meeting) -> MeetingResponse:
     )
 
 
+# Fetches a course by ID or raises 404.
 def _get_course_or_404(db: Session, course_id: int) -> Course:
     course = db.query(Course).filter(Course.id == course_id).first()
     if not course:
@@ -73,6 +76,7 @@ def _notify_meeting_posted_background(course_id: int, meeting_id: int) -> None:
         print(f"Warning: failed to create meeting notifications: {str(e)}")
 
 
+# GET /courses/{id}/meetings - newest-first list for users with course access.
 @router.get("/{course_id}/meetings", response_model=List[MeetingResponse])
 def list_meetings(
     course_id: int,
@@ -93,6 +97,8 @@ def list_meetings(
     return [_to_response(m) for m in meetings]
 
 
+# POST /courses/{id}/meetings - the course teacher posts a meeting; students are notified in a
+# background thread so the request returns quickly.
 @router.post("/{course_id}/meetings", response_model=MeetingResponse, status_code=status.HTTP_201_CREATED)
 def create_meeting(
     course_id: int,
@@ -118,6 +124,7 @@ def create_meeting(
     return _to_response(meeting)
 
 
+# Loads a meeting in this course and checks the caller posted it (404/403 otherwise).
 def _get_owned_meeting(db: Session, course_id: int, meeting_id: int, teacher_id: int) -> Meeting:
     meeting = (
         db.query(Meeting)
@@ -131,6 +138,7 @@ def _get_owned_meeting(db: Session, course_id: int, meeting_id: int, teacher_id:
     return meeting
 
 
+# PATCH .../meetings/{id} - owner edits any supplied field.
 @router.patch("/{course_id}/meetings/{meeting_id}", response_model=MeetingResponse)
 def update_meeting(
     course_id: int,
@@ -156,6 +164,7 @@ def update_meeting(
     return _to_response(meeting)
 
 
+# DELETE .../meetings/{id} - owner deletes the meeting.
 @router.delete("/{course_id}/meetings/{meeting_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_meeting(
     course_id: int,

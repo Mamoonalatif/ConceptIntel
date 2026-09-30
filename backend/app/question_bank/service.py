@@ -58,6 +58,7 @@ _WS = re.compile(r"\s+")
 
 
 def _norm_text(s: Any) -> str:
+    """Collapse runs of whitespace and trim, so comparisons ignore spacing differences."""
     return _WS.sub(" ", str(s or "")).strip()
 
 

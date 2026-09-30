@@ -1,3 +1,6 @@
+// Course Coordinator dashboard: the final approval stage of the graph workflow.
+// Coordinators review AI-generated graph revisions and teachers' manual graph edits
+// (approve merges them into Neo4j), and can edit basic course info.
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -13,6 +16,7 @@ import {
 } from 'lucide-react';
 import { EmptyStateIllustration } from '../components/illustrations';
 
+// Shape of a course as returned by the courses API (only the fields this page uses).
 interface CourseInstance {
   id: number;
   name: string;
@@ -28,12 +32,14 @@ interface CourseInstance {
   graph_status: string;
 }
 
+// Returns Tailwind classes for the coloured badge showing a course's graph status.
 const graphBadgeClass = (status: string) => {
   if (status === 'Approved') return 'bg-primary-muted text-primary border-primary/20';
   if (status === 'Rejected') return 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-500/10 dark:text-rose-400 dark:border-rose-500/30';
   return 'bg-card text-text-secondary border-border';
 };
 
+// Human-readable labels for each kind of manual graph edit operation.
 const OPERATION_LABELS: Record<string, string> = {
   create_node: 'New concept',
   update_node: 'Concept update',
@@ -101,6 +107,8 @@ const EditProposalDetail: React.FC<{ proposal: GraphEditProposal }> = ({ proposa
   }
 };
 
+// Main page component: lists pending graph revisions, pending manual edits and courses.
+// Decisions made here call the graph API, which performs the actual Neo4j merge.
 const CourseCoordinatorDashboard: React.FC = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -130,6 +138,7 @@ const CourseCoordinatorDashboard: React.FC = () => {
   const [loadingEditProposals, setLoadingEditProposals] = useState(true);
   const [decidingProposalId, setDecidingProposalId] = useState<number | null>(null);
 
+  // Loads all courses; 'silent' skips the spinner/error so background auto-refresh is unobtrusive.
   const fetchCourses = async (silent = false) => {
     if (!silent) setLoading(true);
     try {
@@ -142,6 +151,7 @@ const CourseCoordinatorDashboard: React.FC = () => {
     }
   };
 
+  // Loads AI-pipeline graph revisions waiting for the coordinator's approval.
   const fetchPendingRevisions = async () => {
     setLoadingRevisions(true);
     try {
@@ -154,6 +164,7 @@ const CourseCoordinatorDashboard: React.FC = () => {
     }
   };
 
+  // Loads manual node/relationship edit proposals waiting for approval.
   const fetchPendingEditProposals = async () => {
     setLoadingEditProposals(true);
     try {
@@ -166,14 +177,17 @@ const CourseCoordinatorDashboard: React.FC = () => {
     }
   };
 
+  // Initial data load on mount.
   useEffect(() => {
     fetchCourses();
     fetchPendingRevisions();
     fetchPendingEditProposals();
   }, []);
 
+  // Periodically re-fetch the course list so graph status stays current.
   useAutoRefresh(() => fetchCourses(true));
 
+  // Approve or reject one manual edit proposal, then refresh the queue.
   const handleEditProposalDecision = async (proposalId: number, action: 'approve' | 'reject') => {
     setDecidingProposalId(proposalId);
     setError('');
@@ -191,6 +205,7 @@ const CourseCoordinatorDashboard: React.FC = () => {
     }
   };
 
+  // Approve (merge into graph) or reject the revision open in the review modal, with optional notes.
   const handleCoordinatorDecision = async (action: 'approve' | 'reject') => {
     if (!reviewRevision) return;
     setDecidingRevision(true);
@@ -212,6 +227,7 @@ const CourseCoordinatorDashboard: React.FC = () => {
     }
   };
 
+  // Open the inline edit form for a course, pre-filled with its current values.
   const startEdit = (course: CourseInstance) => {
     setEditingId(course.id);
     setEditStatus(course.status);
@@ -219,8 +235,10 @@ const CourseCoordinatorDashboard: React.FC = () => {
     setEditMaxStudents(course.max_students ? String(course.max_students) : '');
   };
 
+  // Close the inline edit form without saving.
   const cancelEdit = () => setEditingId(null);
 
+  // Save edited status/description/max students for a course, then reload the list.
   const saveEdit = async (id: number) => {
     setSavingEdit(true);
     setError('');
@@ -239,6 +257,7 @@ const CourseCoordinatorDashboard: React.FC = () => {
     }
   };
 
+  // Sidebar navigation entries for the app shell.
   const navItems: NavItem[] = [
     { key: 'courses', label: 'Courses', icon: Network, active: true },
     // Coordinator authority is layered on top of the teacher role, not a

@@ -1,3 +1,4 @@
+# Course service helpers: currently the cascade delete used when a course is removed.
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 from app.database.models import (

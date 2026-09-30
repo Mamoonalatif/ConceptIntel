@@ -28,6 +28,7 @@ from app.observability import trace_ai_call
 
 logger = logging.getLogger("conceptintel.notifications.ai_summary")
 
+# Human-readable label for each post type used in prompts and fallback text.
 _POST_TYPE_LABELS = {
     "announcement": "announcement",
     "assignment": "assignment",
@@ -35,6 +36,7 @@ _POST_TYPE_LABELS = {
     "meeting": "meeting",
 }
 
+# Instruction to the model: one short sentence, no preamble.
 SUMMARY_SYSTEM_PROMPT = """You write short, natural, student-facing notification blurbs for a \
 learning management system. Given the type, title, and content of a newly posted course item, \
 respond with exactly ONE short sentence (no more than 25 words) summarizing it for a student \
@@ -42,6 +44,7 @@ notification feed. Be concrete and natural, e.g. "New assignment 'Lab 3' due Fri
 points" or "New material 'Chapter 4 Slides' has been posted." Do not add quotation marks around \
 the whole sentence, do not add a preamble, and respond with the sentence only."""
 
+# Template filled with the post's type, title and content.
 SUMMARY_USER_PROMPT_TEMPLATE = """Type: {label}
 Title: {title}
 Content: {content}"""

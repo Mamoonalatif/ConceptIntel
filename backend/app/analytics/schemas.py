@@ -1,8 +1,10 @@
+# Pydantic response models for the analytics API.
 from datetime import datetime
 from typing import List, Optional
 from pydantic import BaseModel
 
 
+# Submission, lateness and grade statistics for one assignment.
 class AssignmentStat(BaseModel):
     id: int
     title: str
@@ -14,6 +16,7 @@ class AssignmentStat(BaseModel):
     avg_grade: Optional[float] = None
 
 
+# One student's completion and grade statistics within a course.
 class StudentStat(BaseModel):
     student_id: int
     full_name: str
@@ -30,6 +33,7 @@ class StudentStat(BaseModel):
     assignment_status: List[str] = []
 
 
+# Average mastery of one concept across the class.
 class ConceptMasteryStat(BaseModel):
     concept_node_id: str
     concept_name: str
@@ -38,6 +42,7 @@ class ConceptMasteryStat(BaseModel):
     at_risk_count: int  # students below the at-risk mastery threshold on this concept
 
 
+# Everything the teacher analytics dashboard shows for one course.
 class CourseAnalyticsResponse(BaseModel):
     course_id: int
     course_name: str
@@ -59,6 +64,7 @@ class CourseAnalyticsResponse(BaseModel):
     concept_mastery: List[ConceptMasteryStat] = []
 
 
+# Number of users per role across the platform.
 class RoleCounts(BaseModel):
     students: int
     teachers: int
@@ -67,6 +73,7 @@ class RoleCounts(BaseModel):
     admins: int
 
 
+# Short per-course row for the admin overview.
 class CourseSummary(BaseModel):
     course_id: int
     course_name: str
@@ -86,6 +93,7 @@ class PlatformOverviewResponse(BaseModel):
     concept_mastery: List[ConceptMasteryStat] = []
 
 
+# A student's own progress in one enrolled course.
 class MyCourseProgress(BaseModel):
     course_id: int
     course_name: str

@@ -1,3 +1,4 @@
+// Purpose: scroll-triggered fade-in wrapper used by the landing and About pages.
 import React, { useEffect, useRef, useState } from 'react';
 
 /**
@@ -12,9 +13,12 @@ export const Reveal: React.FC<{ children: React.ReactNode; delay?: number; class
   delay = 0,
   className = '',
 }) => {
+  // ref = the wrapper element being watched; visible = has it scrolled into view yet.
   const ref = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(false);
 
+  // Start watching the element; once 15% of it is on screen, reveal it and stop observing (animate only once).
+  // The cleanup function disconnects the observer when the component unmounts.
   useEffect(() => {
     const el = ref.current;
     if (!el) return;

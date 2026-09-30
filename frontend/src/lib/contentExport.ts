@@ -11,6 +11,7 @@ import type { GeneratedContentItem } from '../services/api';
  *           rather than pulling in a PDF library for a page of text.
  */
 
+/** Turns a title into a filename-safe slug (lowercase, dashes, max 60 chars). */
 export function slugify(text: string): string {
   return (text || 'content')
     .toLowerCase()
@@ -19,6 +20,7 @@ export function slugify(text: string): string {
     .slice(0, 60) || 'content';
 }
 
+// Saves a Blob as a file by clicking a temporary <a download> link.
 function triggerDownload(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -31,6 +33,7 @@ function triggerDownload(blob: Blob, filename: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
 
+/** Downloads the content item as a lossless JSON file. */
 export function downloadContentJson(item: GeneratedContentItem): void {
   const payload = {
     title: item.title,
@@ -48,6 +51,7 @@ export function downloadContentJson(item: GeneratedContentItem): void {
   );
 }
 
+// Escapes HTML special characters so user/AI text can't break or inject into the exported page.
 const escapeHtml = (s: unknown): string =>
   String(s ?? '')
     .replace(/&/g, '&amp;')
@@ -66,6 +70,7 @@ export function buildContentHtml(item: GeneratedContentItem, withAnswers = true)
   const p = item.payload || {};
   let body = '';
 
+  // Body differs per content type: flashcards -> table, study guide -> sections, else quiz questions.
   if (item.content_type === 'flashcard') {
     const cards = (p.cards || []) as Array<{ front: string; back: string }>;
     body = `<table class="cards"><thead><tr><th style="width:45%">Term</th><th>Definition</th></tr></thead><tbody>${
@@ -95,6 +100,7 @@ export function buildContentHtml(item: GeneratedContentItem, withAnswers = true)
       </li>`).join('')}</ol>`;
   }
 
+  // Wrap the body in a full standalone HTML document with inline print-friendly CSS.
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <title>${escapeHtml(item.title)}</title>
@@ -136,6 +142,7 @@ export function buildContentHtml(item: GeneratedContentItem, withAnswers = true)
 </body></html>`;
 }
 
+/** Downloads the printable HTML version (optionally without answers). */
 export function downloadContentHtml(item: GeneratedContentItem, withAnswers = true): void {
   triggerDownload(
     new Blob([buildContentHtml(item, withAnswers)], { type: 'text/html;charset=utf-8' }),

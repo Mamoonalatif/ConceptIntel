@@ -1,3 +1,6 @@
+# Graph revision workflow: AI-extracted concepts are diffed against the live graph, reviewed by a teacher,
+# approved by a coordinator, and only then merged into Neo4j. Manual graph edits follow the same
+# propose -> coordinator-decision path. Nothing reaches Neo4j without approval.
 import json
 import logging
 from datetime import datetime
@@ -19,6 +22,7 @@ logger = logging.getLogger("conceptintel.graph_revision")
 
 
 def _semantic_text(name: str, description: str) -> str:
+    """Builds the "name. description" string that is embedded for semantic comparison."""
     return f"{name.strip()}. {(description or '').strip()}".strip(". ").strip()
 
 
@@ -465,6 +469,7 @@ def decide_edit_proposal(db: Session, proposal_id: int, approve: bool, coordinat
     return proposal
 
 
+# Serializers: convert DB rows (with JSON text columns) into plain dicts matching the response schemas.
 def serialize_edit_proposal(proposal: GraphEditProposal) -> Dict[str, Any]:
     """Builds an EditProposalResponse-shaped dict from a GraphEditProposal row."""
     return {

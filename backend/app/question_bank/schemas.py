@@ -1,5 +1,6 @@
+# Pydantic request/response models for the question bank (create, update, import, generate).
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from pydantic import BaseModel, field_validator
 
@@ -7,6 +8,7 @@ from app.question_bank.service import QUESTION_TYPES
 
 
 class QuestionIn(BaseModel):
+    """A teacher's payload to create one question (type, prompt, answer-key payload, metadata)."""
     question_type: str
     prompt: str
     payload: Dict[str, Any]
@@ -21,6 +23,7 @@ class QuestionIn(BaseModel):
     @field_validator("question_type")
     @classmethod
     def valid_type(cls, v: str) -> str:
+        """Only the five supported question types are allowed."""
         if v not in QUESTION_TYPES:
             raise ValueError(f"question_type must be one of: {', '.join(QUESTION_TYPES)}")
         return v
@@ -28,6 +31,7 @@ class QuestionIn(BaseModel):
     @field_validator("prompt")
     @classmethod
     def non_empty_prompt(cls, v: str) -> str:
+        """Reject blank prompts and trim whitespace."""
         if not (v or "").strip():
             raise ValueError("A question needs a prompt.")
         return v.strip()
@@ -35,6 +39,7 @@ class QuestionIn(BaseModel):
     @field_validator("difficulty")
     @classmethod
     def valid_difficulty(cls, v: str) -> str:
+        """Normalise to Easy, Medium or Hard."""
         cleaned = (v or "Medium").strip().capitalize()
         if cleaned not in ("Easy", "Medium", "Hard"):
             raise ValueError("difficulty must be Easy, Medium or Hard")
@@ -43,6 +48,7 @@ class QuestionIn(BaseModel):
     @field_validator("points")
     @classmethod
     def sane_points(cls, v: int) -> int:
+        """Points must be 1-100."""
         if not (1 <= v <= 100):
             raise ValueError("points must be between 1 and 100")
         return v
@@ -50,6 +56,7 @@ class QuestionIn(BaseModel):
     @field_validator("time_limit_seconds")
     @classmethod
     def sane_limit(cls, v: Optional[int]) -> Optional[int]:
+        """Optional per-question timer: 5 seconds to 1 hour."""
         if v is None:
             return None
         if not (5 <= v <= 3600):
@@ -58,6 +65,7 @@ class QuestionIn(BaseModel):
 
 
 class QuestionUpdate(BaseModel):
+    """Partial update for a question - only fields that are sent are changed."""
     prompt: Optional[str] = None
     payload: Optional[Dict[str, Any]] = None
     explanation: Optional[str] = None
@@ -70,6 +78,7 @@ class QuestionUpdate(BaseModel):
 
 
 class QuestionOut(BaseModel):
+    """A bank question as returned to teachers (includes the answer key in payload)."""
     id: int
     course_id: int
     question_type: str
@@ -95,12 +104,14 @@ class ImportQuestionsRequest(BaseModel):
 
 
 class ImportResultOut(BaseModel):
+    """How many questions an import added or skipped, with a message."""
     imported: int
     skipped: int
     message: str
 
 
 class GenerateQuestionsRequest(BaseModel):
+    """Request to AI-generate questions for a concept: type, count (1-20) and difficulty."""
     concept_node_id: str
     question_type: str
     count: int = 5
@@ -109,6 +120,7 @@ class GenerateQuestionsRequest(BaseModel):
     @field_validator("question_type")
     @classmethod
     def valid_type(cls, v: str) -> str:
+        """Only the five supported question types are allowed."""
         if v not in QUESTION_TYPES:
             raise ValueError(f"question_type must be one of: {', '.join(QUESTION_TYPES)}")
         return v
@@ -116,6 +128,7 @@ class GenerateQuestionsRequest(BaseModel):
     @field_validator("count")
     @classmethod
     def sane_count(cls, v: int) -> int:
+        """Generate between 1 and 20 questions per request."""
         if not (1 <= v <= 20):
             raise ValueError("count must be between 1 and 20")
         return v
@@ -123,6 +136,7 @@ class GenerateQuestionsRequest(BaseModel):
     @field_validator("difficulty")
     @classmethod
     def valid_difficulty(cls, v: str) -> str:
+        """Normalise to Easy, Medium or Hard."""
         cleaned = (v or "Medium").strip().capitalize()
         if cleaned not in ("Easy", "Medium", "Hard"):
             raise ValueError("difficulty must be Easy, Medium or Hard")
@@ -130,5 +144,6 @@ class GenerateQuestionsRequest(BaseModel):
 
 
 class QuestionTypeInfo(BaseModel):
+    """A supported question type (key + display label) for the UI dropdown."""
     key: str
     label: str

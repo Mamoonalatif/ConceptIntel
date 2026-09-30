@@ -1,3 +1,5 @@
+// RequestTeacherAccess: public form where a prospective teacher asks for access; an
+// admin later reviews the request and creates the account.
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { authService } from '../services/api';
@@ -7,8 +9,10 @@ import { TeacherAccessIllustration } from '../components/illustrations';
 import { FoxMark } from '../components/FoxMark';
 import { Mail, User, MessageSquare, AlertCircle, Loader2, CheckCircle2, ArrowLeft } from 'lucide-react';
 
+// Full name: letters separated by single spaces.
 const FULL_NAME_PATTERN = /^[A-Za-z]+(?: [A-Za-z]+)*$/;
 
+/** Page component: request form, replaced by a confirmation once submitted. */
 const RequestTeacherAccess: React.FC = () => {
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
@@ -18,6 +22,7 @@ const RequestTeacherAccess: React.FC = () => {
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
 
+  // Checks the name is non-empty and letters/spaces only; sets the inline error and returns validity.
   const validateFullName = (value: string) => {
     if (!value.trim()) {
       setFullNameError('Full name is required');
@@ -31,6 +36,7 @@ const RequestTeacherAccess: React.FC = () => {
     return true;
   };
 
+  // Validates the name and posts the request (name, email, optional message) to the backend.
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');

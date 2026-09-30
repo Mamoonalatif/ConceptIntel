@@ -1,3 +1,4 @@
+# Pydantic model for one card in the unified class stream.
 from datetime import datetime
 from typing import Optional
 from pydantic import BaseModel

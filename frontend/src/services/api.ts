@@ -1,3 +1,6 @@
+// API client layer: one configured axios instance (auth header, token refresh, GET cache)
+// plus typed service objects that wrap every backend endpoint, grouped by feature.
+// Components call these services instead of using axios directly.
 import axios from 'axios';
 
 // VITE_API_URL lets a deployed build (Vercel) point at the real backend host
@@ -7,6 +10,7 @@ import axios from 'axios';
 // copy of this same host.
 export const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
 
+// Shared axios instance: base URL, JSON headers and a 20s timeout. All services use it.
 const api = axios.create({
   baseURL: API_URL,
   headers: {
@@ -46,6 +50,7 @@ const REFRESH_EXEMPT_PATHS = ['/auth/login', '/auth/register', '/auth/google', '
 // at once trigger one refresh call, not five.
 let refreshPromise: Promise<string | null> | null = null;
 
+// Reads the refresh token from whichever storage holds the session.
 const getStoredRefreshToken = (): string | null =>
   localStorage.getItem('refresh_token') || sessionStorage.getItem('refresh_token');
 
@@ -56,6 +61,7 @@ const updateStoredAccessToken = (accessToken: string) => {
   store.setItem('token', accessToken);
 };
 
+// Removes all stored tokens (used when the session can no longer be refreshed).
 const clearStoredAuth = () => {
   localStorage.removeItem('token');
   localStorage.removeItem('refresh_token');
@@ -63,6 +69,7 @@ const clearStoredAuth = () => {
   sessionStorage.removeItem('refresh_token');
 };
 
+// Exchanges the refresh token for a new access token; concurrent callers share one request. Resolves null on failure.
 const refreshAccessToken = (): Promise<string | null> => {
   if (!refreshPromise) {
     const refreshToken = getStoredRefreshToken();
@@ -76,6 +83,7 @@ const refreshAccessToken = (): Promise<string | null> => {
   return refreshPromise;
 };
 
+// Response interceptor: on a 401, refresh the token once and retry the original request; if that fails, broadcast 'session-expired'.
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
@@ -122,11 +130,14 @@ api.interceptors.response.use(
 //   - The cache is in memory only: a hard refresh always re-fetches.
 const CACHE_TTL_MS = 45_000;
 
+// One cached GET response and when it was stored.
 interface CacheEntry { at: number; response: any }
 
+// In-memory cache of GET responses, and a map of requests currently in flight (for de-duplication).
 const responseCache = new Map<string, CacheEntry>();
 const inFlight = new Map<string, Promise<any>>();
 
+// Builds the cache key from URL + params, or null when caching is disabled for this call.
 const cacheKeyFor = (url: string, config?: any): string | null => {
   // Explicit opt-out, for callers that must see live server state on every tick
   // (status polling, "did this finish yet?" checks). Pass { cache: false }.
@@ -144,12 +155,14 @@ export const clearApiCache = () => {
   inFlight.clear();
 };
 
+// Keep the original axios methods; the wrappers below add caching / invalidation around them.
 const rawGet = api.get.bind(api);
 const rawPost = api.post.bind(api);
 const rawPut = api.put.bind(api);
 const rawPatch = api.patch.bind(api);
 const rawDelete = api.delete.bind(api);
 
+// Cached GET: return a fresh cached response, share an in-flight request, or fetch and store it.
 api.get = ((url: string, config?: any) => {
   const key = cacheKeyFor(url, config);
   if (!key) return rawGet(url, config);
@@ -185,6 +198,7 @@ api.put = invalidatingWrite(rawPut) as typeof api.put;
 api.patch = invalidatingWrite(rawPatch) as typeof api.patch;
 api.delete = invalidatingWrite(rawDelete) as typeof api.delete;
 
+// The configured axios instance is also the default export.
 export default api;
 
 // Minimal, read-only course preview shape returned by GET /courses/lookup/{code}
@@ -218,46 +232,57 @@ export interface EnrollmentJoinResult {
 
 // Authentication Services
 export const authService = {
+  // Email/password login; may return requires_2fa instead of tokens.
   login: async (credentials: any) => {
     const res = await api.post('/auth/login', credentials);
     return res.data;
   },
+  // Creates a new account.
   register: async (userData: any) => {
     const res = await api.post('/auth/register', userData);
     return res.data;
   },
+  // Returns the current user profile.
   getMe: async () => {
     const res = await api.get('/auth/me');
     return res.data;
   },
+  // Signs in with a Google ID token.
   google: async (idToken: string) => {
     const res = await api.post('/auth/google', { id_token: idToken });
     return res.data;
   },
+  // Changes (or sets) the current user password.
   changePassword: async (data: { current_password?: string; new_password: string }) => {
     const res = await api.post('/auth/change-password', data);
     return res.data;
   },
+  // Requests a password-reset email.
   forgotPassword: async (email: string) => {
     const res = await api.post('/auth/forgot-password', { email });
     return res.data;
   },
+  // Sets a new password using the emailed reset token.
   resetPassword: async (token: string, new_password: string) => {
     const res = await api.post('/auth/reset-password', { token, new_password });
     return res.data;
   },
+  // Verifies an email address using a link token.
   verifyEmail: async (token: string) => {
     const res = await api.post('/auth/verify-email', { token });
     return res.data;
   },
+  // Verifies an email address using a code typed by the user.
   verifyEmailCode: async (email: string, code: string) => {
     const res = await api.post('/auth/verify-email-code', { email, code });
     return res.data;
   },
+  // Sends the verification email again.
   resendVerification: async (email: string) => {
     const res = await api.post('/auth/resend-verification', { email });
     return res.data;
   },
+  // Gets a new access token from a refresh token (manual call).
   refresh: async (refreshToken: string) => {
     const res = await api.post('/auth/refresh', { refresh_token: refreshToken });
     return res.data;
@@ -271,26 +296,32 @@ export const authService = {
     const res = await api.post('/auth/2fa/verify-login', { temp_token: tempToken, code });
     return res.data;
   },
+  // Whether 2FA is enabled for the current user.
   twoFactorStatus: async (): Promise<{ is_2fa_enabled: boolean }> => {
     const res = await api.get('/auth/2fa/status');
     return res.data;
   },
+  // Starts 2FA setup: returns secret and QR code.
   twoFactorSetup: async (): Promise<{ secret: string; otpauth_uri: string; qr_code_base64: string }> => {
     const res = await api.post('/auth/2fa/setup');
     return res.data;
   },
+  // Confirms a code to turn 2FA on; returns backup codes.
   twoFactorEnable: async (code: string): Promise<{ backup_codes: string[] }> => {
     const res = await api.post('/auth/2fa/enable', { code });
     return res.data;
   },
+  // Turns 2FA off (needs password or code).
   twoFactorDisable: async (data: { password?: string; code?: string }) => {
     const res = await api.post('/auth/2fa/disable', data);
     return res.data;
   },
+  // Public form: asks an admin for a teacher account.
   requestTeacherAccess: async (data: { email: string; full_name: string; reason?: string }) => {
     const res = await api.post('/auth/teacher-requests', data);
     return res.data;
   },
+  // Uploads a profile photo.
   uploadAvatar: async (file: File) => {
     const formData = new FormData();
     formData.append('file', file);
@@ -300,6 +331,7 @@ export const authService = {
     });
     return res.data;
   },
+  // Removes the profile photo.
   deleteAvatar: async () => {
     const res = await api.delete('/auth/me/avatar');
     return res.data;
@@ -323,18 +355,22 @@ export interface StaffScope {
 // Program Services: admin-only CRUD over the Program catalog grouping
 // (GET is available to any authenticated user - used by pickers elsewhere).
 export const programService = {
+  // Lists all programs.
   list: async (): Promise<ProgramItem[]> => {
     const res = await api.get('/programs');
     return res.data;
   },
+  // Creates a program (admin).
   create: async (data: { name: string; code?: string; description?: string }): Promise<ProgramItem> => {
     const res = await api.post('/programs', data);
     return res.data;
   },
+  // Edits a program (admin).
   update: async (id: number, data: { name?: string; code?: string; description?: string }): Promise<ProgramItem> => {
     const res = await api.put(`/programs/${id}`, data);
     return res.data;
   },
+  // Deletes a program (admin).
   delete: async (id: number): Promise<void> => {
     await api.delete(`/programs/${id}`);
   },
@@ -344,16 +380,19 @@ export const programService = {
     const res = await api.get(`/programs/${programId}/coordinators`);
     return res.data;
   },
+  // Makes a user coordinator of the program.
   assignCoordinator: async (programId: number, userId: number) => {
     const res = await api.post(`/programs/${programId}/coordinators`, { user_id: userId });
     return res.data;
   },
+  // Removes a coordinator from the program.
   removeCoordinator: async (programId: number, userId: number) => {
     const res = await api.delete(`/programs/${programId}/coordinators/${userId}`);
     return res.data;
   },
 };
 
+// A user assigned as coordinator of a program.
 export interface ProgramCoordinatorEntry {
   id: number;
   full_name: string;
@@ -362,20 +401,24 @@ export interface ProgramCoordinatorEntry {
 
 // Admin Services
 export const adminService = {
+  // Creates a teacher account.
   createTeacher: async (data: { email: string; full_name: string }) => {
     const res = await api.post('/auth/admin/teachers', data);
     return res.data;
   },
+  // Lists teacher-access requests, optionally by status.
   listTeacherRequests: async (statusFilter?: string) => {
     const res = await api.get('/auth/admin/teacher-requests', {
       params: statusFilter ? { status_filter: statusFilter } : undefined,
     });
     return res.data;
   },
+  // Approves a teacher-access request.
   approveTeacherRequest: async (id: number) => {
     const res = await api.post(`/auth/admin/teacher-requests/${id}/approve`);
     return res.data;
   },
+  // Rejects a teacher-access request.
   rejectTeacherRequest: async (id: number) => {
     const res = await api.post(`/auth/admin/teacher-requests/${id}/reject`);
     return res.data;
@@ -394,6 +437,7 @@ export const adminService = {
     const res = await api.patch(`/auth/admin/staff/${userId}/role`, { role, ...scope });
     return res.data;
   },
+  // Programs/courses a staff member is scoped to.
   listStaffScope: async (userId: number): Promise<StaffScope> => {
     const res = await api.get(`/auth/admin/staff/${userId}/scope`);
     return res.data;
@@ -404,18 +448,22 @@ export const adminService = {
     const res = await api.get('/auth/coordinator/eligible-users');
     return res.data;
   },
+  // Searchable list of all users.
   listAllUsers: async (params?: { role?: string; search?: string; is_active?: boolean }) => {
     const res = await api.get('/auth/admin/all-users', { params });
     return res.data;
   },
+  // Edits a user (name, email, role, active flag).
   updateUser: async (userId: number, data: { full_name?: string; email?: string; role?: string; is_active?: boolean }) => {
     const res = await api.put(`/auth/admin/users/${userId}`, data);
     return res.data;
   },
+  // Deletes a user.
   deleteUser: async (userId: number) => {
     const res = await api.delete(`/auth/admin/users/${userId}`);
     return res.data;
   },
+  // Downloads the users list as a CSV blob.
   exportUsersCsv: async (params?: { role?: string; search?: string; is_active?: boolean }) => {
     const res = await api.get('/auth/admin/users/export-csv', {
       params,
@@ -423,6 +471,7 @@ export const adminService = {
     });
     return res.data;
   },
+  // Lists activity/audit log entries.
   listAdminLogs: async (event_type?: string) => {
     const res = await api.get('/auth/admin/logs', { params: event_type ? { event_type } : undefined });
     return res.data;
@@ -434,6 +483,7 @@ export const adminService = {
     const res = await api.get('/auth/admin/staff', { params: authority ? { authority } : undefined });
     return res.data;
   },
+  // Sets coordinator authority flags on a teacher.
   updateStaffAuthorities: async (userId: number, authorities: { is_program_coordinator?: boolean; is_course_coordinator?: boolean }) => {
     const res = await api.patch(`/auth/admin/staff/${userId}/authorities`, authorities);
     return res.data;
@@ -443,26 +493,32 @@ export const adminService = {
 // Program Coordinator Services: predefined-course catalog CRUD, prerequisite mapping,
 // course deletion. Admin can hit the same endpoints too (see backend/app/auth/routes.py).
 export const programCoordinatorService = {
+  // Lists the predefined course catalog.
   listCatalog: async () => {
     const res = await api.get('/courses/admin/catalog');
     return res.data;
   },
+  // Adds a catalog subject (with optional prerequisite).
   createCatalogEntry: async (data: { name: string; code: string; prerequisite_catalog_id?: number | null }) => {
     const res = await api.post('/courses/admin/catalog', data);
     return res.data;
   },
+  // Edits a catalog subject.
   updateCatalogEntry: async (id: number, data: { name?: string; code?: string; prerequisite_catalog_id?: number | null }) => {
     const res = await api.put(`/courses/admin/catalog/${id}`, data);
     return res.data;
   },
+  // Deletes a catalog subject.
   deleteCatalogEntry: async (id: number) => {
     const res = await api.delete(`/courses/admin/catalog/${id}`);
     return res.data;
   },
+  // Edits a course as coordinator/admin.
   updateCourse: async (id: number, data: any) => {
     const res = await api.put(`/courses/admin/${id}`, data);
     return res.data;
   },
+  // Deletes a course as coordinator/admin.
   deleteCourse: async (id: number) => {
     const res = await api.delete(`/courses/admin/${id}`);
     return res.data;
@@ -500,14 +556,17 @@ export interface CourseCoordinatorEntry {
 // CourseCoordinatorDashboard.tsx - but the blind course-level toggle below is still
 // a live backend endpoint and kept here for any caller still using it.
 export const courseCoordinatorService = {
+  // Edits course info (status, dates, description, capacity).
   updateCourse: async (id: number, data: any) => {
     const res = await api.put(`/courses/admin/${id}`, data);
     return res.data;
   },
+  // Approves the course-level knowledge graph.
   approveGraph: async (courseId: number) => {
     const res = await api.post(`/graph/course/${courseId}/approve`);
     return res.data;
   },
+  // Rejects the course-level knowledge graph.
   rejectGraph: async (courseId: number) => {
     const res = await api.post(`/graph/course/${courseId}/reject`);
     return res.data;
@@ -516,38 +575,47 @@ export const courseCoordinatorService = {
 
 // Course Services
 export const courseService = {
+  // Creates a course.
   create: async (courseData: any) => {
     const res = await api.post('/courses', courseData);
     return res.data;
   },
+  // Lists all courses.
   getAll: async () => {
     const res = await api.get('/courses/all');
     return res.data;
   },
+  // Lists the current teacher's courses.
   getTeacherCourses: async () => {
     const res = await api.get('/courses/teacher/my-courses');
     return res.data;
   },
+  // Lists the subject catalog.
   getCatalog: async () => {
     const res = await api.get('/courses/catalog');
     return res.data;
   },
+  // Previews a course from its enrollment code.
   lookupByCode: async (enrollmentCode: string): Promise<CourseLookup> => {
     const res = await api.get(`/courses/lookup/${enrollmentCode}`);
     return res.data;
   },
+  // Gets one course.
   getDetails: async (id: number) => {
     const res = await api.get(`/courses/${id}`);
     return res.data;
   },
+  // Edits a course.
   update: async (id: number, updateData: any) => {
     const res = await api.put(`/courses/${id}`, updateData);
     return res.data;
   },
+  // Deletes a course.
   delete: async (id: number) => {
     const res = await api.delete(`/courses/${id}`);
     return res.data;
   },
+  // Issues a new enrollment code.
   regenerateCode: async (id: number) => {
     const res = await api.post(`/courses/${id}/generate-code`);
     return res.data;
@@ -565,14 +633,20 @@ export interface ChatMessageItem {
 // AI Assistant Services - a single ongoing per-user chat thread backed by OpenAI
 // (with a graceful "not configured" fallback reply if the key is missing/invalid).
 export const assistantService = {
+  // Loads the chat history.
   getMessages: async (limit?: number): Promise<ChatMessageItem[]> => {
     const res = await api.get('/assistant/messages', { params: limit ? { limit } : undefined });
     return res.data;
   },
+  // Sends a message and returns the assistant reply.
   sendMessage: async (content: string): Promise<ChatMessageItem> => {
-    const res = await api.post('/assistant/messages', { content });
+    // Longer than the shared 20s default: a reply can include a course-material search
+    // (first call loads the embedding model) plus the AI call, and a provider
+    // fallback on top of that.
+    const res = await api.post('/assistant/messages', { content }, { timeout: 90000 });
     return res.data;
   },
+  // Clears the chat history.
   clearMessages: async (): Promise<void> => {
     await api.delete('/assistant/messages');
   },
@@ -580,22 +654,27 @@ export const assistantService = {
 
 // Enrollment Services
 export const enrollmentService = {
+  // Joins a course using its enrollment code.
   join: async (enrollmentCode: string): Promise<EnrollmentJoinResult> => {
     const res = await api.post('/enrollment/join', { enrollment_code: enrollmentCode });
     return res.data;
   },
+  // Lists the student's enrolled courses.
   getMyCourses: async () => {
     const res = await api.get('/enrollment/my-courses');
     return res.data;
   },
+  // Checks whether the student meets the course prerequisite.
   checkPrerequisite: async (courseId: number) => {
     const res = await api.get(`/enrollment/check-prerequisite/${courseId}`);
     return res.data;
   },
+  // Teacher: lists students enrolled in a course.
   getEnrolledStudents: async (courseId: number) => {
     const res = await api.get(`/enrollment/teacher/course/${courseId}/students`);
     return res.data;
   },
+  // Drops an enrollment.
   drop: async (enrollmentId: number) => {
     const res = await api.delete(`/enrollment/${enrollmentId}`);
     return res.data;
@@ -623,22 +702,27 @@ export const uploadService = {
     });
     return res.data;
   },
+  // Lists files uploaded to a course.
   getCourseFiles: async (courseId: number) => {
     const res = await api.get(`/files/course/${courseId}`);
     return res.data;
   },
+  // Semantic search over the course material.
   searchContent: async (courseId: number, query: string): Promise<ContentSearchResult[]> => {
     const res = await api.get(`/files/course/${courseId}/search`, { params: { q: query } });
     return res.data;
   },
+  // Deletes an uploaded file.
   deleteFile: async (fileId: number) => {
     const res = await api.delete(`/files/${fileId}`);
     return res.data;
   },
+  // Re-runs processing (OCR/embedding) on a file.
   reprocessFile: async (fileId: number) => {
     const res = await api.post(`/files/${fileId}/process`);
     return res.data;
   },
+  // Replaces a file with a new upload.
   replaceFile: async (fileId: number, file: File) => {
     const formData = new FormData();
     formData.append('file', file);
@@ -664,6 +748,7 @@ export interface ConceptDiffItem {
   is_new: boolean;
 }
 
+// The proposed change to the graph: concepts plus counts of new/matched items.
 export interface GraphDiff {
   concepts: ConceptDiffItem[];
   new_concept_count: number;
@@ -671,6 +756,7 @@ export interface GraphDiff {
   new_relationship_count: number;
 }
 
+// A background job that builds a graph from course material.
 export interface GraphBuildJob {
   id: number;
   catalog_id: number;
@@ -683,6 +769,7 @@ export interface GraphBuildJob {
   updated_at: string;
 }
 
+// A single manual node/relationship edit awaiting coordinator approval.
 export interface GraphEditProposal {
   id: number;
   catalog_id: number;
@@ -705,6 +792,7 @@ export interface GraphEditProposal {
   coordinator_name?: string | null;
 }
 
+// A full graph revision going through teacher review and coordinator approval.
 export interface GraphRevision {
   id: number;
   job_id: number;
@@ -738,7 +826,9 @@ export interface MyGraphSubmissions {
   edit_proposals: GraphEditProposal[];
 }
 
+// Content-processing pipeline: start a graph build job, poll it, fetch its revision and submit the teacher review.
 export const contentProcessingService = {
+  // Starts the build job for a course.
   triggerPipeline: async (courseId: number, teacherNotes?: string): Promise<GraphBuildJob> => {
     const res = await api.post(`/content-processing/trigger/${courseId}`, { teacher_notes: teacherNotes ?? null });
     return res.data;
@@ -749,14 +839,17 @@ export const contentProcessingService = {
     const res = await api.get(`/content-processing/jobs/${jobId}`, { cache: false } as any);
     return res.data;
   },
+  // Lists build jobs for a course.
   listJobsForCourse: async (courseId: number): Promise<GraphBuildJob[]> => {
     const res = await api.get(`/content-processing/jobs/course/${courseId}`);
     return res.data;
   },
+  // Gets the revision produced by a job.
   getJobRevision: async (jobId: number): Promise<GraphRevision> => {
     const res = await api.get(`/content-processing/jobs/${jobId}/revision`);
     return res.data;
   },
+  // Teacher confirms or rejects (optionally editing) the diff.
   teacherReview: async (
     revisionId: number,
     action: 'confirm' | 'reject',
@@ -774,6 +867,7 @@ export const contentProcessingService = {
 
 // Concept Graph Services
 export const graphService = {
+  // Gets the course graph (nodes and edges).
   getGraph: async (courseId: number) => {
     const res = await api.get(`/graph/course/${courseId}`);
     return res.data;
@@ -787,18 +881,22 @@ export const graphService = {
     });
     return res.data;
   },
+  // Proposes a new concept node.
   createNode: async (courseId: number, nodeData: { name: string; description: string; difficulty: string }) => {
     const res = await api.post(`/graph/node/${courseId}`, nodeData);
     return res.data;
   },
+  // Proposes an edit to a concept node.
   updateNode: async (courseId: number, nodeId: string, nodeData: any) => {
     const res = await api.put(`/graph/node/${courseId}/${nodeId}`, nodeData);
     return res.data;
   },
+  // Proposes deleting a concept node.
   deleteNode: async (courseId: number, nodeId: string) => {
     const res = await api.delete(`/graph/node/${courseId}/${nodeId}`);
     return res.data;
   },
+  // Proposes a prerequisite link between two concepts.
   createPrerequisite: async (sourceName: string, targetName: string, courseId: number) => {
     const res = await api.post('/graph/relationship', {
       course_id: courseId,
@@ -807,6 +905,7 @@ export const graphService = {
     });
     return res.data;
   },
+  // Proposes deleting a prerequisite link.
   deleteRelationship: async (courseId: number, sourceId: string, targetId: string) => {
     const res = await api.delete(`/graph/relationship/${courseId}/${sourceId}/${targetId}`);
     return res.data;
@@ -830,10 +929,12 @@ export const graphService = {
     );
     return res.data;
   },
+  // Graph statistics (counts by difficulty etc).
   getGraphStats: async (courseId: number) => {
     const res = await api.get(`/graph/stats/${courseId}`);
     return res.data;
   },
+  // Searches concepts by text.
   searchConcepts: async (courseId: number, query: string) => {
     const res = await api.get(`/graph/search/${courseId}`, { params: { q: query } });
     return res.data;
@@ -881,6 +982,7 @@ export const graphService = {
   },
 };
 
+// One week of a course schedule: label, title and topics.
 export interface ScheduleSessionItem {
   week_label: string;
   title?: string | null;
@@ -888,6 +990,7 @@ export interface ScheduleSessionItem {
   linked_concept_ids?: string[] | null;
 }
 
+// A course's week-by-week schedule.
 export interface CourseSchedule {
   id: number;
   course_id: number;
@@ -914,18 +1017,22 @@ export interface TodayTopics {
 // approval gate: generate/update apply straight to the live, student-visible
 // schedule.
 export const scheduleService = {
+  // AI-generates the schedule from course material.
   generate: async (courseId: number): Promise<CourseSchedule> => {
     const res = await api.post(`/schedule/course/${courseId}/generate`, {}, { timeout: 60000 });
     return res.data;
   },
+  // Saves the teacher-edited sessions.
   update: async (courseId: number, sessions: ScheduleSessionItem[]): Promise<CourseSchedule> => {
     const res = await api.put(`/schedule/course/${courseId}`, { sessions });
     return res.data;
   },
+  // Gets the current schedule.
   getApproved: async (courseId: number): Promise<CourseSchedule> => {
     const res = await api.get(`/schedule/course/${courseId}`);
     return res.data;
   },
+  // Gets the topics for the current week.
   getToday: async (courseId: number): Promise<TodayTopics> => {
     const res = await api.get(`/schedule/course/${courseId}/today`);
     return res.data;
@@ -953,25 +1060,31 @@ export interface NotificationListResult {
 
 // Notification Services
 export const notificationService = {
+  // Lists notifications with unread count.
   list: async (params?: { unread_only?: boolean; limit?: number; offset?: number }): Promise<NotificationListResult> => {
     const res = await api.get('/notifications', { params });
     return res.data;
   },
+  // Gets only the unread count (for the bell badge).
   unreadCount: async (): Promise<{ unread_count: number }> => {
     const res = await api.get('/notifications/unread-count');
     return res.data;
   },
+  // Marks one notification read.
   markRead: async (id: number): Promise<NotificationItem> => {
     const res = await api.patch(`/notifications/${id}/read`);
     return res.data;
   },
+  // Marks all notifications read.
   markAllRead: async (): Promise<{ updated: number }> => {
     const res = await api.post('/notifications/read-all');
     return res.data;
   },
+  // Deletes one notification.
   remove: async (id: number): Promise<void> => {
     await api.delete(`/notifications/${id}`);
   },
+  // Deletes all read notifications.
   clearRead: async (): Promise<{ deleted: number }> => {
     const res = await api.delete('/notifications/read');
     return res.data;
@@ -991,18 +1104,22 @@ export interface AnnouncementItem {
 
 // Class Stream (announcements) Services
 export const announcementService = {
+  // Lists announcements for a course.
   list: async (courseId: number): Promise<AnnouncementItem[]> => {
     const res = await api.get(`/courses/${courseId}/announcements`);
     return res.data;
   },
+  // Posts an announcement.
   create: async (courseId: number, content: string): Promise<AnnouncementItem> => {
     const res = await api.post(`/courses/${courseId}/announcements`, { content });
     return res.data;
   },
+  // Edits an announcement.
   update: async (courseId: number, announcementId: number, content: string): Promise<AnnouncementItem> => {
     const res = await api.patch(`/courses/${courseId}/announcements/${announcementId}`, { content });
     return res.data;
   },
+  // Deletes an announcement.
   remove: async (courseId: number, announcementId: number): Promise<void> => {
     await api.delete(`/courses/${courseId}/announcements/${announcementId}`);
   },
@@ -1019,8 +1136,44 @@ export interface SubmissionSummary {
   // "Ungraded" | "PendingReview" | "Approved" - grade/feedback above are only
   // ever populated here once this is "Approved" (see backend _student_facing_submission).
   grade_status: 'Ungraded' | 'PendingReview' | 'Approved';
+  // AI-detected misconceptions; only present once the teacher approved the grade.
+  misconceptions?: Misconception[] | null;
 }
 
+// A genuine conceptual error the AI found in a submission, with the correct idea.
+export interface Misconception {
+  concept_name: string;
+  misconception: string;
+  correction: string;
+}
+
+// One close match found by the similar-assignment check (teacher-only).
+export interface SimilarityMatch {
+  submission_id: number;
+  student_id: number;
+  student_name: string | null;
+  assignment_id: number;
+  same_assignment: boolean;
+  score: number; // 0-1 share of wording in common
+}
+
+// Similar-assignment report stored on a submission (teacher-only).
+export interface SimilarityReport {
+  level: 'none' | 'low' | 'medium' | 'high';
+  max_score: number;
+  matches: SimilarityMatch[];
+  checked_at?: string;
+  note?: string;
+}
+
+// Class-wide misconceptions for one concept.
+export interface MisconceptionGroup {
+  concept_name: string;
+  count: number;
+  examples: { student_name: string | null; misconception: string; correction: string }[];
+}
+
+// An assignment, including the student's own submission or the teacher's submission count.
 export interface AssignmentItem {
   id: number;
   course_id: number;
@@ -1037,6 +1190,7 @@ export interface AssignmentItem {
   submission_count: number | null;
 }
 
+// Points awarded for one rubric criterion in a graded submission.
 export interface RubricCriterionScore {
   criterion_id: number;
   title: string;
@@ -1050,6 +1204,7 @@ export interface RubricCriterionScore {
   level_label?: string | null;
 }
 
+// A student submission as seen by the teacher, with grade and rubric breakdown.
 export interface SubmissionItem {
   id: number;
   assignment_id: number;
@@ -1068,6 +1223,10 @@ export interface SubmissionItem {
   // student's SubmissionSummary, grade/feedback here are always the real values
   // regardless of status (the teacher IS the reviewer the gate exists for).
   grade_status: 'Ungraded' | 'PendingReview' | 'Approved';
+  // Similar-assignment report; null until the background check has run.
+  similarity?: SimilarityReport | null;
+  // AI-detected misconceptions (approved list, or the pending AI draft's).
+  misconceptions?: Misconception[] | null;
 }
 
 // One performance level of an analytic-rubric criterion (e.g. "Excellent" =
@@ -1092,6 +1251,7 @@ export interface RubricCriterion {
   levels: RubricLevel[];
 }
 
+// A grading rubric attached to an assignment.
 export interface Rubric {
   id: number;
   assignment_id: number;
@@ -1118,10 +1278,12 @@ export interface MaterialItem {
 
 // Materials (Classroom-style resource posts) Services
 export const materialService = {
+  // Lists materials for a course.
   list: async (courseId: number): Promise<MaterialItem[]> => {
     const res = await api.get(`/courses/${courseId}/materials`);
     return res.data;
   },
+  // Posts a material (optional file/link).
   create: async (
     courseId: number,
     data: { title: string; description?: string; external_link?: string; file?: File }
@@ -1137,6 +1299,7 @@ export const materialService = {
     });
     return res.data;
   },
+  // Edits a material.
   update: async (
     courseId: number,
     materialId: number,
@@ -1145,9 +1308,11 @@ export const materialService = {
     const res = await api.patch(`/courses/${courseId}/materials/${materialId}`, data);
     return res.data;
   },
+  // Deletes a material.
   remove: async (courseId: number, materialId: number): Promise<void> => {
     await api.delete(`/courses/${courseId}/materials/${materialId}`);
   },
+  // Builds the download URL for the attachment (needs auth header).
   downloadAttachmentUrl: (courseId: number, materialId: number) =>
     `${API_URL}/courses/${courseId}/materials/${materialId}/download`,
 };
@@ -1169,10 +1334,12 @@ export interface MeetingItem {
 
 // Meetings (lecture/live-session posts) Services
 export const meetingService = {
+  // Lists meetings for a course.
   list: async (courseId: number): Promise<MeetingItem[]> => {
     const res = await api.get(`/courses/${courseId}/meetings`);
     return res.data;
   },
+  // Schedules a meeting.
   create: async (
     courseId: number,
     data: { title: string; description?: string; meeting_link: string; scheduled_at: string; duration_minutes?: number }
@@ -1180,6 +1347,7 @@ export const meetingService = {
     const res = await api.post(`/courses/${courseId}/meetings`, data);
     return res.data;
   },
+  // Edits a meeting.
   update: async (
     courseId: number,
     meetingId: number,
@@ -1188,6 +1356,7 @@ export const meetingService = {
     const res = await api.patch(`/courses/${courseId}/meetings/${meetingId}`, data);
     return res.data;
   },
+  // Deletes a meeting.
   remove: async (courseId: number, meetingId: number): Promise<void> => {
     await api.delete(`/courses/${courseId}/meetings/${meetingId}`);
   },
@@ -1217,6 +1386,7 @@ export interface StreamItem {
 
 // Unified Class Stream Service - merges announcements/assignments/materials/meetings
 export const streamService = {
+  // Gets the combined class stream.
   list: async (courseId: number): Promise<StreamItem[]> => {
     const res = await api.get(`/courses/${courseId}/stream`);
     return res.data;
@@ -1238,6 +1408,7 @@ export interface TodoItem {
 
 // Student To-Do Service
 export const studentService = {
+  // Gets the student's to-do list with optional sort/filter.
   getTodo: async (sort?: 'due_date' | 'course', filter?: 'upcoming' | 'missing' | 'done'): Promise<TodoItem[]> => {
     const res = await api.get('/students/me/todo', { params: { sort, filter } });
     return res.data;
@@ -1258,10 +1429,12 @@ export interface NotificationPreferences {
 
 // Notification Preferences Service (Settings > Notifications page)
 export const notificationPreferencesService = {
+  // Gets the notification opt-out settings.
   get: async (): Promise<NotificationPreferences> => {
     const res = await api.get('/notification-preferences/me');
     return res.data;
   },
+  // Updates notification settings.
   update: async (data: Partial<NotificationPreferences>): Promise<NotificationPreferences> => {
     const res = await api.patch('/notification-preferences/me', data);
     return res.data;
@@ -1284,6 +1457,7 @@ export interface CalendarEventItem {
 
 // Calendar Service - aggregated assignment due dates + meeting times
 export const calendarService = {
+  // Gets calendar events across the user's courses.
   getMyCalendar: async (): Promise<CalendarEventItem[]> => {
     const res = await api.get('/calendar/me');
     return res.data;
@@ -1293,6 +1467,7 @@ export const calendarService = {
 // Contact Service - public (no-auth) landing-page contact form, forwards to the
 // platform's configured SMTP_EMAIL via backend/app/contact/routes.py.
 export const contactService = {
+  // Sends a message from the landing-page contact form.
   send: async (data: { name: string; email: string; message: string }): Promise<{ success: boolean; detail: string }> => {
     const res = await api.post('/contact', data);
     return res.data;
@@ -1301,10 +1476,12 @@ export const contactService = {
 
 // Assignments (Classwork) Services
 export const assignmentService = {
+  // Lists assignments for a course.
   list: async (courseId: number): Promise<AssignmentItem[]> => {
     const res = await api.get(`/courses/${courseId}/assignments`);
     return res.data;
   },
+  // Creates an assignment (optional attachment).
   create: async (
     courseId: number,
     data: { title: string; description?: string; due_date?: string; points?: number; file?: File }
@@ -1321,6 +1498,7 @@ export const assignmentService = {
     });
     return res.data;
   },
+  // Edits an assignment.
   update: async (
     courseId: number,
     assignmentId: number,
@@ -1329,11 +1507,14 @@ export const assignmentService = {
     const res = await api.patch(`/courses/${courseId}/assignments/${assignmentId}`, data);
     return res.data;
   },
+  // Deletes an assignment.
   remove: async (courseId: number, assignmentId: number): Promise<void> => {
     await api.delete(`/courses/${courseId}/assignments/${assignmentId}`);
   },
+  // Builds the attachment download URL.
   downloadAttachmentUrl: (courseId: number, assignmentId: number) =>
     `${API_URL}/courses/${courseId}/assignments/${assignmentId}/download`,
+  // Student uploads a submission.
   submit: async (courseId: number, assignmentId: number, file: File): Promise<SubmissionSummary> => {
     const formData = new FormData();
     formData.append('file', file);
@@ -1343,10 +1524,22 @@ export const assignmentService = {
     });
     return res.data;
   },
+  // Teacher: lists submissions for an assignment.
   listSubmissions: async (courseId: number, assignmentId: number): Promise<SubmissionItem[]> => {
     const res = await api.get(`/courses/${courseId}/assignments/${assignmentId}/submissions`);
     return res.data;
   },
+  // Teacher: re-runs the similar-assignment check for all submissions of an assignment.
+  checkSimilarity: async (courseId: number, assignmentId: number): Promise<SubmissionItem[]> => {
+    const res = await api.post(`/courses/${courseId}/assignments/${assignmentId}/similarity/check`, null, { timeout: 120000 });
+    return res.data;
+  },
+  // Teacher: class-wide misconceptions grouped by concept.
+  listMisconceptions: async (courseId: number, assignmentId: number): Promise<MisconceptionGroup[]> => {
+    const res = await api.get(`/courses/${courseId}/assignments/${assignmentId}/misconceptions`, { cache: false } as any);
+    return res.data;
+  },
+  // Builds the submission download URL.
   downloadSubmissionUrl: (courseId: number, assignmentId: number, submissionId: number) =>
     `${API_URL}/courses/${courseId}/assignments/${assignmentId}/submissions/${submissionId}/download`,
   // AI concept-level grading - extracts the submission's text, compares it against
@@ -1402,6 +1595,7 @@ export const assignmentService = {
     );
     return res.data;
   },
+  // Gets the rubric, or null if none exists (404).
   getRubric: async (courseId: number, assignmentId: number): Promise<Rubric | null> => {
     try {
       const res = await api.get(`/courses/${courseId}/assignments/${assignmentId}/rubric`);
@@ -1420,6 +1614,7 @@ export const assignmentService = {
     const res = await api.put(`/courses/${courseId}/assignments/${assignmentId}/rubric`, { criteria, status });
     return res.data;
   },
+  // Deletes the rubric.
   deleteRubric: async (courseId: number, assignmentId: number): Promise<void> => {
     await api.delete(`/courses/${courseId}/assignments/${assignmentId}/rubric`);
   },
@@ -1434,6 +1629,7 @@ export interface GA {
   created_at: string;
 }
 
+// Program Learning Outcome, linked to GAs.
 export interface PLO {
   id: number;
   program_id: number;
@@ -1444,6 +1640,7 @@ export interface PLO {
   created_at: string;
 }
 
+// Course Learning Outcome, linked to PLOs.
 export interface CLO {
   id: number;
   catalog_id: number;
@@ -1455,20 +1652,25 @@ export interface CLO {
   created_at: string;
 }
 
+// Outcomes: GA/PLO/CLO CRUD and mappings, concept-to-CLO tagging, outcomes graph and student attainment.
 export const outcomesService = {
+  // Graduate attributes.
   listGAs: async (): Promise<GA[]> => (await api.get('/outcomes/gas')).data,
   createGA: async (data: { code: string; title: string; description?: string }): Promise<GA> =>
     (await api.post('/outcomes/gas', data)).data,
   deleteGA: async (gaId: number): Promise<void> => { await api.delete(`/outcomes/gas/${gaId}`); },
 
+  // Program learning outcomes, optionally per program.
   listPLOs: async (programId?: number): Promise<PLO[]> =>
     (await api.get('/outcomes/plos', { params: programId ? { program_id: programId } : {} })).data,
   createPLO: async (data: { program_id: number; code: string; title: string; description?: string }): Promise<PLO> =>
     (await api.post('/outcomes/plos', data)).data,
+  // Replaces a PLO's GA links.
   setPLOGAs: async (ploId: number, gaIds: number[]): Promise<PLO> =>
     (await api.put(`/outcomes/plos/${ploId}/gas`, { ga_ids: gaIds })).data,
   deletePLO: async (ploId: number): Promise<void> => { await api.delete(`/outcomes/plos/${ploId}`); },
 
+  // Course learning outcomes for a catalog subject.
   listCLOs: async (catalogId: number): Promise<CLO[]> =>
     (await api.get('/outcomes/clos', { params: { catalog_id: catalogId } })).data,
   createCLO: async (data: { catalog_id: number; code: string; title: string; description?: string }): Promise<CLO> =>
@@ -1479,12 +1681,15 @@ export const outcomesService = {
   autoExtractCLOs: async (courseId: number): Promise<{
     created_clos: CLO[]; skipped_existing_count: number; plo_links_created: number; concepts_tagged: number;
   }> => (await api.post('/outcomes/clos/auto-extract', {}, { params: { course_id: courseId }, timeout: 90000 })).data,
+  // Replaces a CLO's PLO links.
   setCLOPLOs: async (cloId: number, ploIds: number[]): Promise<CLO> =>
     (await api.put(`/outcomes/clos/${cloId}/plos`, { plo_ids: ploIds })).data,
   deleteCLO: async (cloId: number): Promise<void> => { await api.delete(`/outcomes/clos/${cloId}`); },
 
+  // Concept-to-CLO tags for a subject.
   listConceptCLOMap: async (catalogId: number): Promise<Array<{ concept_node_id: string; concept_name: string; clo_ids: number[] }>> =>
     (await api.get(`/outcomes/catalog/${catalogId}/concept-clo-map`)).data,
+  // Sets the CLOs tagged on a concept.
   setConceptCLOs: async (
     catalogId: number, conceptNodeId: string, conceptName: string, cloIds: number[]
   ): Promise<{ concept_node_id: string; concept_name: string; clo_ids: number[] }> =>
@@ -1492,6 +1697,7 @@ export const outcomesService = {
       concept_node_id: conceptNodeId, concept_name: conceptName, clo_ids: cloIds,
     })).data,
 
+  // Nodes and edges of the outcome chain for a subject.
   getOutcomesGraph: async (catalogId: number): Promise<{
     clos: Array<{ id: string; code: string; title: string }>;
     plos: Array<{ id: string; code: string; title: string }>;
@@ -1509,6 +1715,7 @@ export const outcomesService = {
     (await api.get('/outcomes/my-plo-attainment')).data,
 };
 
+// A student's attainment score for a CLO.
 export interface CLOAttainment {
   clo_id: number;
   clo_code: string;
@@ -1517,6 +1724,7 @@ export interface CLOAttainment {
   evidence_count: number;
 }
 
+// A student's attainment score for a PLO.
 export interface PLOAttainment {
   plo_id: number;
   plo_code: string;
@@ -1571,6 +1779,7 @@ export interface ContentAttemptSummary {
   completed_at: string;
 }
 
+// Result of submitting a generated quiz.
 export interface QuizResult {
   score: number;
   correct_count: number;
@@ -1647,6 +1856,7 @@ export interface GenerateContentPayload {
 
 // Content Generation (flashcards/MCQs/quizzes/study guides from concept-graph concepts)
 export const contentGenerationService = {
+  // Generates content synchronously (long timeout).
   generate: async (
     courseId: number,
     data: GenerateContentPayload
@@ -1679,11 +1889,15 @@ export const contentGenerationService = {
   // Turns an "assignment"-type draft into a real Assignment + Published Rubric -
   // the approve step for this content type (see backend create_assignment_from_content).
   createAssignmentFromContent: async (
-    courseId: number, contentId: number
+    courseId: number, contentId: number,
+    overrides?: { title?: string; description?: string; due_date?: string; points?: number }
   ): Promise<{ assignment_id: number; course_id: number; rubric_id: number }> => {
-    const res = await api.post(`/courses/${courseId}/content/${contentId}/create-assignment`);
+    const res = await api.post(`/courses/${courseId}/content/${contentId}/create-assignment`, overrides ?? {});
     return res.data;
   },
+  // URL of the formal Word (.docx) handout + rubric for an assignment draft.
+  assignmentDocxUrl: (courseId: number, contentId: number) =>
+    `${API_URL}/courses/${courseId}/content/${contentId}/assignment-docx`,
   listJobs: async (courseId: number, activeOnly = false): Promise<GenerationJob[]> => {
     const res = await api.get(`/courses/${courseId}/content/jobs`, {
       params: { active_only: activeOnly }, cache: false,
@@ -1705,18 +1919,22 @@ export const contentGenerationService = {
     });
     return res.data;
   },
+  // Concepts available for generation.
   listConcepts: async (courseId: number): Promise<GeneratableConcept[]> => {
     const res = await api.get(`/courses/${courseId}/content-concepts`);
     return res.data;
   },
+  // Lists generated content, optionally by type.
   list: async (courseId: number, contentType?: string): Promise<GeneratedContentItem[]> => {
     const res = await api.get(`/courses/${courseId}/content`, { params: contentType ? { content_type: contentType } : undefined });
     return res.data;
   },
+  // Gets one content item.
   get: async (courseId: number, contentId: number): Promise<GeneratedContentItem> => {
     const res = await api.get(`/courses/${courseId}/content/${contentId}`);
     return res.data;
   },
+  // Edits a content item's title/payload.
   edit: async (courseId: number, contentId: number, data: { title?: string; payload?: any }): Promise<GeneratedContentItem> => {
     const res = await api.patch(`/courses/${courseId}/content/${contentId}`, data);
     return res.data;
@@ -1727,13 +1945,16 @@ export const contentGenerationService = {
     const res = await api.post(`/courses/${courseId}/content/${contentId}/refine`, { instruction }, { timeout: 60000 });
     return res.data;
   },
+  // Teacher approves or rejects a draft.
   review: async (courseId: number, contentId: number, approve: boolean, notes?: string): Promise<GeneratedContentItem> => {
     const res = await api.post(`/courses/${courseId}/content/${contentId}/review`, { approve, notes });
     return res.data;
   },
+  // Deletes a content item.
   remove: async (courseId: number, contentId: number): Promise<void> => {
     await api.delete(`/courses/${courseId}/content/${contentId}`);
   },
+  // Student submits quiz answers for scoring.
   submitAttempt: async (courseId: number, contentId: number, answers: number[]): Promise<QuizResult> => {
     const res = await api.post(`/courses/${courseId}/content/${contentId}/attempt`, { answers });
     return res.data;
@@ -1756,6 +1977,7 @@ export interface BadgeItem {
   points_reward: number;
 }
 
+// One row of the course leaderboard.
 export interface LeaderboardEntry {
   student_id: number;
   student_name: string;
@@ -1764,6 +1986,7 @@ export interface LeaderboardEntry {
   rank: number;
 }
 
+// The student's points, streaks and badges in a course.
 export interface MyGamificationSummary {
   course_id: number;
   total_points: number;
@@ -1780,6 +2003,7 @@ export interface MockTest {
   questions: ServedQuestion[];
 }
 
+// Scored result of a mock test.
 export interface MockResult {
   score: number;
   points_earned: number;
@@ -1793,6 +2017,7 @@ export interface MockResult {
   by_difficulty: Array<{ name: string; accuracy: number; points_possible: number }>;
 }
 
+// Practice analytics: mastery, trends and streaks.
 export interface PracticeAnalytics {
   window_days: number;
   concepts: Array<{ concept_node_id: string; concept_name: string; mastery: number; evidence_count: number }>;
@@ -1808,15 +2033,19 @@ export interface PracticeAnalytics {
   total_points: number;
 }
 
+// Practice: mock tests built from the question bank, and practice analytics.
 export const practiceService = {
+  // How many questions are available for a mock test.
   bankSize: async (courseId: number): Promise<{ available: number; max_size: number }> => {
     const res = await api.get(`/courses/${courseId}/practice/bank-size`);
     return res.data;
   },
+  // Starts a mock test.
   startMock: async (courseId: number, size = 20): Promise<MockTest> => {
     const res = await api.post(`/courses/${courseId}/practice/mock-test`, { size });
     return res.data;
   },
+  // Submits mock test answers for scoring.
   submitMock: async (
     courseId: number, attemptToken: string, responses: Record<string, any>, durationSeconds?: number
   ): Promise<MockResult> => {
@@ -1825,6 +2054,7 @@ export const practiceService = {
     });
     return res.data;
   },
+  // Gets practice analytics over a day window.
   analytics: async (courseId: number, days = 30): Promise<PracticeAnalytics> => {
     const res = await api.get(`/courses/${courseId}/practice/analytics`, { params: { days } });
     return res.data;
@@ -1843,6 +2073,7 @@ export interface LiveSession {
   participants: number;
 }
 
+// Live game state pushed over the WebSocket.
 export interface LiveState {
   type: 'state';
   code: string;
@@ -1861,7 +2092,9 @@ export interface LiveState {
   };
 }
 
+// Live multiplayer quiz: create/list sessions, join by code and open the play WebSocket.
 export const liveQuizService = {
+  // Teacher creates a live session from chosen questions.
   createSession: async (
     courseId: number,
     data: { title: string; question_ids: number[]; seconds_per_question?: number; speed_bonus_max?: number }
@@ -1869,10 +2102,12 @@ export const liveQuizService = {
     const res = await api.post(`/courses/${courseId}/live/sessions`, data);
     return res.data;
   },
+  // Lists live sessions for a course.
   listSessions: async (courseId: number): Promise<LiveSession[]> => {
     const res = await api.get(`/courses/${courseId}/live/sessions`);
     return res.data;
   },
+  // Student joins a live session with a code and nickname.
   join: async (code: string, nickname: string): Promise<{
     session_id: number; participant_id: number; code: string; title: string; nickname: string; status: string;
   }> => {
@@ -1908,6 +2143,7 @@ export interface QuestionPayload {
   pairs?: Array<{ left: string; right: string }>;
 }
 
+// A question in the course question bank.
 export interface BankQuestion {
   id: number;
   course_id: number;
@@ -1929,6 +2165,7 @@ export interface BankQuestion {
   created_at: string;
 }
 
+// An exam configuration.
 export interface ExamItem {
   id: number;
   course_id: number;
@@ -1962,6 +2199,7 @@ export interface ServedQuestion {
   right_items?: string[];
 }
 
+// An exam attempt as started by a student.
 export interface ExamAttempt {
   attempt_id: number;
   exam_id: number;
@@ -1974,6 +2212,7 @@ export interface ExamAttempt {
   started_at: string;
 }
 
+// Scored result of an exam attempt.
 export interface ExamResult {
   attempt_id: number;
   score: number;
@@ -1989,6 +2228,7 @@ export interface ExamResult {
   }>;
 }
 
+// One student attempt, for the teacher's results table.
 export interface ExamAttemptSummary {
   id: number;
   student_id: number;
@@ -1999,11 +2239,14 @@ export interface ExamAttemptSummary {
   submitted_at: string | null;
 }
 
+// Question bank: list/create/edit/delete questions, import from content and AI generation.
 export const questionBankService = {
+  // Supported question types.
   types: async (courseId: number): Promise<Array<{ key: QuestionType; label: string }>> => {
     const res = await api.get(`/courses/${courseId}/question-bank/types`);
     return res.data;
   },
+  // Lists questions with filters.
   list: async (
     courseId: number,
     filters?: { question_type?: string; difficulty?: string; concept_node_id?: string; search?: string }
@@ -2011,23 +2254,28 @@ export const questionBankService = {
     const res = await api.get(`/courses/${courseId}/question-bank`, { params: filters });
     return res.data;
   },
+  // Creates a question.
   create: async (courseId: number, data: any): Promise<BankQuestion> => {
     const res = await api.post(`/courses/${courseId}/question-bank`, data);
     return res.data;
   },
+  // Edits a question.
   update: async (courseId: number, questionId: number, data: any): Promise<BankQuestion> => {
     const res = await api.patch(`/courses/${courseId}/question-bank/${questionId}`, data);
     return res.data;
   },
+  // Deletes a question.
   remove: async (courseId: number, questionId: number): Promise<void> => {
     await api.delete(`/courses/${courseId}/question-bank/${questionId}`);
   },
+  // Imports questions from a generated quiz.
   importFromContent: async (
     courseId: number, contentId: number
   ): Promise<{ imported: number; skipped: number; message: string }> => {
     const res = await api.post(`/courses/${courseId}/question-bank/import`, { content_id: contentId });
     return res.data;
   },
+  // AI-generates validated questions for a concept.
   generate: async (
     courseId: number,
     data: { concept_node_id: string; question_type: QuestionType; count?: number; difficulty?: string }
@@ -2038,30 +2286,38 @@ export const questionBankService = {
   },
 };
 
+// Exams: configure, run and review timed exams.
 export const examService = {
+  // Lists exams.
   list: async (courseId: number): Promise<ExamItem[]> => {
     const res = await api.get(`/courses/${courseId}/exams`);
     return res.data;
   },
+  // Creates an exam.
   create: async (courseId: number, data: any): Promise<ExamItem> => {
     const res = await api.post(`/courses/${courseId}/exams`, data);
     return res.data;
   },
+  // Edits an exam.
   update: async (courseId: number, examId: number, data: any): Promise<ExamItem> => {
     const res = await api.patch(`/courses/${courseId}/exams/${examId}`, data);
     return res.data;
   },
+  // Deletes an exam.
   remove: async (courseId: number, examId: number): Promise<void> => {
     await api.delete(`/courses/${courseId}/exams/${examId}`);
   },
+  // Teacher: lists attempts on an exam.
   attempts: async (courseId: number, examId: number): Promise<ExamAttemptSummary[]> => {
     const res = await api.get(`/courses/${courseId}/exams/${examId}/attempts`);
     return res.data;
   },
+  // Student starts an attempt.
   startAttempt: async (courseId: number, examId: number): Promise<ExamAttempt> => {
     const res = await api.post(`/courses/${courseId}/exams/${examId}/attempt`);
     return res.data;
   },
+  // Student submits answers for scoring.
   submitAttempt: async (
     courseId: number, examId: number, attemptId: number, responses: Record<string, any>
   ): Promise<ExamResult> => {
@@ -2087,6 +2343,7 @@ export interface StudyOverviewItem {
   supports_match: boolean;
 }
 
+// One card/question in the Learn queue.
 export interface LearnQueueItem {
   kind: 'card' | 'question';
   index: number;
@@ -2099,10 +2356,12 @@ export interface LearnQueueItem {
   times_seen: number;
 }
 
+// Counts of items by learning stage.
 export interface LearnProgress {
   total: number; new: number; due: number; mastered: number; resting: number;
 }
 
+// The spaced-repetition queue for a set.
 export interface LearnQueue {
   content_id: number;
   title: string;
@@ -2111,6 +2370,7 @@ export interface LearnQueue {
   progress: LearnProgress;
 }
 
+// A Test-mode quiz (no answer key).
 export interface StudyTest {
   content_id: number;
   title: string;
@@ -2119,6 +2379,7 @@ export interface StudyTest {
   questions: Array<{ source_index: number; question: string; options: string[]; explanation: string }>;
 }
 
+// Scored Test-mode result.
 export interface StudyTestResult {
   score: number;
   correct_count: number;
@@ -2129,12 +2390,14 @@ export interface StudyTestResult {
   }>;
 }
 
+// Term/definition pairs for Match mode.
 export interface MatchSet {
   content_id: number;
   title: string;
   pairs: Array<{ index: number; term: string; definition: string }>;
 }
 
+// A past study session.
 export interface StudySessionItem {
   id: number;
   mode: 'learn' | 'test' | 'match';
@@ -2146,15 +2409,19 @@ export interface StudySessionItem {
   created_at: string;
 }
 
+// Study modes: Learn (spaced repetition), Test and Match over approved material; no AI calls.
 export const studyService = {
+  // Study overview for all sets in a course.
   overview: async (courseId: number): Promise<StudyOverviewItem[]> => {
     const res = await api.get(`/courses/${courseId}/study/overview`);
     return res.data;
   },
+  // Gets the Learn queue.
   getLearnQueue: async (courseId: number, contentId: number, limit = 20): Promise<LearnQueue> => {
     const res = await api.get(`/courses/${courseId}/study/${contentId}/learn`, { params: { limit } });
     return res.data;
   },
+  // Submits Learn answers and updates progress.
   submitLearn: async (
     courseId: number, contentId: number,
     answers: Array<{ item_index: number; correct: boolean }>, durationSeconds?: number
@@ -2164,12 +2431,14 @@ export const studyService = {
     });
     return res.data;
   },
+  // Starts a Test.
   startTest: async (courseId: number, contentId: number, count?: number): Promise<StudyTest> => {
     const res = await api.get(`/courses/${courseId}/study/${contentId}/test`, {
       params: count ? { count } : undefined,
     });
     return res.data;
   },
+  // Scores a Test.
   submitTest: async (
     courseId: number, contentId: number, attemptToken: string, answers: number[]
   ): Promise<StudyTestResult> => {
@@ -2178,16 +2447,19 @@ export const studyService = {
     });
     return res.data;
   },
+  // Gets pairs for Match.
   startMatch: async (courseId: number, contentId: number, pairs = 6): Promise<MatchSet> => {
     const res = await api.get(`/courses/${courseId}/study/${contentId}/match`, { params: { pairs } });
     return res.data;
   },
+  // Records a Match result.
   submitMatch: async (
     courseId: number, contentId: number,
     data: { pairs_total: number; pairs_matched: number; duration_seconds: number }
   ): Promise<void> => {
     await api.post(`/courses/${courseId}/study/${contentId}/match`, data);
   },
+  // Lists past study sessions.
   sessions: async (courseId: number, limit = 20): Promise<StudySessionItem[]> => {
     const res = await api.get(`/courses/${courseId}/study/sessions`, { params: { limit } });
     return res.data;
@@ -2211,6 +2483,7 @@ export interface ConceptGame {
 // Concept games - a student picks a concept and the model authors a complete,
 // self-contained HTML page they can play.
 export const gameService = {
+  // AI-authors a game for a concept (very long timeout).
   generate: async (
     courseId: number,
     data: { concept_node_id: string; difficulty?: 'Easy' | 'Medium' | 'Hard' }
@@ -2220,10 +2493,12 @@ export const gameService = {
     const res = await api.post(`/games/course/${courseId}/generate`, data, { timeout: 240000 });
     return res.data;
   },
+  // Lists games for a course.
   list: async (courseId: number): Promise<ConceptGame[]> => {
     const res = await api.get(`/games/course/${courseId}`);
     return res.data;
   },
+  // Records a play score.
   recordPlay: async (gameId: number, score: number): Promise<void> => {
     await api.post(`/games/${gameId}/play`, { score });
   },
@@ -2264,14 +2539,17 @@ export const gameService = {
 
 // Gamification Service - points, streaks, badges, leaderboard
 export const gamificationService = {
+  // Gets the course leaderboard.
   getLeaderboard: async (courseId: number): Promise<LeaderboardEntry[]> => {
     const res = await api.get(`/courses/${courseId}/gamification/leaderboard`);
     return res.data;
   },
+  // Gets the student's points/streak/badges.
   getMySummary: async (courseId: number): Promise<MyGamificationSummary> => {
     const res = await api.get(`/courses/${courseId}/gamification/my-summary`);
     return res.data;
   },
+  // Lists every badge.
   listAllBadges: async (): Promise<BadgeItem[]> => {
     const res = await api.get('/gamification/badges');
     return res.data;
@@ -2289,6 +2567,7 @@ export interface RevisionPlanItem {
   recommended_materials: Array<{ content_id: number; content_type: string; title: string }>;
 }
 
+// A personalised revision plan.
 export interface RevisionPlan {
   course_id: number;
   overall_progress: number | null;
@@ -2297,16 +2576,19 @@ export interface RevisionPlan {
 
 // Adaptive Engine Service - personalized revision plans (Observe/Analyze/Plan/Act)
 export const adaptiveEngineService = {
+  // Student's own revision plan.
   getMyPlan: async (courseId: number): Promise<RevisionPlan> => {
     const res = await api.get(`/courses/${courseId}/adaptive/my-plan`);
     return res.data;
   },
+  // Teacher views one student's plan.
   getStudentPlan: async (courseId: number, studentId: number): Promise<RevisionPlan> => {
     const res = await api.get(`/courses/${courseId}/adaptive/student/${studentId}`);
     return res.data;
   },
 };
 
+// Per-assignment submission and grade stats.
 export interface AssignmentStat {
   id: number;
   title: string;
@@ -2318,6 +2600,7 @@ export interface AssignmentStat {
   avg_grade: number | null;
 }
 
+// Per-student completion and grade stats.
 export interface StudentStat {
   student_id: number;
   full_name: string;
@@ -2331,6 +2614,7 @@ export interface StudentStat {
   assignment_status: ('submitted' | 'late' | 'missing')[];
 }
 
+// Class mastery of one concept.
 export interface ConceptMasteryStat {
   concept_node_id: string;
   concept_name: string;
@@ -2339,6 +2623,7 @@ export interface ConceptMasteryStat {
   at_risk_count: number;
 }
 
+// Full analytics payload for a course.
 export interface CourseAnalytics {
   course_id: number;
   course_name: string;
@@ -2356,6 +2641,7 @@ export interface CourseAnalytics {
   concept_mastery: ConceptMasteryStat[];
 }
 
+// A student's progress in one course.
 export interface MyCourseProgress {
   course_id: number;
   course_name: string;
@@ -2366,6 +2652,7 @@ export interface MyCourseProgress {
   avg_grade: number | null;
 }
 
+// User counts by role.
 export interface RoleCounts {
   students: number;
   teachers: number;
@@ -2374,6 +2661,7 @@ export interface RoleCounts {
   admins: number;
 }
 
+// Summary row for one course.
 export interface CourseSummary {
   course_id: number;
   course_name: string;
@@ -2382,6 +2670,7 @@ export interface CourseSummary {
   avg_mastery: number | null;
 }
 
+// Platform-wide overview for admins.
 export interface PlatformOverview {
   total_courses: number;
   total_programs: number;
@@ -2391,15 +2680,19 @@ export interface PlatformOverview {
   concept_mastery: ConceptMasteryStat[];
 }
 
+// Analytics: platform overview (admin), course analytics (teacher) and own progress (student).
 export const analyticsService = {
+  // Platform-wide figures.
   getPlatformOverview: async (): Promise<PlatformOverview> => {
     const res = await api.get('/analytics/platform-overview');
     return res.data;
   },
+  // Analytics for one course.
   getCourseAnalytics: async (courseId: number): Promise<CourseAnalytics> => {
     const res = await api.get(`/analytics/course/${courseId}`);
     return res.data;
   },
+  // Student's progress across courses.
   getMyProgress: async (): Promise<MyCourseProgress[]> => {
     const res = await api.get('/analytics/my-progress');
     return res.data;

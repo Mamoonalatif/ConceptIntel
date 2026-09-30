@@ -18,9 +18,11 @@ logger = logging.getLogger("conceptintel.outcomes")
 
 
 def _normalize_title(text: str) -> str:
+    """Lowercase and strip non-alphanumerics so near-identical titles compare equal (duplicate detection)."""
     return re.sub(r"[^a-z0-9]", "", (text or "").lower())
 
 
+# Neo4j node ids are namespaced by level (clo_/plo_/ga_) so they never collide across node types.
 def _clo_node_id(clo_id: int) -> str:
     return f"clo_{clo_id}"
 
@@ -34,6 +36,7 @@ def _ga_node_id(ga_id: int) -> str:
 
 
 def sync_ga_node(ga_id: int, code: str, title: str, description: str = "") -> None:
+    """Create or update a Graduate Attribute node in Neo4j (MERGE = idempotent)."""
     neo4j_service.query(
         """
         MERGE (g:GA {id: $id})
@@ -44,6 +47,7 @@ def sync_ga_node(ga_id: int, code: str, title: str, description: str = "") -> No
 
 
 def sync_plo_node(plo_id: int, program_id: int, code: str, title: str, description: str = "") -> None:
+    """Create or update a Program Learning Outcome node in Neo4j."""
     neo4j_service.query(
         """
         MERGE (p:PLO {id: $id})
@@ -57,6 +61,7 @@ def sync_plo_node(plo_id: int, program_id: int, code: str, title: str, descripti
 
 
 def sync_clo_node(clo_id: int, catalog_id: int, code: str, title: str, description: str = "") -> None:
+    """Create or update a Course Learning Outcome node in Neo4j."""
     neo4j_service.query(
         """
         MERGE (c:CLO {id: $id})
@@ -70,14 +75,17 @@ def sync_clo_node(clo_id: int, catalog_id: int, code: str, title: str, descripti
 
 
 def delete_ga_node(ga_id: int) -> None:
+    """Remove a GA node (and its edges) from Neo4j."""
     neo4j_service.query("MATCH (g:GA {id: $id}) DETACH DELETE g", {"id": _ga_node_id(ga_id)})
 
 
 def delete_plo_node(plo_id: int) -> None:
+    """Remove a PLO node (and its edges) from Neo4j."""
     neo4j_service.query("MATCH (p:PLO {id: $id}) DETACH DELETE p", {"id": _plo_node_id(plo_id)})
 
 
 def delete_clo_node(clo_id: int) -> None:
+    """Remove a CLO node (and its edges) from Neo4j."""
     neo4j_service.query("MATCH (c:CLO {id: $id}) DETACH DELETE c", {"id": _clo_node_id(clo_id)})
 
 
@@ -105,6 +113,7 @@ def sync_plo_ga_links(plo_id: int, ga_ids: List[int]) -> None:
 
 
 def sync_clo_plo_links(clo_id: int, plo_ids: List[int]) -> None:
+    """Full replace of one CLO's MAPS_TO edges to PLO nodes in Neo4j."""
     clo_node = _clo_node_id(clo_id)
     neo4j_service.query(
         "MATCH (c:CLO {id: $id})-[r:MAPS_TO]->(:PLO) DELETE r",

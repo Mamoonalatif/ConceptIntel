@@ -1,3 +1,4 @@
+// Purpose: the common page layout for every logged-in screen: sidebar navigation, top bar (theme, notifications, profile menu) and content area.
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { ThemeToggle } from './ThemeToggle';
@@ -9,6 +10,7 @@ import { courseService, enrollmentService } from '../services/api';
 import { Avatar } from './Avatar';
 import { FoxMark } from '../components/FoxMark';
 
+// One entry in the sidebar; may be top-level or an indented course/section link.
 export interface NavItem {
   key: string;
   label: string;
@@ -28,6 +30,7 @@ export interface NavItem {
   depth?: 0 | 1 | 2;
 }
 
+// Props: role subtitle, the page's own nav items, page content, and optional top-right action buttons.
 interface AppShellProps {
   /** Small subtitle shown under the app name, e.g. "Student Hub", "Admin Console". */
   roleLabel: string;
@@ -51,12 +54,14 @@ export const AppShell: React.FC<AppShellProps> = ({ roleLabel, navItems, childre
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  // UI state: change-password modal, mobile drawer, notification dropdown and profile menu visibility; ref used for click-outside on the profile menu.
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const profileMenuRef = useRef<HTMLDivElement>(null);
 
+  // While the profile menu is open, close it when the user clicks outside of it.
   useEffect(() => {
     if (!profileMenuOpen) return;
     const handleClickOutside = (e: MouseEvent) => {
@@ -75,6 +80,7 @@ export const AppShell: React.FC<AppShellProps> = ({ roleLabel, navItems, childre
   // global entry would land you on whichever course happened to be first and make you
   // re-pick - the per-course link nested under the active course (below) is the only
   // way in that already knows which course you mean.
+  // `active` is derived from the current URL so the right row is highlighted.
   const globalNavItems: NavItem[] = [
     { key: 'calendar', label: 'Calendar', icon: CalendarDays, active: location.pathname === '/calendar', onClick: () => navigate('/calendar') },
     { key: 'analytics', label: 'Analytics', icon: BarChart3, active: location.pathname === '/analytics', onClick: () => navigate('/analytics') },
@@ -88,6 +94,7 @@ export const AppShell: React.FC<AppShellProps> = ({ roleLabel, navItems, childre
   // convenience layer: a failure leaves the sidebar exactly as it was.
   const [myCourses, setMyCourses] = useState<{ id: number; name: string }[]>([]);
 
+  // Load the user's courses (teacher: courses they teach; student: courses they are enrolled in) for the sidebar; de-duplicated by id.
   useEffect(() => {
     if (!user) { setMyCourses([]); return; }
     let cancelled = false;
@@ -118,6 +125,7 @@ export const AppShell: React.FC<AppShellProps> = ({ roleLabel, navItems, childre
 
   // Which course the user is currently looking at, from either /course/:id[/graph]
   // or /content-studio?course=:id. Drives which course expands its sub-sections.
+  // Course id taken from the URL (used to expand the current course's sub-links).
   const activeCourseId = useMemo(() => {
     const m = location.pathname.match(/^\/course\/(\d+)/);
     if (m) return parseInt(m[1], 10);
@@ -131,6 +139,7 @@ export const AppShell: React.FC<AppShellProps> = ({ roleLabel, navItems, childre
   // The studio's open tab, so Content Studio and Content Library can highlight
   // separately even though they are the same route. Absent means the page's own
   // default, which is Generate for anyone who can author and the library otherwise.
+  // Which Content Studio tab is open, so Studio and Library can be highlighted separately.
   const studioTab = useMemo(() => {
     if (location.pathname !== '/content-studio') return null;
     return new URLSearchParams(location.search).get('tab')
@@ -139,6 +148,7 @@ export const AppShell: React.FC<AppShellProps> = ({ roleLabel, navItems, childre
 
   // Splice the course list in directly beneath the role's own "My Courses" /
   // "My Classes" entry, and expand the active course into its sections.
+  // Builds the final sidebar list by inserting each course (and, for the active one, Concept Graph / Content Studio / Content Library links) under the role's courses entry.
   const expandedNavItems = useMemo<NavItem[]>(() => {
     const anchorKey = user?.role === 'teacher' ? 'courses' : 'classes';
     const idx = navItems.findIndex((i) => i.key === anchorKey);
@@ -197,6 +207,7 @@ export const AppShell: React.FC<AppShellProps> = ({ roleLabel, navItems, childre
     return out;
   }, [navItems, myCourses, activeCourseId, location.pathname, studioTab, user?.role, navigate]);
 
+  // Renders one sidebar row as a button, styled by nesting depth and active state; closes the mobile drawer on click.
   const renderNavItem = (item: NavItem) => {
     const Icon = item.icon;
     const depth = item.depth ?? (item.nested ? 1 : 0);
@@ -260,6 +271,7 @@ export const AppShell: React.FC<AppShellProps> = ({ roleLabel, navItems, childre
     );
   };
 
+  // Sidebar contents (logo, role label, nav lists); reused in both the desktop sidebar and the mobile drawer.
   const sidebarBody = (
     <>
       {/* Logo — same mark used on the public landing page, for one consistent brand image everywhere. */}
@@ -293,6 +305,7 @@ export const AppShell: React.FC<AppShellProps> = ({ roleLabel, navItems, childre
   // scrollable content, not inside the sidebar - a persistent top navbar
   // (not just a mobile fallback), sticky within the main column so it stays
   // visible on every page regardless of scroll position.
+  // Sticky top bar with the mobile menu button, role title, theme toggle, notifications and the profile dropdown.
   const topBar = (
     <div className="sticky top-0 z-20 flex items-center justify-between gap-3 px-4 sm:px-6 lg:px-8 py-3 bg-surface border-b border-border shadow-soft">
       <div className="flex items-center gap-3 min-w-0">

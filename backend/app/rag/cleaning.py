@@ -10,6 +10,7 @@ import re
 import unicodedata
 from collections import Counter
 
+# Matches a line that is only a page number such as "12", "Page 3" or "3 of 10".
 PAGE_NUMBER_PATTERN = re.compile(r"^\s*(page\s+)?\d{1,4}(\s*(of|/)\s*\d{1,4})?\s*$", re.IGNORECASE)
 # A line is a repeated-boilerplate candidate if it's short and appears often.
 BOILERPLATE_MAX_LEN = 80
@@ -48,12 +49,14 @@ def strip_repeated_boilerplate(text: str) -> str:
 
 
 def collapse_whitespace(text: str) -> str:
+    """Squeezes runs of spaces/tabs to one space and 3+ newlines to a blank line, then trims."""
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
 
 
 def remove_control_chars(text: str) -> str:
+    """Drops non-printable characters (keeps newline, carriage return, tab)."""
     return "".join(ch for ch in text if ch.isprintable() or ch in "\n\r\t")
 
 

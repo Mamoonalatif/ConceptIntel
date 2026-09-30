@@ -14,11 +14,13 @@ from pathlib import Path
 
 logger = logging.getLogger("conceptintel")
 
+# Below this many extracted characters a PDF is assumed scanned; OCR at most MAX_OCR_PAGES pages.
 MIN_CHARS_BEFORE_OCR_FALLBACK = 200
 MAX_OCR_PAGES = 50
 
 
 def is_tesseract_available() -> bool:
+    """True if pytesseract is importable and the Tesseract binary responds."""
     try:
         import pytesseract
         pytesseract.get_tesseract_version()

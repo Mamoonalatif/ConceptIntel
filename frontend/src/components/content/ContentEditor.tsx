@@ -1,3 +1,4 @@
+// Purpose: lets a teacher hand-edit AI-generated content (flashcards, quizzes, study guides) and save it back via the API.
 import React, { useState } from 'react';
 import {
   ArrowLeft, Save, RefreshCw, Plus, Trash2, AlertTriangle, Check, Info, X,
@@ -6,6 +7,7 @@ import { contentGenerationService } from '../../services/api';
 import type { GeneratedContentItem } from '../../services/api';
 import { apiErrorMessage } from '../../lib/apiError';
 
+// Props: course id, the content item being edited, and cancel / saved callbacks.
 interface ContentEditorProps {
   courseId: number;
   item: GeneratedContentItem;
@@ -30,16 +32,19 @@ const MIN_OPTIONS = 2;
 const MAX_OPTIONS = 5;
 
 export const ContentEditor: React.FC<ContentEditorProps> = ({ courseId, item, onCancel, onSaved }) => {
+  // Editable copy of the title; payload (below) is an editable copy of the content body; saving/error track the save request.
   const [title, setTitle] = useState(item.title);
   // Deep-cloned so abandoning the edit cannot mutate the list behind it.
   const [payload, setPayload] = useState<any>(() => JSON.parse(JSON.stringify(item.payload || {})));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
+  // Which editor section to show, based on the item's content type (anything that is not flashcard/study guide is a quiz).
   const isFlash = item.content_type === 'flashcard';
   const isGuide = item.content_type === 'study_guide';
   const isQuiz = !isFlash && !isGuide;
 
+  // Checks the edited content against the same rules as the backend; returns an error message, or null if valid.
   const validate = (): string | null => {
     if (!title.trim()) return 'The title cannot be empty.';
     if (isFlash) {
@@ -72,6 +77,7 @@ export const ContentEditor: React.FC<ContentEditorProps> = ({ courseId, item, on
     return null;
   };
 
+  // Validates, then sends the changes to the server and hands the updated item back to the parent.
   const save = async () => {
     const problem = validate();
     if (problem) { setError(problem); return; }
@@ -86,6 +92,7 @@ export const ContentEditor: React.FC<ContentEditorProps> = ({ courseId, item, on
     }
   };
 
+  // Immutable-update helper: clones the payload, lets `fn` modify the clone, then stores it so React re-renders.
   const set = (fn: (draft: any) => void) => {
     setPayload((prev: any) => {
       const next = JSON.parse(JSON.stringify(prev));
@@ -107,12 +114,14 @@ export const ContentEditor: React.FC<ContentEditorProps> = ({ courseId, item, on
         </button>
       </div>
 
+      {/* Validation / save error banner */}
       {error && (
         <div className="bg-red-50 border border-red-200 text-red-600 dark:bg-red-500/10 dark:border-red-500/30 dark:text-red-400 rounded-xl p-4 flex items-start gap-3 text-sm">
           <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />{error}
         </div>
       )}
 
+      {/* Warning: editing an approved item changes what students see immediately. */}
       {item.status === 'Approved' && (
         <div className="bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 text-amber-800 dark:text-amber-300 rounded-xl p-3 flex items-start gap-2.5 text-xs">
           <Info className="w-3.5 h-3.5 mt-0.5 shrink-0" />
@@ -335,6 +344,8 @@ export const ContentEditor: React.FC<ContentEditorProps> = ({ courseId, item, on
   );
 };
 
+// Reusable editor for a list of text entries (key points, mistakes, formulae) with add / edit / remove controls.
+// `mono` switches to a monospace single-line style for formulae.
 const ListEditor: React.FC<{
   label: string; items: string[]; mono?: boolean;
   onAdd: () => void; onChange: (i: number, v: string) => void; onRemove: (i: number) => void;

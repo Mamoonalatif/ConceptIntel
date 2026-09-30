@@ -1,3 +1,6 @@
+// ContentStudioPage: hosts Content Studio / Content Library. Picks a course, then shows
+// one tab (generate, library, study, practice, exams, live quiz, question bank, games)
+// which renders the matching component. The active tab and course live in the URL.
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
@@ -19,6 +22,7 @@ import { PracticeHub } from '../components/PracticeHub';
 import { LiveQuiz } from '../components/LiveQuiz';
 import { apiErrorMessage } from '../lib/apiError';
 
+// Normalised course shape used by the picker (teacher, admin and student APIs return different shapes).
 interface CourseLite {
   id: number;
   name: string;
@@ -73,12 +77,14 @@ export const ContentStudioPage: React.FC = () => {
   // real. The tab strip below already hides these; this covers the URL.
   const tab: StudioTab =
     !canAuthor && (requestedTab === 'generate' || requestedTab === 'bank') ? 'library' : requestedTab;
+  // Switch tab by writing ?tab= into the URL (keeps other params).
   const setTab = (next: StudioTab) => {
     const params = new URLSearchParams(searchParams);
     params.set('tab', next);
     setSearchParams(params, { replace: true });
   };
 
+  // Load the courses visible to this role and pick the initial one (from ?course= if valid).
   useEffect(() => {
     const load = async () => {
       setLoading(true);
@@ -135,6 +141,7 @@ export const ContentStudioPage: React.FC = () => {
         ? 'Generate flashcards, quizzes and study guides from your concept graph, grounded in the material you uploaded. Nothing reaches students until you approve it.'
         : 'Study material your instructors have approved, plus playable games generated for any concept.';
 
+  // Select a course and mirror it into ?course= in the URL.
   const handleCourseChange = (id: number) => {
     setCourseId(id);
     // Merged into the existing params rather than replacing them: writing a bare
@@ -249,6 +256,7 @@ export const ContentStudioPage: React.FC = () => {
               ))}
             </div>
 
+            {/* Tab content: each tab renders one component, keyed by course so it resets on course change. */}
             {courseId && tab === 'generate' && canAuthor && (
               <ContentGeneration
                 key={`g-${courseId}`}

@@ -1,8 +1,11 @@
+// Purpose: password-strength rules (shared by register/reset/change-password forms) and a live checklist UI that shows which rules pass.
 import React from 'react';
 import { Check, X } from 'lucide-react';
 
+// Characters that count as a "special character" in the password rules.
 export const SPECIAL_CHARS = '!@#$%^&*';
 
+// Evaluates each password rule and returns a pass/fail flag per rule.
 export const passwordChecks = (password: string) => ({
   length: password.length >= 8,
   upper: /[A-Z]/.test(password),
@@ -11,9 +14,11 @@ export const passwordChecks = (password: string) => ({
   special: [...password].some((ch) => SPECIAL_CHARS.includes(ch)),
 });
 
+// True only when every rule passes; forms use this to allow submission.
 export const isPasswordValid = (password: string) =>
   Object.values(passwordChecks(password)).every(Boolean);
 
+// Display order and human-readable label for each rule shown in the checklist.
 const RULES: { key: keyof ReturnType<typeof passwordChecks>; label: string }[] = [
   { key: 'length', label: 'At least 8 characters' },
   { key: 'upper', label: 'One uppercase letter' },

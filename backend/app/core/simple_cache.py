@@ -12,12 +12,15 @@ this app's current single-process deployment; would need Redis for a
 multi-worker one.
 """
 import time
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
+# key -> (expiry time on the monotonic clock, cached value)
 _store: dict[str, tuple[float, Any]] = {}
 
 
 def get_or_compute(key: str, ttl_seconds: float, compute: Callable[[], Any]) -> Any:
+    """Return the cached value for `key` if it has not expired; otherwise call
+    `compute()`, cache the result for `ttl_seconds`, and return it."""
     cached = _store.get(key)
     if cached and cached[0] > time.monotonic():
         return cached[1]
@@ -27,9 +30,11 @@ def get_or_compute(key: str, ttl_seconds: float, compute: Callable[[], Any]) -> 
 
 
 def invalidate(key: str) -> None:
+    """Drop one cache entry (call after the underlying data changes)."""
     _store.pop(key, None)
 
 
 def invalidate_prefix(prefix: str) -> None:
+    """Drop every cache entry whose key starts with `prefix`."""
     for key in [k for k in _store if k.startswith(prefix)]:
         _store.pop(key, None)

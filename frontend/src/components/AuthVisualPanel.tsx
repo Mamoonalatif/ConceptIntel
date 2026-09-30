@@ -1,3 +1,4 @@
+// Purpose: decorative left-hand panel (logo, illustration, tagline) shown beside the login/register forms on large screens.
 import React from 'react';
 import { AuthIllustration } from './illustrations';
 import { FoxMark } from '../components/FoxMark';
@@ -12,11 +13,14 @@ export interface AuthVisualPanelProps {
   illustration?: React.FC<{ className?: string }>;
 }
 
+// Renders the branded gradient panel; falls back to the default AuthIllustration when no custom one is given.
+// Hidden below the `lg` breakpoint so mobile users only see the form.
 export const AuthVisualPanel: React.FC<AuthVisualPanelProps> = ({
   tagline,
   description,
   illustration: CustomIllustration,
 }) => {
+  // Pick the caller's illustration if provided, otherwise the default one.
   const VisualComponent = CustomIllustration || AuthIllustration;
 
   return (

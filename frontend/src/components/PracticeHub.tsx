@@ -1,3 +1,5 @@
+// PracticeHub: student practice tab. Lets a student start a mock test drawn from the whole question bank (weighted to weak concepts) and shows
+// practice analytics (sessions, streak, points, weakest/strongest concepts, per-mode accuracy). Teachers see the dashboard but cannot take a mock.
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Target, TrendingUp, Flame, RefreshCw, CheckCircle2, XCircle, AlertTriangle,
@@ -16,11 +18,13 @@ interface PracticeHubProps {
   canSolve?: boolean;
 }
 
+// Text colour for an accuracy/mastery percentage: green >=75, amber >=50, red below.
 const accuracyColor = (pct: number) =>
   pct >= 75 ? 'text-emerald-600 dark:text-emerald-400'
   : pct >= 50 ? 'text-amber-600 dark:text-amber-400'
   : 'text-rose-500';
 
+// Progress-bar fill colour using the same thresholds.
 const barColor = (pct: number) =>
   pct >= 75 ? 'bg-emerald-500' : pct >= 50 ? 'bg-amber-500' : 'bg-rose-500';
 
@@ -41,6 +45,7 @@ export const PracticeHub: React.FC<PracticeHubProps> = ({ courseId, canSolve = t
   const [test, setTest] = useState<MockTest | null>(null);
   const [starting, setStarting] = useState(false);
 
+  // Load the practice analytics and how many questions are available in the bank (bank size failure is tolerated).
   const load = async () => {
     setLoading(true);
     try {
@@ -57,11 +62,13 @@ export const PracticeHub: React.FC<PracticeHubProps> = ({ courseId, canSolve = t
     }
   };
 
+  // Load on mount / course change.
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [courseId]);
 
+  // Ask the server to build a mock test of `size` questions and switch to the runner.
   const startMock = async () => {
     setStarting(true);
     setError('');
@@ -74,6 +81,7 @@ export const PracticeHub: React.FC<PracticeHubProps> = ({ courseId, canSolve = t
     }
   };
 
+  // When a mock is in progress (student only), show the runner; its onDone clears the test and reloads the analytics.
   if (test && canSolve) {
     return (
       <MockRunner
@@ -84,6 +92,7 @@ export const PracticeHub: React.FC<PracticeHubProps> = ({ courseId, canSolve = t
     );
   }
 
+  // Number of bank questions, and the largest mock size allowed (capped by the server max and what is available).
   const available = bank?.available ?? 0;
   const maxSize = Math.min(bank?.max_size ?? 60, available || 60);
 
@@ -198,6 +207,7 @@ export const PracticeHub: React.FC<PracticeHubProps> = ({ courseId, canSolve = t
   );
 };
 
+// ConceptList: card listing concepts with a mastery bar and number of assessments (used for "weakest" and "strongest").
 const ConceptList: React.FC<{
   title: string; subtitle: string;
   rows: Array<{ concept_node_id: string; concept_name: string; mastery: number; evidence_count: number }>;
@@ -231,6 +241,7 @@ const ConceptList: React.FC<{
   </div>
 );
 
+// MockRunner: student answers every question of the mock, submits once with the attempt token and time taken, then sees the score with breakdowns by concept and difficulty.
 const MockRunner: React.FC<{
   courseId: number; test: MockTest; onDone: () => void;
 }> = ({ courseId, test, onDone }) => {
@@ -240,6 +251,7 @@ const MockRunner: React.FC<{
   const [error, setError] = useState('');
   const startedAt = useRef(Date.now());
 
+  // Submit all responses, and the elapsed seconds, for grading.
   const submit = async () => {
     setSubmitting(true);
     setError('');
@@ -255,6 +267,7 @@ const MockRunner: React.FC<{
     }
   };
 
+  // Result screen after submitting: score, breakdown cards and per-question review.
   if (result) {
     return (
       <div className="space-y-4">
@@ -299,6 +312,7 @@ const MockRunner: React.FC<{
     );
   }
 
+  // Number of questions answered so far, shown in the sticky header.
   const answered = test.questions.filter((q) => responses[String(q.id)] !== undefined).length;
 
   return (
@@ -332,6 +346,7 @@ const MockRunner: React.FC<{
   );
 };
 
+// BreakdownCard: list of accuracy bars for a grouping (by concept or by difficulty) in the mock result.
 const BreakdownCard: React.FC<{
   title: string; hint: string; rows: Array<{ name: string; accuracy: number; points_possible: number }>;
 }> = ({ title, hint, rows }) => (

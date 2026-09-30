@@ -106,6 +106,7 @@ class RecordGamePlayRequest(BaseModel):
 
 
 class GamePlayOut(BaseModel):
+    """Response model for a recorded play (which game, the clamped score, when)."""
     id: int
     game_id: int
     score: float
@@ -116,6 +117,7 @@ class GamePlayOut(BaseModel):
 
 
 def _get_course_or_404(db: Session, course_id: int) -> Course:
+    """Fetch the course by id or raise a 404."""
     course = db.query(Course).filter(Course.id == course_id).first()
     if not course:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")

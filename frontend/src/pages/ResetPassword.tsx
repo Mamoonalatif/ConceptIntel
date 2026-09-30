@@ -1,3 +1,5 @@
+// ResetPassword: destination of the emailed reset link (?token=...). Lets the user choose
+// a new password and submits it with the token to the backend.
 import React, { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { authService } from '../services/api';
@@ -7,6 +9,7 @@ import { AuthIllustration } from '../components/illustrations';
 import { FoxMark } from '../components/FoxMark';
 import { Lock, AlertCircle, Loader2, ArrowLeft, Eye, EyeOff, CheckCircle2 } from 'lucide-react';
 
+/** Page component: shows the form, a success message, or an "invalid link" message if the token is missing. */
 const ResetPassword: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -18,6 +21,7 @@ const ResetPassword: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [done, setDone] = useState(false);
 
+  // Checks token present and both passwords match, then calls the reset-password endpoint.
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');

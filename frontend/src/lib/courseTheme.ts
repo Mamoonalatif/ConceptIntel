@@ -1,3 +1,4 @@
+// Course banner theming helper: maps a course's theme colour name to Tailwind gradient classes.
 // Google Classroom-style per-course banner theming. Named colors, not raw hex -
 // keeps every banner visually consistent with the app's existing brand palette
 // instead of letting teachers pick an arbitrary, possibly-clashing color.
@@ -11,6 +12,7 @@ export const COURSE_THEME_PALETTE: Record<string, string> = {
   sky: 'from-sky-500 to-sky-600',
 };
 
+// Fallback gradients, used when a course has no (valid) theme colour.
 const DEFAULT_ROTATION = Object.values(COURSE_THEME_PALETTE);
 
 /** A course's banner gradient class: the teacher's chosen theme_color if set and

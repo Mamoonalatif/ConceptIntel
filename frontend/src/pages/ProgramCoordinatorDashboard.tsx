@@ -1,3 +1,6 @@
+// Program Coordinator dashboard: manage the predefined course catalog, set prerequisites
+// and delete course instances, and assign Course Coordinators to courses in this
+// coordinator's own program(s). Split into three sections selected from the sidebar.
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -11,8 +14,10 @@ import {
 } from 'lucide-react';
 import { EmptyStateIllustration } from '../components/illustrations';
 
+// Which of the three sidebar sections is currently shown.
 type ProgramCoordSection = 'catalog' | 'instances' | 'coordinators';
 
+// A predefined catalog course (template) that course instances are created from.
 interface CatalogEntry {
   id: number;
   name: string;
@@ -20,6 +25,7 @@ interface CatalogEntry {
   prerequisite_catalog_id: number | null;
 }
 
+// A concrete course offering (a course taught in a semester), linked to a catalog entry.
 interface CourseInstance {
   id: number;
   name: string;
@@ -40,6 +46,7 @@ interface StaffOption {
   role: string;
 }
 
+// Main page component holding all state for the catalog, instances and coordinator sections.
 const ProgramCoordinatorDashboard: React.FC = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -72,6 +79,8 @@ const ProgramCoordinatorDashboard: React.FC = () => {
   const [assigningCourseId, setAssigningCourseId] = useState<number | null>(null);
   const [removingKey, setRemovingKey] = useState<string | null>(null);
 
+  // Loads the catalog and courses together, then the current coordinators of each course in
+  // this coordinator's program. 'silent' is used by auto-refresh to avoid spinners/errors.
   const fetchAll = async (silent = false) => {
     if (!silent) setLoading(true);
     try {
@@ -125,13 +134,16 @@ const ProgramCoordinatorDashboard: React.FC = () => {
     }
   };
 
+  // Re-fetch everything periodically so the page reflects changes made elsewhere.
   useAutoRefresh(() => fetchAll(true));
 
+  // Initial load on mount: data plus the user picker options.
   useEffect(() => {
     fetchAll();
     fetchStaffOptions();
   }, []);
 
+  // Form submit handler: adds a new course to the catalog and clears the form.
   const handleCreateCatalogEntry = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -153,6 +165,7 @@ const ProgramCoordinatorDashboard: React.FC = () => {
     }
   };
 
+  // Switch a catalog row into inline edit mode with its current values.
   const startEdit = (entry: CatalogEntry) => {
     setEditingId(entry.id);
     setEditName(entry.name);
@@ -160,8 +173,10 @@ const ProgramCoordinatorDashboard: React.FC = () => {
     setEditPrereq(entry.prerequisite_catalog_id ? String(entry.prerequisite_catalog_id) : '');
   };
 
+  // Leave inline edit mode without saving.
   const cancelEdit = () => setEditingId(null);
 
+  // Persist the inline catalog edit, then reload.
   const saveEdit = async (id: number) => {
     setSavingEdit(true);
     setError('');
@@ -180,6 +195,7 @@ const ProgramCoordinatorDashboard: React.FC = () => {
     }
   };
 
+  // Delete a catalog entry (server rejects it if it is still in use).
   const deleteCatalogEntry = async (id: number) => {
     setError('');
     try {
@@ -190,6 +206,7 @@ const ProgramCoordinatorDashboard: React.FC = () => {
     }
   };
 
+  // Set or clear the prerequisite course of a course instance.
   const updateCoursePrerequisite = async (courseId: number, prerequisiteCourseId: string) => {
     setError('');
     try {
@@ -202,6 +219,7 @@ const ProgramCoordinatorDashboard: React.FC = () => {
     }
   };
 
+  // Delete a course instance.
   const deleteCourse = async (courseId: number) => {
     setError('');
     try {
@@ -212,6 +230,7 @@ const ProgramCoordinatorDashboard: React.FC = () => {
     }
   };
 
+  // Reload the coordinator list of a single course after an assign/unassign.
   const refreshCourseCoordinators = async (courseId: number) => {
     try {
       const entries = await programCoordinatorService.listCourseCoordinators(courseId);
@@ -221,6 +240,7 @@ const ProgramCoordinatorDashboard: React.FC = () => {
     }
   };
 
+  // Assign the user chosen in the row's picker as Course Coordinator of the course.
   const assignCourseCoordinator = async (courseId: number) => {
     const raw = (selectedUserByCourse[courseId] || '').trim();
     if (!raw) return;
@@ -245,6 +265,7 @@ const ProgramCoordinatorDashboard: React.FC = () => {
     }
   };
 
+  // Unassign a Course Coordinator from a course.
   const removeCourseCoordinator = async (courseId: number, userId: number) => {
     setError('');
     setRemovingKey(`${courseId}:${userId}`);
@@ -260,9 +281,11 @@ const ProgramCoordinatorDashboard: React.FC = () => {
 
   // "My courses" for the Course Coordinator assignment section - see fetchAll's
   // comment for why this is derived client-side from the already-scoped catalog list.
+  // Derived values recomputed on every render (no state needed).
   const myCatalogIds = new Set(catalog.map((c) => c.id));
   const myCourses = courses.filter((c) => c.catalog_id != null && myCatalogIds.has(c.catalog_id));
 
+  // Sidebar navigation: each item switches the visible section.
   const navItems: NavItem[] = [
     { key: 'catalog', label: 'Course Catalog', icon: BookOpen, active: activeSection === 'catalog', onClick: () => setActiveSection('catalog') },
     { key: 'instances', label: 'Course Instances', icon: Layers, active: activeSection === 'instances', onClick: () => setActiveSection('instances') },

@@ -39,6 +39,7 @@ ALLOWED_MIME_TYPES = [
 
 
 def main():
+    """Updates the Supabase storage bucket configuration so image MIME types (e.g. avatars) are accepted."""
     if not settings.SUPABASE_URL or not settings.SUPABASE_KEY:
         print("SUPABASE_URL / SUPABASE_KEY are not configured in backend/.env — nothing to do.")
         return

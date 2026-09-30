@@ -33,6 +33,7 @@ from app.database import models
 def main():
     # Creates any brand-new tables create_all CAN handle on its own; only the ALTER
     # below is something it cannot.
+    """Applies the schema change described in the module docstring to the existing database, then prints a summary."""
     models.Base.metadata.create_all(bind=engine)
 
     with engine.connect() as conn:

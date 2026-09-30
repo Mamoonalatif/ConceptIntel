@@ -1,3 +1,4 @@
+// App entry point: mounts React, wrapping <App /> in Google OAuth and Theme providers.
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { GoogleOAuthProvider } from '@react-oauth/google'

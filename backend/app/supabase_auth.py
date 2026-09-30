@@ -46,6 +46,7 @@ def _client() -> httpx.Client:
 
 
 def is_supabase_auth_configured() -> bool:
+    """True if the Supabase URL and service key are both set."""
     return bool(settings.SUPABASE_URL and settings.SUPABASE_KEY)
 
 
@@ -98,12 +99,14 @@ def get_or_create_supabase_user_by_email(email: str, full_name: str) -> str:
 
 
 def update_supabase_user_password(supabase_uid: str, new_password: str) -> None:
+    """Set a new password for a Supabase user via the Admin API (raises on failure)."""
     resp = _client().put(f"/admin/users/{supabase_uid}", json={"password": new_password})
     if resp.status_code != 200:
         raise Exception(f"Supabase password update failed ({resp.status_code}): {resp.text}")
 
 
 def delete_supabase_user(supabase_uid: str) -> None:
+    """Best-effort delete of a Supabase auth user; failures are only logged."""
     try:
         _client().delete(f"/admin/users/{supabase_uid}")
     except Exception as e:

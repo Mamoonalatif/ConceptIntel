@@ -1,3 +1,5 @@
+# Business rules for joining a course: code format, course open, enrollment window, duplicate,
+# prerequisite, capacity and semester checks. Raises EnrollmentError; the route turns it into HTTP.
 import re
 from datetime import date
 from sqlalchemy.orm import Session
@@ -21,6 +23,7 @@ class EnrollmentError(Exception):
         super().__init__(detail)
 
 
+# Trims the code and checks it is non-empty, 8 chars, uppercase alphanumeric.
 def _validate_code_format(raw_code: str) -> str:
     code = (raw_code or "").strip()
     if not code:
@@ -30,6 +33,7 @@ def _validate_code_format(raw_code: str) -> str:
     return code
 
 
+# Finds the course with this enrollment code or raises a 404-style error.
 def _get_course_by_code(db: Session, code: str) -> Course:
     course = db.query(Course).filter(Course.enrollment_code == code).first()
     if not course:
@@ -37,6 +41,7 @@ def _get_course_by_code(db: Session, code: str) -> Course:
     return course
 
 
+# Rejects the join unless the course status is "Open".
 def _check_status_open(course: Course) -> None:
     if (course.status or "").lower() != "open":
         raise EnrollmentError(400, "This course is currently not open for enrollment.")
@@ -71,6 +76,7 @@ def _check_existing_enrollment(db: Session, student: User, course: Course):
     return existing
 
 
+# Requires a Completed enrollment in the prerequisite course (if the course has one).
 def _check_prerequisite(db: Session, student: User, course: Course) -> None:
     if not course.prerequisite_course_id:
         return
@@ -95,6 +101,7 @@ def _check_prerequisite(db: Session, student: User, course: Course) -> None:
     )
 
 
+# Rejects the join when the number of Active students has reached max_students.
 def _check_capacity(db: Session, course: Course) -> None:
     if course.max_students is None:
         return  # Nullable max_students means unlimited capacity.

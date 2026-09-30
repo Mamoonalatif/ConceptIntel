@@ -1,3 +1,4 @@
+# Rate limiting for sensitive endpoints (login, join, etc.): Redis-backed with an in-memory fallback.
 import threading
 import time
 from collections import defaultdict, deque
@@ -18,6 +19,8 @@ RATE_LIMIT_DETAIL = "Too many attempts. Please wait a few minutes and try again.
 
 
 def _check_local(key: str, limit: int, window_seconds: int) -> None:
+    """In-process sliding-window check: drop hits older than the window, then
+    raise 429 if `limit` hits remain, otherwise record this hit."""
     now = time.monotonic()
     with _local_lock:
         hits = _local_hits[key]

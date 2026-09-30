@@ -1,3 +1,4 @@
+# Comment endpoints: private student-teacher comment threads on assignments, announcements and materials.
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -12,6 +13,7 @@ from app.notifications.types import NotificationType
 
 router = APIRouter(prefix="/courses/{course_id}/comments", tags=["Comments"])
 
+# Maps a comment's target_type string to the table that holds that post.
 _TARGET_MODELS = {
     "assignment": Assignment,
     "announcement": Announcement,
@@ -19,6 +21,7 @@ _TARGET_MODELS = {
 }
 
 
+# Fetches a course by ID or raises 404.
 def _get_course_or_404(db: Session, course_id: int) -> Course:
     course = db.query(Course).filter(Course.id == course_id).first()
     if not course:
@@ -26,6 +29,7 @@ def _get_course_or_404(db: Session, course_id: int) -> Course:
     return course
 
 
+# Checks the target type is supported and that the post exists in this course.
 def _get_target_or_404(db: Session, course_id: int, target_type: str, target_id: int):
     model = _TARGET_MODELS.get(target_type)
     if model is None:
@@ -36,6 +40,7 @@ def _get_target_or_404(db: Session, course_id: int, target_type: str, target_id:
     return target
 
 
+# Converts a Comment ORM row into the API response model (adds author name and is_own).
 def _to_response(c: Comment, current_user: User) -> CommentResponse:
     return CommentResponse(
         id=c.id,
@@ -50,6 +55,7 @@ def _to_response(c: Comment, current_user: User) -> CommentResponse:
     )
 
 
+# GET /courses/{id}/comments - one thread; students see only their own and the teacher's comments (see docstring).
 @router.get("", response_model=List[CommentResponse])
 def list_comments(
     course_id: int,
@@ -81,6 +87,7 @@ def list_comments(
     return [_to_response(c, current_user) for c in comments]
 
 
+# POST /courses/{id}/comments - adds a comment, then notifies the other side of the thread.
 @router.post("", response_model=CommentResponse, status_code=status.HTTP_201_CREATED)
 def create_comment(
     course_id: int,

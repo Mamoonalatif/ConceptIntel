@@ -1,8 +1,10 @@
+// Purpose: two modals for managing two-factor authentication (2FA): enabling it (QR code + backup codes) and disabling it.
 import React, { useEffect, useState } from 'react';
 import { authService } from '../services/api';
 import { apiErrorMessage } from '../lib/apiError';
 import { X, ShieldCheck, AlertCircle, CheckCircle2, RefreshCw, Copy } from 'lucide-react';
 
+// Props: close handler and a callback fired when 2FA has been successfully enabled.
 interface TwoFactorSetupModalProps {
   onClose: () => void;
   onEnabled: () => void;
@@ -12,6 +14,7 @@ interface TwoFactorSetupModalProps {
    type back a code to prove it actually works, then show the one-time backup
    codes. Mirrors ChangePasswordModal's layout/step conventions. */
 export const TwoFactorSetupModal: React.FC<TwoFactorSetupModalProps> = ({ onClose, onEnabled }) => {
+  // loading = waiting for the setup secret; qrCode/secret = authenticator enrolment data; code = user's typed code; backupCodes = shown after success; copied = copy-button feedback.
   const [loading, setLoading] = useState(true);
   const [qrCode, setQrCode] = useState('');
   const [secret, setSecret] = useState('');
@@ -21,6 +24,7 @@ export const TwoFactorSetupModal: React.FC<TwoFactorSetupModalProps> = ({ onClos
   const [backupCodes, setBackupCodes] = useState<string[] | null>(null);
   const [copied, setCopied] = useState(false);
 
+  // On open, ask the server to start 2FA setup and receive the QR code and secret. `cancelled` avoids state updates after unmount.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -38,6 +42,7 @@ export const TwoFactorSetupModal: React.FC<TwoFactorSetupModalProps> = ({ onClos
     return () => { cancelled = true; };
   }, []);
 
+  // Sends the typed 6-digit code to confirm the authenticator works; on success the server returns one-time backup codes.
   const handleVerify = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -52,6 +57,7 @@ export const TwoFactorSetupModal: React.FC<TwoFactorSetupModalProps> = ({ onClos
     }
   };
 
+  // Copies all backup codes to the clipboard and briefly shows "Copied!".
   const handleCopyBackupCodes = async () => {
     if (!backupCodes) return;
     try {
@@ -78,6 +84,7 @@ export const TwoFactorSetupModal: React.FC<TwoFactorSetupModalProps> = ({ onClos
           </button>
         </div>
 
+        {/* Step 2: 2FA is on, show backup codes. Step 1 (else branch): scan QR and verify a code. */}
         {backupCodes ? (
           <div className="p-6 space-y-4">
             <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-xl p-4 flex items-center gap-2 text-sm">
@@ -162,6 +169,7 @@ export const TwoFactorSetupModal: React.FC<TwoFactorSetupModalProps> = ({ onClos
   );
 };
 
+// Props: close handler, success callback, and whether the account has a password (otherwise only a code can confirm).
 interface TwoFactorDisableModalProps {
   onClose: () => void;
   onDisabled: () => void;
@@ -171,11 +179,13 @@ interface TwoFactorDisableModalProps {
 /* Requires re-proving control of the account (password or a live code) before
    turning 2FA off - see backend/app/auth/routes.py two_factor_disable. */
 export const TwoFactorDisableModal: React.FC<TwoFactorDisableModalProps> = ({ onClose, onDisabled, hasPassword }) => {
+  // useCode = confirm with an authenticator/backup code instead of a password; value = what the user typed.
   const [useCode, setUseCode] = useState(!hasPassword);
   const [value, setValue] = useState('');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
+  // Sends the password or code to the server to turn 2FA off; reports success or shows the error.
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -220,6 +230,7 @@ export const TwoFactorDisableModal: React.FC<TwoFactorDisableModalProps> = ({ on
             value={value}
             onChange={(e) => setValue(e.target.value)}
           />
+          {/* Let the user switch between confirming by password and by code. */}
           {hasPassword && (
             <button
               type="button"

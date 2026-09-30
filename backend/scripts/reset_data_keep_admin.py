@@ -70,6 +70,7 @@ TABLES_TO_WIPE = [
 
 
 def main():
+    """Deletes all transactional/demo data except admin accounts and re-seeds the predefined courses."""
     parser = argparse.ArgumentParser(description="Wipe all data except admin accounts, then reseed the catalog.")
     parser.add_argument("--yes", action="store_true", help="Skip the confirmation prompt.")
     args = parser.parse_args()

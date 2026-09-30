@@ -1,3 +1,4 @@
+// Custom hook: re-runs a data-fetch callback periodically and when the tab regains focus.
 import { useEffect, useRef } from 'react';
 import { clearApiCache } from '../services/api';
 
@@ -25,6 +26,7 @@ export function useAutoRefresh(fetchFn: () => void, intervalMs: number = 15000) 
 
     const interval = setInterval(refresh, intervalMs);
 
+    // Refresh when the window is focused or the tab becomes visible again.
     const onFocus = () => refresh();
     const onVisibilityChange = () => {
       if (document.visibilityState === 'visible') refresh();
@@ -33,6 +35,7 @@ export function useAutoRefresh(fetchFn: () => void, intervalMs: number = 15000) 
     window.addEventListener('focus', onFocus);
     document.addEventListener('visibilitychange', onVisibilityChange);
 
+    // Cleanup: stop the timer and remove listeners on unmount / interval change.
     return () => {
       clearInterval(interval);
       window.removeEventListener('focus', onFocus);

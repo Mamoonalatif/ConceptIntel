@@ -1,8 +1,10 @@
+// Purpose: modal that tracks a background AI content-generation job by polling until it completes, fails or times out.
 import React, { useEffect, useRef, useState } from 'react';
 import { CheckCircle2, XCircle, ExternalLink, Sparkles, Bell } from 'lucide-react';
 import { contentGenerationService } from '../../services/api';
 import type { GenerationJob } from '../../services/api';
 
+// Props: course, the job to track, optional completion callback, and close handler.
 interface GenerationProgressModalProps {
   courseId: number;
   job: GenerationJob;
@@ -11,6 +13,7 @@ interface GenerationProgressModalProps {
   onClose: () => void;
 }
 
+// How often (ms) to ask the server for the job's status.
 const POLL_MS = 1500;
 // Generation is bounded by three 60s attempts server-side; past this the job is stuck
 // rather than slow, and pretending otherwise just leaves the modal spinning forever.
@@ -27,13 +30,17 @@ const GIVE_UP_MS = 5 * 60 * 1000;
 export const GenerationProgressModal: React.FC<GenerationProgressModalProps> = ({
   courseId, job: initialJob, onCompleted, onClose,
 }) => {
+  // job = latest known job state; timedOut = we stopped waiting; startedAt = when polling began; notified = guards onCompleted from firing twice.
   const [job, setJob] = useState<GenerationJob>(initialJob);
   const [timedOut, setTimedOut] = useState(false);
   const startedAt = useRef(Date.now());
   const notified = useRef(false);
 
+  // The job has reached a final state (success or failure).
   const done = job.status === 'Completed' || job.status === 'Failed';
 
+  // Polling loop: each render schedules one delayed status fetch; the effect re-runs when the job updates, forming a repeating poll.
+  // Stops once the job is done or the overall time limit passes; cleanup cancels a pending timer.
   useEffect(() => {
     if (done || timedOut) return;
     const t = setTimeout(async () => {
@@ -66,6 +73,7 @@ export const GenerationProgressModal: React.FC<GenerationProgressModalProps> = (
         </div>
 
         <div className="p-6 text-center">
+          {/* In progress: animated dots, current stage and a reassurance that closing is safe. */}
           {!done && !timedOut && (
             <>
               <PulsingDots />
@@ -86,6 +94,7 @@ export const GenerationProgressModal: React.FC<GenerationProgressModalProps> = (
             </>
           )}
 
+          {/* Gave up waiting: the job may still finish server-side. */}
           {timedOut && !done && (
             <>
               <XCircle className="w-10 h-10 text-amber-500 mx-auto mb-3" />
@@ -97,6 +106,7 @@ export const GenerationProgressModal: React.FC<GenerationProgressModalProps> = (
             </>
           )}
 
+          {/* Success message. */}
           {job.status === 'Completed' && (
             <>
               <CheckCircle2 className="w-10 h-10 text-emerald-500 mx-auto mb-3" />
@@ -107,6 +117,7 @@ export const GenerationProgressModal: React.FC<GenerationProgressModalProps> = (
             </>
           )}
 
+          {/* Failure message with the server's error. */}
           {job.status === 'Failed' && (
             <>
               <XCircle className="w-10 h-10 text-rose-500 mx-auto mb-3" />
@@ -119,6 +130,7 @@ export const GenerationProgressModal: React.FC<GenerationProgressModalProps> = (
         </div>
 
         <div className="px-6 py-4 border-t border-border bg-background flex justify-end gap-2">
+          {/* Footer: open the generated content (when available) and the close button. */}
           {job.status === 'Completed' && job.result_content_id && (
             <button
               onClick={() =>

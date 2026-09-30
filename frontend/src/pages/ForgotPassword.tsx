@@ -1,3 +1,4 @@
+// ForgotPassword: asks for an email and requests a password-reset link from the backend.
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { authService } from '../services/api';
@@ -7,6 +8,7 @@ import { AuthIllustration } from '../components/illustrations';
 import { FoxMark } from '../components/FoxMark';
 import { Mail, AlertCircle, Loader2, ArrowLeft, MailCheck } from 'lucide-react';
 
+/** Page component: email form, switching to a "check your email" confirmation once sent. */
 const ForgotPassword: React.FC = () => {
   const [email, setEmail] = useState('');
   const [error, setError] = useState('');
@@ -15,6 +17,7 @@ const ForgotPassword: React.FC = () => {
 
   const emailInvalid = email.length > 0 && !isValidEmail(email);
 
+  // Validates the email, then calls the forgot-password endpoint.
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');

@@ -1,3 +1,5 @@
+// LiveQuiz: real-time Kahoot-style quiz. A teacher hosts a room (join code, start/next/end controls, live answer distribution) and students join with
+// a code and nickname. Game state is pushed by the server over a WebSocket and this file only renders it.
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Radio, Play, SkipForward, Square, Users, Timer, Trophy, RefreshCw, AlertTriangle,
@@ -22,6 +24,7 @@ interface LiveQuizProps {
  * reconnecting client simply receives the current state and renders it, rather than
  * trying to replay what it missed.
  */
+// Entry component: switches between the menu, the host room and the player room.
 export const LiveQuiz: React.FC<LiveQuizProps> = ({ courseId, canHost }) => {
   const [mode, setMode] = useState<'menu' | 'host' | 'play'>('menu');
   const [code, setCode] = useState('');
@@ -41,6 +44,7 @@ export const LiveQuiz: React.FC<LiveQuizProps> = ({ courseId, canHost }) => {
 
 /* ────────────────────────────── menu ────────────────────────────── */
 
+// LiveMenu: students enter a join code + nickname; teachers create a new live session from question-bank questions or reopen an existing one.
 const LiveMenu: React.FC<{
   courseId: number; canHost: boolean;
   onHost: (code: string) => void; onPlay: (code: string) => void;
@@ -59,12 +63,14 @@ const LiveMenu: React.FC<{
   const [bonus, setBonus] = useState(10);
   const [creating, setCreating] = useState(false);
 
+  // Teachers: load their past sessions and the question bank (used to pick questions).
   useEffect(() => {
     if (!canHost) return;
     liveQuizService.listSessions(courseId).then(setSessions).catch(() => {});
     questionBankService.list(courseId).then(setBank).catch(() => {});
   }, [courseId, canHost]);
 
+  // Student: join a session by code and move to the player room.
   const join = async () => {
     if (!joinCode.trim() || !nickname.trim()) return;
     setJoining(true);
@@ -79,6 +85,7 @@ const LiveMenu: React.FC<{
     }
   };
 
+  // Teacher: create a session (title, questions, seconds per question, speed bonus) and open its host room.
   const create = async () => {
     if (!title.trim() || picked.length === 0) {
       setError('Give the quiz a title and pick at least one question.');
@@ -234,6 +241,8 @@ const LiveMenu: React.FC<{
 
 /* ───────────────────────── shared socket hook ───────────────────────── */
 
+// useLiveSocket: custom hook that connects to the session's WebSocket, keeps the latest server state, knows if this user is the host,
+// auto-reconnects after a drop, and exposes send() for actions (start/next/end/answer).
 function useLiveSocket(code: string) {
   const [state, setState] = useState<LiveState | null>(null);
   const [connected, setConnected] = useState(false);
@@ -241,6 +250,7 @@ function useLiveSocket(code: string) {
   const [notice, setNotice] = useState('');
   const socketRef = useRef<WebSocket | null>(null);
 
+  // Open the socket on mount/code change and clean up (close + cancel retry) on unmount.
   useEffect(() => {
     let closed = false;
     let retry: ReturnType<typeof setTimeout> | null = null;
@@ -251,6 +261,7 @@ function useLiveSocket(code: string) {
       socketRef.current = ws;
 
       ws.onopen = () => setConnected(true);
+      // Handle server messages: "state" = full game state, "welcome" = tells us if we are the host, "answer_received" = result of our answer, "error" = show the message.
       ws.onmessage = (ev) => {
         try {
           const msg = JSON.parse(ev.data);
@@ -282,6 +293,7 @@ function useLiveSocket(code: string) {
     };
   }, [code]);
 
+  // Send a JSON action to the server if the socket is open.
   const send = (payload: Record<string, any>) => {
     const ws = socketRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(payload));
@@ -290,6 +302,7 @@ function useLiveSocket(code: string) {
   return { state, connected, isHost, notice, setNotice, send };
 }
 
+// ConnectionPill: shows "Live" or "Reconnecting..." depending on the socket status.
 const ConnectionPill: React.FC<{ connected: boolean }> = ({ connected }) => (
   <span className={`flex items-center gap-1.5 text-[12px] font-semibold ${
     connected ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>
@@ -298,6 +311,7 @@ const ConnectionPill: React.FC<{ connected: boolean }> = ({ connected }) => (
   </span>
 );
 
+// Leaderboard: ranked list of players by score; `highlight` marks the current player's row.
 const Leaderboard: React.FC<{ rows: LiveState['leaderboard']; highlight?: string }> = ({ rows, highlight }) => (
   <div className="space-y-1.5">
     {rows.length === 0 ? (
@@ -317,6 +331,7 @@ const Leaderboard: React.FC<{ rows: LiveState['leaderboard']; highlight?: string
 
 /* ────────────────────────────── host ────────────────────────────── */
 
+// HostRoom: projector-style view for the teacher: join code, player count, question with live answer bars, control buttons and leaderboard.
 const HostRoom: React.FC<{ courseId: number; code: string; onExit: () => void }> = ({ code, onExit }) => {
   const { state, connected, send } = useLiveSocket(code);
 
@@ -413,6 +428,7 @@ const HostRoom: React.FC<{ courseId: number; code: string; onExit: () => void }>
 
 /* ───────────────────────────── player ───────────────────────────── */
 
+// PlayerRoom: student view: waiting screen, current question with an answer widget, locked-in/reveal screen, final results and leaderboard.
 const PlayerRoom: React.FC<{ code: string; onExit: () => void }> = ({ code, onExit }) => {
   const { state, connected, notice, setNotice, send } = useLiveSocket(code);
   const [answer, setAnswer] = useState<any>(undefined);
@@ -428,12 +444,14 @@ const PlayerRoom: React.FC<{ code: string; onExit: () => void }> = ({ code, onEx
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state?.current_index]);
 
+  // Send the chosen answer to the server and remember which question it was for (prevents answering twice).
   const submit = () => {
     if (answer === undefined || !state?.question) return;
     send({ action: 'answer', response: answer });
     setSentFor(state.current_index);
   };
 
+  // True once this player has already answered the current question.
   const alreadyAnswered = sentFor === state?.current_index;
 
   return (

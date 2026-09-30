@@ -1,3 +1,6 @@
+# AI concept extraction: builds the system prompt, calls the LLM (OpenRouter, or Google directly
+# under GEMINI_DIRECT) on each text chunk, sanitizes the JSON result (clean names, drop junk,
+# merge duplicates) and caches it. Also hosts the shared OpenAI-client factory used by RAG.
 import json
 import logging
 import re
@@ -67,6 +70,7 @@ def openrouter_payment_error_message(e: Exception) -> Optional[str]:
     return None
 
 
+# Instructions for the extraction model; {placeholders} are filled in by _build_system_prompt.
 SYSTEM_PROMPT_TEMPLATE = """You are a senior academic curriculum architect and learning engineer.
 
 You are extracting concepts for the course: "{course_name}"{course_code_suffix}.
@@ -228,6 +232,7 @@ def _build_system_prompt(
     existing_concept_names: Optional[List[str]],
     course_outline: Optional[str] = None,
 ) -> str:
+    """Fills the prompt template with course name/code, known concepts (to avoid duplicates) and the outline (scope)."""
     course_code_suffix = f" ({course_code})" if course_code else ""
 
     existing_concepts_block = ""
@@ -280,6 +285,7 @@ GEMINI_OPENAI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/opena
 def _get_client() -> Optional[OpenAI]:
     # See config.py GEMINI_DIRECT - calls Google directly (and its free tier) when
     # enabled, instead of OpenRouter's paid rate for the same model.
+    """Returns an OpenAI-SDK client for the active provider, or None if no usable API key is configured."""
     if settings.GEMINI_DIRECT:
         if not settings.GEMINI_API_KEY or settings.GEMINI_API_KEY.startswith("your_"):
             return None
@@ -387,6 +393,7 @@ _NEVER_A_CONCEPT = {
 # Patterns for administrative junk that an exact blacklist can't catch, because the
 # noise words appear inside a longer string. All observed in the live graph:
 # "Code \nPHY", "Applied Physics \nSemester No", "Modulus Chap".
+# Regex patterns for junk names that cannot be listed literally.
 _NEVER_A_CONCEPT_PATTERNS = [
     re.compile(r"^(course\s+)?code\b", re.I),          # "Code PHY"
     re.compile(r"\bsemester\s*(no|number)?\b", re.I),  # "Applied Physics Semester No"
@@ -432,6 +439,7 @@ def _dedup_key(name: str) -> str:
 
 
 def _is_never_a_concept(name: str) -> bool:
+    """True if the name is on the blacklist or matches a junk pattern (administrative/filler text)."""
     key = (name or "").strip().lower()
     if key in _NEVER_A_CONCEPT:
         return True

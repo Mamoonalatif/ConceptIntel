@@ -1,11 +1,16 @@
+// Assignments: per-course assignment list. Teachers create/edit/delete assignments, manage an AI-drafted rubric, and review/grade submissions;
+// students see due-date badges and submit (or resubmit) their work and read feedback.
 import React, { useEffect, useState } from 'react';
 import {
   ClipboardList, Send, Pencil, Trash2, X, Check, RefreshCw, Paperclip,
   Upload, Download, ChevronDown, ChevronUp, Clock, CheckCircle2, Sparkles, MessageSquare,
-  ListChecks, Plus, Target,
+  ListChecks, Plus, Target, ShieldAlert, FileText, Lightbulb,
 } from 'lucide-react';
-import { assignmentService, outcomesService } from '../services/api';
-import type { AssignmentItem, SubmissionItem, Rubric, RubricCriterion, CLO } from '../services/api';
+import { assignmentService, outcomesService, contentGenerationService } from '../services/api';
+import type {
+  AssignmentItem, SubmissionItem, Rubric, RubricCriterion, CLO, GeneratedContentItem, MisconceptionGroup,
+  SimilarityReport, Misconception,
+} from '../services/api';
 import { useAutoRefresh } from '../hooks/useAutoRefresh';
 import { parseUtc } from '../lib/time';
 import { EmptyStateIllustration } from './illustrations';
@@ -32,6 +37,7 @@ interface AssignmentsProps {
   catalogId?: number | null;
 }
 
+// Builds the coloured "due" badge (label + Tailwind classes): neutral if already submitted, red if overdue, amber if due within 48h, blue otherwise.
 function dueBadge(dueDate: string | null, submitted: boolean) {
   if (!dueDate) return null;
   const due = parseUtc(dueDate);
@@ -45,7 +51,51 @@ function dueBadge(dueDate: string | null, submitted: boolean) {
   return { label: `Due ${label}`, className: 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-500/10 dark:text-blue-400 dark:border-blue-500/20' };
 }
 
+// Main component: holds all UI state (composer, edit form, submissions, grading, rubric draft) and renders the list for both teacher and student roles.
+// Teacher-only badge for the similar-assignment result: level, strongest overlap and who it matches.
+const SimilarityBadge: React.FC<{ report?: SimilarityReport | null }> = ({ report }) => {
+  if (!report) return <p className="text-[11px] text-text-muted mt-0.5">Similarity check pending…</p>;
+  if (report.level === 'none' || report.matches.length === 0) {
+    return <p className="text-[11px] text-emerald-600 dark:text-emerald-400 mt-0.5">No similar submissions found</p>;
+  }
+  const tone = report.level === 'high'
+    ? 'text-rose-600 dark:text-rose-400'
+    : report.level === 'medium' ? 'text-amber-600 dark:text-amber-400' : 'text-text-muted';
+  return (
+    <div className={`text-[11px] mt-0.5 ${tone}`}>
+      <p className="flex items-center gap-1 font-bold">
+        <ShieldAlert className="w-3 h-3" /> {report.level.toUpperCase()} similarity · {Math.round(report.max_score * 100)}% wording in common
+      </p>
+      {report.matches.map((m) => (
+        <p key={m.submission_id} className="pl-4">
+          {Math.round(m.score * 100)}% with {m.student_name || 'another student'}{m.same_assignment ? '' : ' (another assignment)'}
+        </p>
+      ))}
+    </div>
+  );
+};
+
+// AI-detected misconceptions for one submission (what was wrong and the correct idea); hidden when there are none.
+const MisconceptionList: React.FC<{ items?: Misconception[] | null; audience: 'teacher' | 'student' }> = ({ items, audience }) => {
+  if (!items || items.length === 0) return null;
+  return (
+    <div className="bg-amber-50 border border-amber-200 dark:bg-amber-500/10 dark:border-amber-500/20 rounded-lg p-2.5 space-y-1.5">
+      <p className="flex items-center gap-1 text-[11px] font-bold text-amber-700 dark:text-amber-400 uppercase tracking-wider">
+        <Lightbulb className="w-3.5 h-3.5" /> {audience === 'student' ? 'Ideas to review' : 'Misconceptions detected'}
+      </p>
+      {items.map((m, i) => (
+        <div key={i} className="text-[12px] text-text-secondary">
+          {m.concept_name && <span className="font-semibold text-text-primary">{m.concept_name}: </span>}
+          {m.misconception}
+          <p className="text-emerald-700 dark:text-emerald-400">Correct idea: {m.correction}</p>
+        </div>
+      ))}
+    </div>
+  );
+};
+
 export const Assignments: React.FC<AssignmentsProps> = ({ courseId, isTeacher, catalogId }) => {
+  // --- Assignment list and composer (new-assignment form) state ---
   const [items, setItems] = useState<AssignmentItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -55,9 +105,16 @@ export const Assignments: React.FC<AssignmentsProps> = ({ courseId, isTeacher, c
   const [description, setDescription] = useState('');
   const [dueDate, setDueDate] = useState('');
   const [points, setPoints] = useState('');
-  const [attachFile, setAttachFile] = useState<File | null>(null);
   const [posting, setPosting] = useState(false);
+  // Generated (Content Studio) assignment drafts not yet posted - the composer picks one of these.
+  const [drafts, setDrafts] = useState<GeneratedContentItem[]>([]);
+  const [draftsLoading, setDraftsLoading] = useState(false);
+  const [selectedDraftId, setSelectedDraftId] = useState<number | null>(null);
+  // Teacher-only review tools: class-wide misconceptions per assignment and the similarity re-check flag.
+  const [classMisconceptions, setClassMisconceptions] = useState<Record<number, MisconceptionGroup[]>>({});
+  const [checkingSimilarityId, setCheckingSimilarityId] = useState<number | null>(null);
 
+  // --- Inline edit form state ---
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editTitle, setEditTitle] = useState('');
   const [editDescription, setEditDescription] = useState('');
@@ -65,6 +122,7 @@ export const Assignments: React.FC<AssignmentsProps> = ({ courseId, isTeacher, c
   const [editPoints, setEditPoints] = useState('');
   const [saving, setSaving] = useState(false);
 
+  // --- Submissions panel and grading state ---
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [submissions, setSubmissions] = useState<Record<number, SubmissionItem[]>>({});
   const [submittingId, setSubmittingId] = useState<number | null>(null);
@@ -90,11 +148,13 @@ export const Assignments: React.FC<AssignmentsProps> = ({ courseId, isTeacher, c
   const [rubricGenerating, setRubricGenerating] = useState(false);
   const [rubricSaving, setRubricSaving] = useState(false);
 
+  // Load the CLOs (course learning outcomes) for this course's catalog subject so the rubric editor can link criteria to them.
   useEffect(() => {
     if (!catalogId) { setClos([]); return; }
     outcomesService.listCLOs(catalogId).then(setClos).catch(() => setClos([]));
   }, [catalogId]);
 
+  // Expand/collapse the rubric panel for an assignment; lazily fetches the rubric the first time it is opened and loads it into the editable draft.
   const toggleRubric = async (assignmentId: number) => {
     if (rubricOpenId === assignmentId) { setRubricOpenId(null); return; }
     setRubricOpenId(assignmentId);
@@ -114,6 +174,7 @@ export const Assignments: React.FC<AssignmentsProps> = ({ courseId, isTeacher, c
     }
   };
 
+  // Ask the backend (AI) to draft a rubric for the assignment and load it into the draft editor.
   const handleGenerateRubric = async (assignmentId: number) => {
     setRubricGenerating(true);
     setError('');
@@ -128,6 +189,7 @@ export const Assignments: React.FC<AssignmentsProps> = ({ courseId, isTeacher, c
     }
   };
 
+  // Draft-rubric editing helpers: immutable updates to the rubricDraft array (criteria and their performance levels) before it is saved.
   const updateDraftCriterion = (index: number, patch: Partial<RubricCriterion>) => {
     setRubricDraft((prev) => prev.map((c, i) => (i === index ? { ...c, ...patch } : c)));
   };
@@ -158,6 +220,7 @@ export const Assignments: React.FC<AssignmentsProps> = ({ courseId, isTeacher, c
     )));
   };
 
+  // Validate (at least one titled criterion) and publish the rubric draft to the backend, then refresh the local copy.
   const saveDraftRubric = async (assignmentId: number) => {
     const cleaned = rubricDraft.filter((c) => c.title.trim());
     if (cleaned.length === 0) {
@@ -177,8 +240,10 @@ export const Assignments: React.FC<AssignmentsProps> = ({ courseId, isTeacher, c
     }
   };
 
+  // Running total of criterion max points, shown next to the assignment's own points so the teacher can spot a mismatch.
   const rubricTotal = rubricDraft.reduce((sum, c) => sum + (Number(c.max_points) || 0), 0);
 
+  // Fetch the course's assignments; "silent" mode (used by auto-refresh) skips the spinner and error message.
   const fetchItems = async (silent = false) => {
     if (!silent) setLoading(true);
     try {
@@ -191,38 +256,57 @@ export const Assignments: React.FC<AssignmentsProps> = ({ courseId, isTeacher, c
     }
   };
 
+  // Initial load, and reload when the course changes.
   useEffect(() => {
     fetchItems();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [courseId]);
 
+  // Poll periodically so new assignments/submissions appear without a manual refresh.
   useAutoRefresh(() => fetchItems(true));
 
+  // Clear and close the new-assignment form.
   const resetComposer = () => {
-    setTitle(''); setDescription(''); setDueDate(''); setPoints(''); setAttachFile(null); setShowComposer(false);
+    setTitle(''); setDescription(''); setDueDate(''); setPoints('');
+    setSelectedDraftId(null); setShowComposer(false);
   };
 
+  // Open the composer and load the generated assignments that have not been posted yet.
+  const openComposer = async () => {
+    setShowComposer(true);
+    setDraftsLoading(true);
+    try {
+      const all = await contentGenerationService.list(courseId, 'assignment');
+      setDrafts(all.filter((d) => d.assignment_id == null));
+    } catch (err) {
+      setError(apiErrorMessage(err, 'Could not load the generated assignments.'));
+    } finally {
+      setDraftsLoading(false);
+    }
+  };
+
+  // Pick a generated assignment: prefill title, description and points (all still editable before posting).
+  const selectDraft = (d: GeneratedContentItem) => {
+    setSelectedDraftId(d.id);
+    setTitle(d.payload?.title || d.title || '');
+    setDescription(d.payload?.instructions || '');
+    setPoints(d.payload?.points != null ? String(Math.round(d.payload.points)) : '');
+  };
+
+  // Post the selected generated assignment to students: the backend creates the assignment, its rubric and the Word handout attachment.
   const handlePost = async () => {
-    if (!title.trim()) return;
+    if (selectedDraftId === null || !title.trim()) return;
     setPosting(true);
     setError('');
     try {
-      const created = await assignmentService.create(courseId, {
+      await contentGenerationService.createAssignmentFromContent(courseId, selectedDraftId, {
         title: title.trim(),
         description: description.trim() || undefined,
         due_date: dueDate ? new Date(dueDate).toISOString() : undefined,
         points: points ? parseInt(points) : undefined,
-        file: attachFile || undefined,
       });
-      setItems((prev) => [created, ...prev]);
       resetComposer();
-      // Automatically open the rubric panel and kick off the AI draft right
-      // away, rather than leaving the teacher to notice and click the
-      // "Rubric" link themselves - posting an assignment with no rubric is
-      // rarely what's actually wanted, so make the next step happen for them.
-      setRubricOpenId(created.id);
-      setRubricDraft([]);
-      handleGenerateRubric(created.id);
+      await fetchItems(true);
     } catch (err: any) {
       setError(apiErrorMessage(err, 'Failed to post assignment.'));
     } finally {
@@ -230,6 +314,7 @@ export const Assignments: React.FC<AssignmentsProps> = ({ courseId, isTeacher, c
     }
   };
 
+  // Edit flow: startEdit copies an assignment into the edit fields, cancelEdit closes the form, saveEdit sends the update and merges the result into the list.
   const startEdit = (item: AssignmentItem) => {
     setEditingId(item.id);
     setEditTitle(item.title);
@@ -259,6 +344,7 @@ export const Assignments: React.FC<AssignmentsProps> = ({ courseId, isTeacher, c
     }
   };
 
+  // Delete an assignment after confirmation (its submissions are removed too by the backend).
   const handleDelete = async (id: number) => {
     if (!window.confirm('Delete this assignment? All student submissions will also be removed.')) return;
     try {
@@ -269,6 +355,7 @@ export const Assignments: React.FC<AssignmentsProps> = ({ courseId, isTeacher, c
     }
   };
 
+  // Teacher: expand/collapse an assignment's submissions, fetching them the first time.
   const toggleSubmissions = async (assignmentId: number) => {
     if (expandedId === assignmentId) {
       setExpandedId(null);
@@ -283,8 +370,27 @@ export const Assignments: React.FC<AssignmentsProps> = ({ courseId, isTeacher, c
         setError(apiErrorMessage(err, 'Could not load the submissions.'));
       }
     }
+    // Class-wide misconceptions are best-effort extra context - never block the submissions list.
+    assignmentService.listMisconceptions(courseId, assignmentId)
+      .then((groups) => setClassMisconceptions((prev) => ({ ...prev, [assignmentId]: groups })))
+      .catch(() => undefined);
   };
 
+  // Teacher: re-run the similar-assignment check across all submissions of an assignment and refresh the list.
+  const handleCheckSimilarity = async (assignmentId: number) => {
+    setCheckingSimilarityId(assignmentId);
+    setError('');
+    try {
+      const updated = await assignmentService.checkSimilarity(courseId, assignmentId);
+      setSubmissions((prev) => ({ ...prev, [assignmentId]: updated }));
+    } catch (err) {
+      setError(apiErrorMessage(err, 'Could not run the similarity check.'));
+    } finally {
+      setCheckingSimilarityId(null);
+    }
+  };
+
+  // Teacher: trigger AI grading of one submission and replace it in the cached list with the graded version.
   const handleGrade = async (assignmentId: number, submissionId: number) => {
     setGradingSubmissionId(submissionId);
     setError('');
@@ -301,6 +407,7 @@ export const Assignments: React.FC<AssignmentsProps> = ({ courseId, isTeacher, c
     }
   };
 
+  // Manual grading: startEditGrade opens the override form prefilled; saveGradeOverride saves the teacher's own grade + feedback.
   const startEditGrade = (sub: SubmissionItem) => {
     setEditingGradeId(sub.id);
     setEditGradeValue(sub.grade !== null ? String(sub.grade) : '');
@@ -327,6 +434,7 @@ export const Assignments: React.FC<AssignmentsProps> = ({ courseId, isTeacher, c
     }
   };
 
+  // Teacher: approve an AI grade that is PendingReview, optionally sending rubric-level overrides chosen in the dropdowns.
   const handleApprove = async (assignmentId: number, submissionId: number) => {
     setApprovingId(submissionId);
     setError('');
@@ -354,6 +462,7 @@ export const Assignments: React.FC<AssignmentsProps> = ({ courseId, isTeacher, c
     }
   };
 
+  // Teacher: reject an AI grade awaiting review.
   const handleReject = async (assignmentId: number, submissionId: number) => {
     setRejectingId(submissionId);
     setError('');
@@ -370,6 +479,7 @@ export const Assignments: React.FC<AssignmentsProps> = ({ courseId, isTeacher, c
     }
   };
 
+  // Student: upload (or replace) their submission file and store the returned summary on the assignment.
   const handleSubmit = async (assignmentId: number, file: File) => {
     setSubmittingId(assignmentId);
     setError('');
@@ -383,6 +493,7 @@ export const Assignments: React.FC<AssignmentsProps> = ({ courseId, isTeacher, c
     }
   };
 
+  // Render: header + create button, error banner, teacher composer, then the list (loading / empty / items).
   return (
     <div className="bg-surface rounded-2xl p-6 border border-border animate-fade-up">
       <div className="flex items-center justify-between mb-4">
@@ -391,7 +502,7 @@ export const Assignments: React.FC<AssignmentsProps> = ({ courseId, isTeacher, c
           Assignments
         </h3>
         {isTeacher && !showComposer && (
-          <button onClick={() => setShowComposer(true)} className="btn-primary text-xs px-3 py-1.5">
+          <button onClick={openComposer} className="btn-primary text-xs px-3 py-1.5">
             + Create
           </button>
         )}
@@ -403,51 +514,82 @@ export const Assignments: React.FC<AssignmentsProps> = ({ courseId, isTeacher, c
 
       {isTeacher && showComposer && (
         <div className="border border-border rounded-xl p-4 mb-5 bg-background space-y-3">
-          <input
-            className="input-light w-full"
-            placeholder="Assignment title"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-          />
-          <textarea
-            className="input-light w-full resize-none"
-            rows={2}
-            placeholder="Instructions (optional)"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-          />
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-semibold text-text-secondary mb-1">Due date (optional)</label>
-              <input
-                type="datetime-local"
-                className="input-light w-full text-sm"
-                value={dueDate}
-                onChange={(e) => setDueDate(e.target.value)}
-              />
+          {/* Step 1: choose one of the assignments generated in Content Studio. */}
+          <p className="text-xs font-bold text-text-secondary uppercase tracking-wider">Select a generated assignment</p>
+          {draftsLoading ? (
+            <p className="text-xs text-text-muted">Loading generated assignments...</p>
+          ) : drafts.length === 0 ? (
+            <div className="text-xs text-text-muted border border-dashed border-border rounded-lg p-3">
+              No unposted generated assignments yet. Generate one in Content Studio (choose <strong>Assignment</strong>), then come back here to post it.
             </div>
-            <div>
-              <label className="block text-xs font-semibold text-text-secondary mb-1">Points (optional)</label>
-              <input
-                type="number" min="0"
-                className="input-light w-full text-sm"
-                value={points}
-                onChange={(e) => setPoints(e.target.value)}
-              />
+          ) : (
+            <div className="space-y-1.5 max-h-56 overflow-y-auto">
+              {drafts.map((d) => (
+                <button
+                  key={d.id}
+                  onClick={() => selectDraft(d)}
+                  className={`w-full text-left flex items-center gap-2 rounded-lg border px-3 py-2 transition-all ${
+                    selectedDraftId === d.id ? 'border-primary bg-primary-muted/40' : 'border-border bg-surface hover:border-primary/40'
+                  }`}
+                >
+                  <FileText className="w-4 h-4 text-secondary shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-text-primary truncate">{d.payload?.title || d.title}</p>
+                    <p className="text-[11px] text-text-muted truncate">{d.concept_name} · {d.payload?.points ?? '-'} pts · {d.payload?.criteria?.length ?? 0} rubric criteria</p>
+                  </div>
+                  {selectedDraftId === d.id && <Check className="w-4 h-4 text-primary ml-auto shrink-0" />}
+                </button>
+              ))}
             </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <label className="flex items-center gap-1.5 text-xs font-semibold text-text-muted hover:text-primary cursor-pointer">
-              <Paperclip className="w-3.5 h-3.5" />
-              {attachFile ? attachFile.name : 'Attach reference file (optional)'}
-              <input type="file" className="hidden" onChange={(e) => setAttachFile(e.target.files?.[0] || null)} />
-            </label>
-          </div>
+          )}
+
+          {/* Step 2: adjust what students see; the Word handout + rubric is attached automatically. */}
+          {selectedDraftId !== null && (
+            <>
+              <input
+                className="input-light w-full"
+                placeholder="Assignment title"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+              />
+              <textarea
+                className="input-light w-full resize-none"
+                rows={3}
+                placeholder="Description shown to students"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+              />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-text-secondary mb-1">Due date (optional)</label>
+                  <input
+                    type="datetime-local"
+                    className="input-light w-full text-sm"
+                    value={dueDate}
+                    onChange={(e) => setDueDate(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-text-secondary mb-1">Points</label>
+                  <input
+                    type="number" min="0"
+                    className="input-light w-full text-sm"
+                    value={points}
+                    onChange={(e) => setPoints(e.target.value)}
+                  />
+                </div>
+              </div>
+              <p className="flex items-center gap-1.5 text-xs text-text-muted">
+                <Paperclip className="w-3.5 h-3.5" />
+                The assignment handout and detailed rubric will be attached as a Word document for students.
+              </p>
+            </>
+          )}
           <div className="flex justify-end gap-2">
             <button onClick={resetComposer} className="btn-ghost text-xs px-3 py-1.5">Cancel</button>
             <button
               onClick={handlePost}
-              disabled={posting || !title.trim()}
+              disabled={posting || selectedDraftId === null || !title.trim()}
               className="btn-primary text-xs px-3.5 py-1.5 disabled:opacity-50"
             >
               {posting ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
@@ -525,6 +667,7 @@ export const Assignments: React.FC<AssignmentsProps> = ({ courseId, isTeacher, c
                       )}
                     </div>
 
+                    {/* Teacher sees submission/rubric toggles; student sees their submission status, feedback and upload control. */}
                     {isTeacher ? (
                       <div className="flex items-center gap-4 mt-3">
                         <button
@@ -577,6 +720,7 @@ export const Assignments: React.FC<AssignmentsProps> = ({ courseId, isTeacher, c
                                     {item.my_submission.feedback}
                                   </div>
                                 )}
+                                {feedbackOpenId === item.my_submission.id && <MisconceptionList items={item.my_submission.misconceptions} audience="student" />}
                               </div>
                             )}
                           </div>
@@ -727,7 +871,33 @@ export const Assignments: React.FC<AssignmentsProps> = ({ courseId, isTeacher, c
                             No submissions yet.
                           </div>
                         ) : (
-                          submissions[item.id].map((sub) => (
+                          <>
+                          {/* Class-wide misconceptions (AI) and the similar-assignment re-check control. */}
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-[11px] font-bold text-text-secondary uppercase tracking-wider">{submissions[item.id].length} submission(s)</p>
+                            <button
+                              onClick={() => handleCheckSimilarity(item.id)}
+                              disabled={checkingSimilarityId === item.id}
+                              className="flex items-center gap-1 text-[12px] font-semibold text-primary hover:underline disabled:opacity-50"
+                              title="Compare all submissions for copied wording"
+                            >
+                              {checkingSimilarityId === item.id ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <ShieldAlert className="w-3.5 h-3.5" />}
+                              Check similarity
+                            </button>
+                          </div>
+                          {(classMisconceptions[item.id] || []).length > 0 && (
+                            <div className="bg-amber-50 border border-amber-200 dark:bg-amber-500/10 dark:border-amber-500/20 rounded-lg p-2.5 space-y-1">
+                              <p className="flex items-center gap-1 text-[11px] font-bold text-amber-700 dark:text-amber-400 uppercase tracking-wider">
+                                <Lightbulb className="w-3.5 h-3.5" /> Common misconceptions in this class
+                              </p>
+                              {classMisconceptions[item.id].map((g) => (
+                                <p key={g.concept_name} className="text-[12px] text-text-secondary">
+                                  <span className="font-semibold text-text-primary">{g.concept_name}</span> — {g.count} student{g.count === 1 ? '' : 's'}: {g.examples[0]?.misconception}
+                                </p>
+                              ))}
+                            </div>
+                          )}
+                          {submissions[item.id].map((sub) => (
                             <div key={sub.id} className="bg-background rounded-lg px-3 py-2 space-y-2">
                               <div className="flex items-center justify-between gap-2">
                                 <div className="min-w-0">
@@ -739,6 +909,7 @@ export const Assignments: React.FC<AssignmentsProps> = ({ courseId, isTeacher, c
                                       <span className="ml-1.5 font-bold text-amber-600 dark:text-amber-400">· Pending review</span>
                                     )}
                                   </p>
+                                  <SimilarityBadge report={sub.similarity} />
                                 </div>
                                 <div className="flex items-center gap-1 shrink-0">
                                   <button
@@ -767,6 +938,7 @@ export const Assignments: React.FC<AssignmentsProps> = ({ courseId, isTeacher, c
                                   {sub.feedback}
                                 </div>
                               )}
+                              {editingGradeId !== sub.id && <MisconceptionList items={sub.misconceptions} audience="teacher" />}
 
                               {sub.grade_status === 'PendingReview' && editingGradeId !== sub.id && (
                                 <div className="space-y-1.5">
@@ -852,7 +1024,8 @@ export const Assignments: React.FC<AssignmentsProps> = ({ courseId, isTeacher, c
                                 </button>
                               )}
                             </div>
-                          ))
+                          ))}
+                          </>
                         )}
                       </div>
                     )}

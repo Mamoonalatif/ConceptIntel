@@ -1,3 +1,5 @@
+# Course endpoints: catalog management (admin/coordinators), course CRUD for teachers,
+# admin overrides, enrollment-code lookup/regeneration and course-coordinator assignment.
 import secrets
 import string
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -26,6 +28,7 @@ router = APIRouter(prefix="/courses", tags=["Courses"])
 # available key is the caller's IP - generous enough for the real use case
 # (a student mistyping a code a few times) while useless for scripting through
 # the enrollment-code keyspace.
+# Max public lookups per IP within the window below.
 LOOKUP_RATE_LIMIT = 20
 LOOKUP_RATE_LIMIT_WINDOW_SECONDS = 300
 
@@ -54,6 +57,7 @@ def generate_unique_code(db: Session) -> str:
             return code
 
 
+# Fetches a catalog entry or raises a 400 error if the ID does not exist.
 def _get_catalog_entry_or_404(db: Session, catalog_id: int) -> CourseCatalog:
     entry = db.query(CourseCatalog).filter(CourseCatalog.id == catalog_id).first()
     if not entry:
@@ -82,6 +86,7 @@ def _derive_prerequisite_course_id(db: Session, catalog_entry: CourseCatalog):
 
 # --- Course Catalog: public/authenticated read-only listing (for teacher dropdown) ---
 
+# GET /courses/catalog - any logged-in user; feeds the teacher's course-creation dropdown.
 @router.get("/catalog", response_model=List[CourseCatalogResponse])
 def list_catalog(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Read-only listing of the predefined course catalog, for the teacher-facing dropdown."""
@@ -90,6 +95,7 @@ def list_catalog(db: Session = Depends(get_db), current_user: User = Depends(get
 
 # --- Admin: Course Catalog management ---
 
+# GET /courses/admin/catalog - lists catalog entries, limited to the coordinator's own programs.
 @router.get("/admin/catalog", response_model=List[CourseCatalogResponse])
 def admin_list_catalog(db: Session = Depends(get_db), scope: ProgramScope = Depends(get_current_program_coordinator)):
     query = db.query(CourseCatalog)
@@ -98,6 +104,7 @@ def admin_list_catalog(db: Session = Depends(get_db), scope: ProgramScope = Depe
     return query.all()
 
 
+# POST /courses/admin/catalog - adds a catalog entry after checking program scope and prerequisite.
 @router.post("/admin/catalog", response_model=CourseCatalogResponse, status_code=status.HTTP_201_CREATED)
 def admin_create_catalog_entry(
     entry_in: CourseCatalogCreate,
@@ -120,6 +127,7 @@ def admin_create_catalog_entry(
     return new_entry
 
 
+# PUT /courses/admin/catalog/{id} - partially updates an entry (no self-prerequisite allowed).
 @router.put("/admin/catalog/{id}", response_model=CourseCatalogResponse)
 def admin_update_catalog_entry(
     id: int,
@@ -146,6 +154,7 @@ def admin_update_catalog_entry(
     return entry
 
 
+# DELETE /courses/admin/catalog/{id} - removes an entry within the caller's program scope.
 @router.delete("/admin/catalog/{id}", status_code=status.HTTP_204_NO_CONTENT)
 def admin_delete_catalog_entry(
     id: int,
@@ -161,6 +170,8 @@ def admin_delete_catalog_entry(
 
 # --- Course instances ---
 
+# POST /courses - a teacher creates a course from a catalog entry; name/code/prerequisite are
+# derived from the catalog and a unique enrollment code is generated.
 @router.post("", response_model=CourseResponse, status_code=status.HTTP_201_CREATED)
 def create_course(
     course_in: CourseCreate,
@@ -194,6 +205,7 @@ def create_course(
     return new_course
 
 
+# GET /courses/teacher/my-courses - courses owned by the logged-in teacher.
 @router.get("/teacher/my-courses", response_model=List[CourseResponse])
 def get_teacher_courses(
     db: Session = Depends(get_db),
@@ -203,12 +215,14 @@ def get_teacher_courses(
     return db.query(Course).filter(Course.teacher_id == current_teacher.id).all()
 
 
+# GET /courses/all - every course (any logged-in user).
 @router.get("/all", response_model=List[CourseResponse])
 def get_all_courses(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Retrieve all courses (accessible by any logged in user)."""
     return db.query(Course).all()
 
 
+# GET /courses/lookup/{code} - public, rate-limited preview of a course by enrollment code.
 @router.get("/lookup/{enrollment_code}", response_model=CourseLookupResponse)
 def lookup_course_by_code(
     enrollment_code: str,
@@ -228,6 +242,7 @@ def lookup_course_by_code(
     return CourseLookupResponse(name=course.name, code=course.code)
 
 
+# GET /courses/{id} - course details, only for users with access (teacher/enrolled/oversight).
 @router.get("/{id}", response_model=CourseResponse)
 def get_course_details(
     id: int,
@@ -244,6 +259,7 @@ def get_course_details(
     return course
 
 
+# PUT /courses/{id} - the owning teacher edits their course; changing the catalog re-derives name/code/prerequisite.
 @router.put("/{id}", response_model=CourseResponse)
 def update_course(
     id: int,
@@ -276,6 +292,7 @@ def update_course(
     return course
 
 
+# DELETE /courses/{id} - the owning teacher deletes the course and all dependent rows.
 @router.delete("/{id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_course(
     id: int,
@@ -314,6 +331,7 @@ def regenerate_enrollment_code(
 
 # --- Admin: full control over any course instance ---
 
+# PUT /courses/admin/{id} - admin/coordinator update with scope checks; see docstring.
 @router.put("/admin/{id}", response_model=CourseResponse)
 def admin_update_course(
     id: int,
@@ -386,6 +404,7 @@ def admin_update_course(
     return course
 
 
+# DELETE /courses/admin/{id} - deletes any course inside the caller's program scope.
 @router.delete("/admin/{id}", status_code=status.HTTP_204_NO_CONTENT)
 def admin_delete_course(
     id: int,
@@ -403,10 +422,12 @@ def admin_delete_course(
 
 # --- Program Coordinators assign/unassign Course Coordinators for their own courses ---
 
+# Body for assigning a course coordinator: the target user's ID.
 class CourseCoordinatorAssignRequest(BaseModel):
     user_id: int
 
 
+# A coordinator listed for a catalog subject (id, name, email).
 class CourseCoordinatorEntry(BaseModel):
     id: int
     full_name: str
@@ -416,6 +437,7 @@ class CourseCoordinatorEntry(BaseModel):
         from_attributes = True
 
 
+# Fetches a course by ID or raises 404.
 def _get_course_or_404(db: Session, course_id: int) -> Course:
     course = db.query(Course).filter(Course.id == course_id).first()
     if not course:
@@ -423,11 +445,13 @@ def _get_course_or_404(db: Session, course_id: int) -> Course:
     return course
 
 
+# Raises 403 unless the course's program is within the caller's scope.
 def _assert_course_program_in_scope(db: Session, scope: ProgramScope, course: Course):
     program_id = course.catalog_entry.program_id if course.catalog_entry else None
     _assert_program_in_scope(scope, program_id)
 
 
+# POST .../catalog/{id}/coordinator - assigns a course coordinator to a subject (see docstring).
 @router.post("/admin/catalog/{catalog_id}/coordinator", status_code=status.HTTP_201_CREATED)
 def assign_course_coordinator(
     catalog_id: int,
@@ -469,6 +493,7 @@ def assign_course_coordinator(
     return {"message": f"{target_user.full_name} assigned as Course Coordinator for {catalog_entry.name}."}
 
 
+# DELETE .../catalog/{id}/coordinator/{user_id} - unassigns a coordinator from a subject.
 @router.delete("/admin/catalog/{catalog_id}/coordinator/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 def remove_course_coordinator(
     catalog_id: int,
@@ -491,6 +516,7 @@ def remove_course_coordinator(
     return None
 
 
+# GET .../catalog/{id}/coordinators - lists coordinators assigned to a subject.
 @router.get("/admin/catalog/{catalog_id}/coordinators", response_model=List[CourseCoordinatorEntry])
 def list_course_coordinators(
     catalog_id: int,

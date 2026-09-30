@@ -1,3 +1,4 @@
+# Class stream endpoint: one merged, newest-first feed of a course's announcements, assignments, materials and meetings.
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -11,6 +12,7 @@ from app.courses.access import assert_course_access
 router = APIRouter(prefix="/courses", tags=["Class Stream"])
 
 
+# Fetches a course by ID or raises 404.
 def _get_course_or_404(db: Session, course_id: int) -> Course:
     course = db.query(Course).filter(Course.id == course_id).first()
     if not course:
@@ -18,6 +20,7 @@ def _get_course_or_404(db: Session, course_id: int) -> Course:
     return course
 
 
+# GET /courses/{id}/stream - merges the four post types into StreamItems (see docstring).
 @router.get("/{course_id}/stream", response_model=List[StreamItem])
 def get_class_stream(
     course_id: int,
@@ -33,6 +36,7 @@ def get_class_stream(
 
     items: List[StreamItem] = []
 
+    # Each block below loads one post type and converts every row into a common StreamItem.
     announcements = db.query(Announcement).filter(Announcement.course_id == course_id).all()
     for a in announcements:
         items.append(StreamItem(
@@ -68,5 +72,6 @@ def get_class_stream(
             meeting_link=mt.meeting_link, scheduled_at=mt.scheduled_at, duration_minutes=mt.duration_minutes,
         ))
 
+    # Newest first across all post types.
     items.sort(key=lambda i: i.created_at, reverse=True)
     return items

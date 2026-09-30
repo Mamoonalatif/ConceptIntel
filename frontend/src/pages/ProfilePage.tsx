@@ -1,3 +1,5 @@
+// ProfilePage: shows the logged-in user's account details and role capabilities, lets
+// them upload/remove a profile photo and open the change-password modal.
 import React, { useRef, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { AppShell, type NavItem } from '../components/AppShell';
@@ -24,6 +26,7 @@ import {
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
+// Display info for each role: label, icon, description and capability list.
 const ROLE_META: Record<string, { label: string; icon: React.FC<{ className?: string }>; desc: string; capabilities: string[] }> = {
   student: {
     label: 'Student',
@@ -82,7 +85,7 @@ const ROLE_META: Record<string, { label: string; icon: React.FC<{ className?: st
   },
 };
 
-/* Info Row */
+/* Info Row: one labelled read-only detail (icon + label + value). */
 const InfoRow: React.FC<{ label: string; value: string; icon: React.FC<{ className?: string }> }> = ({ label, value, icon: Icon }) => (
   <div className="flex items-center gap-4 p-4 bg-background border border-border rounded-xl">
     <div className="w-9 h-9 rounded-lg bg-primary-muted flex items-center justify-center shrink-0">
@@ -95,6 +98,7 @@ const InfoRow: React.FC<{ label: string; value: string; icon: React.FC<{ classNa
   </div>
 );
 
+/** Page component for the profile screen. */
 const ProfilePage: React.FC = () => {
   const { user, refreshUser } = useAuth();
   const navigate = useNavigate();
@@ -103,6 +107,7 @@ const ProfilePage: React.FC = () => {
   const [photoError, setPhotoError] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Uploads the chosen image as the avatar, then refreshes the user so it shows up.
   const handlePhotoSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
@@ -119,6 +124,7 @@ const ProfilePage: React.FC = () => {
     }
   };
 
+  // Deletes the current avatar and refreshes the user.
   const handleRemovePhoto = async () => {
     setPhotoError('');
     setPhotoBusy(true);

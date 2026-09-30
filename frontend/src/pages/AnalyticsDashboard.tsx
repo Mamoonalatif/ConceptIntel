@@ -1,3 +1,6 @@
+// AnalyticsDashboard: role-aware analytics page. Students see their own completion per
+// course; teachers/coordinators pick a course and see mastery heatmap + assignment stats;
+// admins additionally get a platform-wide overview. All data comes from analyticsService.
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -22,6 +25,7 @@ const ROLE_SLICE_LABELS: Record<string, string> = {
   course_coordinators: 'Course Coordinators', admins: 'Admins',
 };
 
+// Minimal shape of an entry in the course picker.
 interface CourseOption {
   id: number;
   name: string;
@@ -31,6 +35,7 @@ interface CourseOption {
    bottleneck panel below (never used for arbitrary "series" identity). */
 const rateBarClass = (value: number) => (value < 50 ? 'bg-rose-500' : value < 75 ? 'bg-amber-500' : 'bg-teal-500');
 
+/** Page component: loads the data relevant to the current role and renders stat cards, heatmaps and progress bars. */
 const AnalyticsDashboard: React.FC = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -106,6 +111,7 @@ const AnalyticsDashboard: React.FC = () => {
   // looks identical everywhere instead of collapsing to just the global links.
   const navItems: NavItem[] = getPrimaryNavItems(user, navigate);
 
+  // Assignments sorted by lowest submission rate first (the "bottlenecks" panel).
   const bottlenecks = data
     ? [...data.assignments].sort((a, b) => (a.submitted_count / (a.total_students || 1)) - (b.submitted_count / (b.total_students || 1)))
     : [];

@@ -1,3 +1,6 @@
+# Authentication and user-management routes (mounted at /api/auth): register, login, 2FA, Google sign-in,
+# password reset, email verification, avatars, and admin staff/user management.
+# Also defines the role-based get_current_* dependencies that other routers import to protect endpoints.
 import base64
 import csv
 import hashlib
@@ -24,13 +27,13 @@ from app.database.connection import get_db, SessionLocal
 from app.database.models import (
     User, TeacherRequest, Program, Course, CourseCatalog,
     ProgramCoordinatorAssignment, CourseCoordinatorAssignment,
-    Assignment, AssignmentSubmission, Announcement, Material, Meeting,
+    AssignmentSubmission,
     Comment, ChatMessage, NotificationPreference, PasswordResetToken,
     EmailVerificationToken,
 )
 from app.courses.services import delete_course_cascade
 from app.auth.schemas import (
-    UserCreate, UserLogin, UserResponse, Token, TokenData,
+    UserCreate, UserLogin, UserResponse, Token,
     AdminCreateTeacher, TeacherCredentialsResponse,
     TeacherRequestCreate, TeacherRequestResponse,
     UserStatusUpdate, UserAdminUpdate, GoogleAuthRequest, StaffRoleUpdate, ChangePasswordRequest,
@@ -117,7 +120,6 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
         raise credentials_exception
 
     email: str = payload.get("sub")
-    role: str = payload.get("role")
     user_id: int = payload.get("user_id")
 
     if email is None or user_id is None:
@@ -285,6 +287,8 @@ def get_current_course_manager(current_user: User = Depends(get_current_user)) -
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 def register(user_in: UserCreate, db: Session = Depends(get_db)):
+    """Self-register a new student: reject duplicate emails, create the account
+    (in Supabase Auth when configured), then email a verification link/code."""
     # Check if user already exists
     existing_user = db.query(User).filter(User.email == user_in.email).first()
     if existing_user:
@@ -338,6 +342,7 @@ def register(user_in: UserCreate, db: Session = Depends(get_db)):
 
 
 def _issue_tokens_for_user(user: User) -> dict:
+    """Build the login response: a fresh access + refresh JWT pair plus the user profile."""
     token_data = {
         "sub": user.email,
         "role": user.role,
@@ -362,6 +367,8 @@ def _issue_tokens_for_user(user: User) -> dict:
 
 @router.post("/login", response_model=Union[Token, TwoFactorRequiredResponse])
 def login(credentials: UserLogin, db: Session = Depends(get_db)):
+    """Email/password login. Checks the password (Supabase or legacy bcrypt), then
+    active/verified status, and either returns tokens or a 2FA-pending token."""
     user = db.query(User).filter(User.email == credentials.email).first()
     if not user:
         raise HTTPException(
@@ -440,6 +447,7 @@ def two_factor_verify_login(payload: TwoFactorLoginVerify, db: Session = Depends
 
 @router.get("/2fa/status", response_model=TwoFactorStatusResponse)
 def two_factor_status(current_user: User = Depends(get_current_user)):
+    """Tell the frontend whether the signed-in user has 2FA turned on."""
     return TwoFactorStatusResponse(is_2fa_enabled=current_user.is_2fa_enabled)
 
 
@@ -650,6 +658,7 @@ def google_login(payload: GoogleAuthRequest, db: Session = Depends(get_db)):
 
 @router.get("/me", response_model=UserResponse)
 def read_current_user(current_user: User = Depends(get_current_user)):
+    """Return the profile of the currently authenticated user (GET /auth/me)."""
     return current_user
 
 
@@ -737,6 +746,7 @@ RESET_TOKEN_TTL = timedelta(minutes=30)
 
 
 def _hash_reset_token(raw_token: str) -> str:
+    """SHA-256 a password-reset token; only the hash is stored so a DB leak cannot be replayed."""
     return hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
 
 
@@ -819,6 +829,7 @@ VERIFICATION_TOKEN_TTL = timedelta(hours=24)
 
 
 def _hash_verification_token(raw_token: str) -> str:
+    """SHA-256 an email-verification token (same store-only-the-hash convention as reset tokens)."""
     return hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
 
 
@@ -1374,6 +1385,7 @@ def list_teacher_requests(
     db: Session = Depends(get_db),
     current_admin: User = Depends(get_current_admin)
 ):
+    """Admin: list teacher-account requests, optionally filtered by status, newest first."""
     query = db.query(TeacherRequest)
     if status_filter:
         query = query.filter(TeacherRequest.status == status_filter.lower())
@@ -1394,6 +1406,7 @@ def approve_teacher_request(
     db: Session = Depends(get_db),
     current_admin: User = Depends(get_current_admin)
 ):
+    """Admin: approve a pending teacher request by creating the teacher account and emailing credentials."""
     req = db.query(TeacherRequest).filter(TeacherRequest.id == request_id).first()
     if not req:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Teacher request not found")
@@ -1420,6 +1433,7 @@ def reject_teacher_request(
     db: Session = Depends(get_db),
     current_admin: User = Depends(get_current_admin)
 ):
+    """Admin: mark a pending teacher request as rejected."""
     req = db.query(TeacherRequest).filter(TeacherRequest.id == request_id).first()
     if not req:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Teacher request not found")

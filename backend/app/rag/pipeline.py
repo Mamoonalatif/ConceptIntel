@@ -48,6 +48,7 @@ from app.rag.images import extract_images, caption_image, is_captioning_configur
 logger = logging.getLogger("conceptintel")
 
 
+# Entry point of ingestion: clean -> chunk -> caption images -> dedup -> embed -> store.
 def process_file_for_rag(
     db: Session,
     course_id: int,
@@ -121,7 +122,13 @@ def process_file_for_rag(
     # Replace rather than append. Done in the same transaction as the insert so a
     # failure mid-embed can never leave the file with zero chunks.
     _delete_existing_chunks(db, file_id, commit=False)
-    db.add_all(rows)
+    # Flushed in small batches inside the one transaction: a single INSERT carrying
+    # every chunk's 768-float vector is several hundred KB, and the Supabase pooler
+    # drops the connection ("server closed the connection unexpectedly") on it,
+    # leaving the file un-embedded. Still one commit, so still all-or-nothing.
+    for start in range(0, len(rows), 5):
+        db.add_all(rows[start:start + 5])
+        db.flush()
     db.commit()
     return len(rows)
 

@@ -1,7 +1,10 @@
+# Pydantic response model for an uploaded course file and its processing status.
 from pydantic import BaseModel
 from datetime import datetime
 from typing import Optional
 
+# File metadata returned to clients: storage info, text-extraction status (status/used_ocr)
+# and RAG ingestion status (rag_status/rag_error).
 class UploadedFileResponse(BaseModel):
     id: int
     course_id: int

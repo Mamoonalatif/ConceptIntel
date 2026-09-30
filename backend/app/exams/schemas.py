@@ -1,3 +1,4 @@
+# Pydantic request/response models for exams (settings, teacher CRUD, student attempts, results).
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -5,6 +6,7 @@ from pydantic import BaseModel, field_validator
 
 
 class ExamSettings(BaseModel):
+    """Delivery rules for an exam (timer, shuffling, attempts, pass mark, answer visibility)."""
     time_limit_seconds: Optional[int] = None
     shuffle_questions: bool = True
     shuffle_options: bool = True
@@ -15,6 +17,7 @@ class ExamSettings(BaseModel):
     @field_validator("time_limit_seconds")
     @classmethod
     def sane_limit(cls, v: Optional[int]) -> Optional[int]:
+        """0/None means untimed; otherwise 1 minute to 6 hours."""
         if v is None or v == 0:
             return None
         if not (60 <= v <= 6 * 3600):
@@ -24,6 +27,7 @@ class ExamSettings(BaseModel):
     @field_validator("max_attempts")
     @classmethod
     def sane_attempts(cls, v: int) -> int:
+        """0 = unlimited, otherwise at most 20 attempts."""
         if not (0 <= v <= 20):
             raise ValueError("max_attempts must be between 0 (unlimited) and 20")
         return v
@@ -31,12 +35,14 @@ class ExamSettings(BaseModel):
     @field_validator("pass_mark")
     @classmethod
     def sane_pass_mark(cls, v: float) -> float:
+        """Pass mark is a percentage 0-100 (rounded to 2 dp)."""
         if not (0 <= v <= 100):
             raise ValueError("pass_mark must be a percentage between 0 and 100")
         return round(float(v), 2)
 
 
 class ExamIn(ExamSettings):
+    """Teacher's payload to create an exam: title, description, question ids and settings."""
     title: str
     description: Optional[str] = None
     question_ids: List[int] = []
@@ -44,12 +50,14 @@ class ExamIn(ExamSettings):
     @field_validator("title")
     @classmethod
     def non_empty(cls, v: str) -> str:
+        """Reject blank titles and trim whitespace."""
         if not (v or "").strip():
             raise ValueError("An exam needs a title.")
         return v.strip()
 
 
 class ExamUpdate(BaseModel):
+    """Partial update for an exam - every field optional, only those sent are changed."""
     title: Optional[str] = None
     description: Optional[str] = None
     question_ids: Optional[List[int]] = None
@@ -63,6 +71,7 @@ class ExamUpdate(BaseModel):
 
 
 class ExamOut(BaseModel):
+    """An exam as returned to teachers/students, with computed counts and points."""
     id: int
     course_id: int
     title: str
@@ -98,6 +107,7 @@ class ServedQuestion(BaseModel):
 
 
 class ExamAttemptOut(BaseModel):
+    """A started attempt: the served questions, time remaining and start time."""
     attempt_id: int
     exam_id: int
     title: str
@@ -117,6 +127,7 @@ class SubmitExamRequest(BaseModel):
 
 
 class ExamResultOut(BaseModel):
+    """Outcome of a submitted attempt: score, pass/fail, lateness and per-question detail."""
     attempt_id: int
     score: float
     points_earned: float
@@ -128,6 +139,7 @@ class ExamResultOut(BaseModel):
 
 
 class ExamAttemptSummary(BaseModel):
+    """One row of a teacher's list of a student's attempts on an exam."""
     id: int
     student_id: int
     student_name: Optional[str] = None

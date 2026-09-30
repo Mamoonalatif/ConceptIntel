@@ -22,6 +22,7 @@ from app.upload.services import extract_text_from_file
 
 logger = logging.getLogger("conceptintel.grading")
 
+# Base grading instructions: score each relevant concept 0-100 with one sentence of feedback, as strict JSON.
 SYSTEM_PROMPT = """You are an experienced, fair teaching assistant grading one student's
 assignment submission for a university course.
 
@@ -53,9 +54,25 @@ Respond ONLY with valid JSON in this exact format:
   "concept_scores": [
     {"concept_name": "Newton's Second Law", "score": 90, "feedback": "Correctly applied F=ma throughout, with correct unit handling."},
     {"concept_name": "Free Body Diagrams", "score": 60, "feedback": "Diagram is present but omits the normal force on the incline - review how to resolve forces on angled surfaces."}
+  ],
+  "misconceptions": [
+    {"concept_name": "Free Body Diagrams", "misconception": "Treats the normal force as always equal to the weight.", "correction": "On an incline the normal force equals only the component of weight perpendicular to the surface."}
   ]
 }"""
 
+# Appended to every grading prompt: ask the model to detect genuine conceptual errors.
+MISCONCEPTION_PROMPT_SUFFIX = """
+
+MISCONCEPTION DETECTION: besides scoring, identify genuine MISCONCEPTIONS in the
+submission - places where the student states or applies something conceptually WRONG
+(a systematic misunderstanding), as opposed to merely leaving something out or making a
+typo. For each one return "concept_name" (prefer a name from the provided concept list),
+"misconception" (what the student wrongly believes/did, one sentence, quoting or
+paraphrasing the submission) and "correction" (the correct idea, one sentence). Return at
+most 5, most important first, in a top-level "misconceptions" array. If there are none,
+return an empty array - never invent misconceptions to fill the list."""
+
+# Appended to the base prompt when the assignment has a rubric: pick a level (or points) per criterion.
 RUBRIC_SYSTEM_PROMPT_SUFFIX = """
 
 You are ALSO given this assignment's grading rubric - a fixed list of criteria the
@@ -82,6 +99,9 @@ Respond ONLY with valid JSON in this exact format:
   "criterion_scores": [
     {"criterion_id": 1, "level_id": 4, "feedback": "Correctly applied F=ma with consistent units throughout."},
     {"criterion_id": 2, "points_earned": 12, "feedback": "Diagram present but missing the normal force."}
+  ],
+  "misconceptions": [
+    {"concept_name": "Free Body Diagrams", "misconception": "Treats the normal force as always equal to the weight.", "correction": "On an incline the normal force equals only the component of weight perpendicular to the surface."}
   ]
 }"""
 
@@ -161,6 +181,8 @@ introduce, and do not treat these excerpts as a model answer.
     system_prompt = SYSTEM_PROMPT
     if rubric_criteria:
         system_prompt = SYSTEM_PROMPT + RUBRIC_SYSTEM_PROMPT_SUFFIX
+    system_prompt += MISCONCEPTION_PROMPT_SUFFIX
+    if rubric_criteria:
         rubric_line_parts = []
         for c in rubric_criteria:
             line = f"- id={c['id']}: {c['title']} (max {c['max_points']} points) - {c.get('description') or ''}"
@@ -218,6 +240,16 @@ Student's submission (extracted text, first 12000 characters):
             data = json.loads(raw_content)
             data.setdefault("concept_scores", [])
             data.setdefault("criterion_scores", [])
+            # Keep only well-formed misconception entries (the model occasionally returns strings).
+            data["misconceptions"] = [
+                {
+                    "concept_name": str(m.get("concept_name", "")).strip(),
+                    "misconception": str(m.get("misconception", "")).strip(),
+                    "correction": str(m.get("correction", "")).strip(),
+                }
+                for m in (data.get("misconceptions") or [])
+                if isinstance(m, dict) and str(m.get("misconception", "")).strip()
+            ][:5]
             if rubric_criteria:
                 # Recompute overall_grade from the rubric itself rather than trusting the
                 # model's own 0-100 judgment call - a rubric exists precisely so the

@@ -14,6 +14,7 @@ from app.database.connection import engine
 
 
 def main():
+    """Applies the schema change described in the module docstring to the existing database, then prints a summary."""
     with engine.connect() as conn:
         conn.execute(text("ALTER TABLE email_verification_tokens ADD COLUMN IF NOT EXISTS code_hash VARCHAR;"))
         conn.execute(text("ALTER TABLE email_verification_tokens ADD COLUMN IF NOT EXISTS attempts INTEGER NOT NULL DEFAULT 0;"))

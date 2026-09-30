@@ -1,3 +1,5 @@
+# Notification endpoints: list, unread badge count, mark read, mark all read, and delete. All are scoped
+# to the logged-in user's own notifications.
 from datetime import datetime
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -15,6 +17,7 @@ from app.auth.routes import get_current_user
 router = APIRouter(prefix="/notifications", tags=["Notifications"])
 
 
+# GET /notifications - paginated list (see docstring).
 @router.get("", response_model=NotificationListResponse)
 def list_notifications(
     unread_only: bool = False,
@@ -45,6 +48,7 @@ def list_notifications(
     return NotificationListResponse(items=items, unread_count=unread_count, total=total)
 
 
+# GET /notifications/unread-count - badge count (see docstring).
 @router.get("/unread-count", response_model=UnreadCountResponse)
 def get_unread_count(
     db: Session = Depends(get_db),
@@ -60,6 +64,7 @@ def get_unread_count(
     return UnreadCountResponse(unread_count=count)
 
 
+# Fetches a notification only if it belongs to this user, otherwise 404.
 def _get_owned_notification(db: Session, notification_id: int, user_id: int) -> Notification:
     notif = (
         db.query(Notification)
@@ -71,6 +76,7 @@ def _get_owned_notification(db: Session, notification_id: int, user_id: int) -> 
     return notif
 
 
+# PATCH /notifications/{id}/read - marks one notification read and stamps read_at.
 @router.patch("/{notification_id}/read", response_model=NotificationResponse)
 def mark_read(
     notification_id: int,
@@ -86,6 +92,7 @@ def mark_read(
     return notif
 
 
+# POST /notifications/read-all - marks all of the user's unread notifications read in one query.
 @router.post("/read-all", response_model=BulkActionResponse)
 def mark_all_read(
     db: Session = Depends(get_db),
@@ -100,6 +107,7 @@ def mark_all_read(
     return BulkActionResponse(updated=updated)
 
 
+# DELETE /notifications/read - (see docstring).
 @router.delete("/read", response_model=BulkActionResponse)
 def clear_read_notifications(
     db: Session = Depends(get_db),
@@ -117,6 +125,7 @@ def clear_read_notifications(
     return BulkActionResponse(deleted=deleted)
 
 
+# DELETE /notifications/{id} - deletes one notification.
 @router.delete("/{notification_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_notification(
     notification_id: int,

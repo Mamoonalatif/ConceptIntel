@@ -1,3 +1,5 @@
+# Pydantic schemas for AI content generation: the shapes the model output must match (flashcards, MCQs,
+# study guides, assignment drafts) and the API request/response bodies. Validators enforce correct *shape*.
 from datetime import datetime
 from typing import Optional
 from pydantic import BaseModel, field_validator, model_validator
@@ -21,6 +23,7 @@ QUESTION_STYLES: dict[str, str] = {
 }
 
 
+# One flashcard.
 class FlashcardOut(BaseModel):
     front: str
     back: str
@@ -43,17 +46,20 @@ class MCQOut(BaseModel):
     @field_validator("options")
     @classmethod
     def sane_option_count(cls, v: list[str]) -> list[str]:
+        """Rejects questions with fewer than 2 or more than 5 options."""
         if not (2 <= len(v) <= 5):
             raise ValueError("a question must have between 2 and 5 options")
         return v
 
     @model_validator(mode="after")
     def index_in_range(self):
+        """Rejects a correct_index that does not point at one of the options."""
         if not (0 <= self.correct_index < len(self.options)):
             raise ValueError("correct_index must point at one of the options")
         return self
 
 
+# A glossary term and its definition inside a study guide.
 class KeyTermOut(BaseModel):
     term: str
     definition: str
@@ -77,14 +83,32 @@ class StudyGuideOut(BaseModel):
     connections: Optional[str] = None
 
 
+class AssignmentLevelOut(BaseModel):
+    """One performance level (e.g. Excellent/Good/Fair/Poor) of a drafted rubric
+    criterion - becomes a RubricLevel row when the assignment is posted."""
+    label: str
+    points: float
+    description: Optional[str] = None
+
+
+class AssignmentTaskOut(BaseModel):
+    """One numbered question/task of the drafted assignment, with its marks."""
+    title: str
+    description: str
+    marks: Optional[float] = None
+
+
 class AssignmentCriterionOut(BaseModel):
     """One grading criterion in an AI-drafted assignment - the same shape a
     Rubric/RubricCriterion pair takes (see app/database/models.py), before it has
-    been turned into real rows via the "create assignment" action."""
+    been turned into real rows via the "create assignment" action. `levels` is the
+    detailed performance grid shown in the Word rubric; drafts made before levels
+    existed simply have it empty."""
     title: str
     description: Optional[str] = None
     max_points: float
     clo_code: Optional[str] = None
+    levels: list[AssignmentLevelOut] = []
 
 
 class AssignmentDraftOut(BaseModel):
@@ -96,15 +120,22 @@ class AssignmentDraftOut(BaseModel):
     instructions: str
     points: float
     criteria: list[AssignmentCriterionOut]
+    # Extra detail for the formal Word document. All optional so older drafts
+    # (title/instructions/points/criteria only) still validate and render.
+    objectives: list[str] = []
+    tasks: list[AssignmentTaskOut] = []
+    submission_guidelines: list[str] = []
 
     @field_validator("criteria")
     @classmethod
     def at_least_one_criterion(cls, v: list[AssignmentCriterionOut]) -> list[AssignmentCriterionOut]:
+        """Rejects an assignment draft with an empty rubric."""
         if not v:
             raise ValueError("an assignment draft needs at least one grading criterion")
         return v
 
 
+# Body for asking the AI to generate content for one concept.
 class GenerateContentRequest(BaseModel):
     concept_node_id: str
     concept_name: str
@@ -155,6 +186,7 @@ class GenerateContentRequest(BaseModel):
     @field_validator("language")
     @classmethod
     def clean_language(cls, v: str) -> str:
+        """Trims the language and rejects long values (must be a name, not a sentence)."""
         cleaned = (v or "English").strip()
         if len(cleaned) > 40:
             raise ValueError("language must be a language name, not a sentence")
@@ -163,6 +195,7 @@ class GenerateContentRequest(BaseModel):
     @field_validator("source_text")
     @classmethod
     def bounded_source(cls, v: Optional[str]) -> Optional[str]:
+        """Trims supplied source text and caps it at 20000 characters."""
         if not v:
             return None
         # Bounded because it goes straight into the prompt; beyond this the model
@@ -172,6 +205,7 @@ class GenerateContentRequest(BaseModel):
     @field_validator("question_styles")
     @classmethod
     def known_styles(cls, v: list[str]) -> list[str]:
+        """Normalizes question styles, rejects unknown ones and removes duplicates keeping order."""
         cleaned = [s.strip().lower() for s in (v or []) if s and s.strip()]
         unknown = [s for s in cleaned if s not in QUESTION_STYLES]
         if unknown:
@@ -186,6 +220,7 @@ class GenerateContentRequest(BaseModel):
     @field_validator("content_type")
     @classmethod
     def valid_type(cls, v: str) -> str:
+        """Only the supported content types are accepted."""
         if v not in ("flashcard", "mcq", "quiz", "study_guide", "assignment"):
             raise ValueError("content_type must be one of: flashcard, mcq, quiz, study_guide, assignment")
         return v
@@ -193,6 +228,7 @@ class GenerateContentRequest(BaseModel):
     @field_validator("difficulty")
     @classmethod
     def valid_difficulty(cls, v: str) -> str:
+        """Normalizes difficulty to Easy, Medium or Hard."""
         cleaned = (v or "Medium").strip().capitalize()
         if cleaned not in ("Easy", "Medium", "Hard"):
             raise ValueError("difficulty must be one of: Easy, Medium, Hard")
@@ -201,12 +237,14 @@ class GenerateContentRequest(BaseModel):
     @field_validator("target")
     @classmethod
     def valid_target(cls, v: str) -> str:
+        """Normalizes target to concept, parent or combined."""
         cleaned = (v or "concept").strip().lower()
         if cleaned not in ("concept", "parent", "combined"):
             raise ValueError("target must be one of: concept, parent, combined")
         return cleaned
 
 
+# A saved piece of generated content as returned to the client (payload already parsed).
 class GeneratedContentOut(BaseModel):
     id: int
     course_id: int
@@ -241,6 +279,7 @@ class GeneratedContentOut(BaseModel):
     created_at: datetime
 
 
+# Teacher approve/reject decision on generated content.
 class ReviewContentRequest(BaseModel):
     approve: bool
     notes: Optional[str] = None
@@ -260,6 +299,7 @@ class RefineContentRequest(BaseModel):
     instruction: str
 
 
+# A student's answers to a generated quiz.
 class QuizSubmitRequest(BaseModel):
     answers: list[int]  # selected option index per question, same order as payload.questions
 
@@ -295,11 +335,22 @@ class ContentAttemptSummary(BaseModel):
     completed_at: datetime
 
 
+# Result of a quiz attempt.
 class QuizResultOut(BaseModel):
     score: float
     correct_count: int
     total_count: int
     per_question: list[dict]  # [{question, your_answer, correct_index, correct, explanation}]
+
+
+class CreateAssignmentRequest(BaseModel):
+    """Optional overrides the teacher sets when posting a generated assignment from
+    the course's Assignments tab (title/description/due date/points). Anything left
+    out falls back to the AI draft's own value."""
+    title: Optional[str] = None
+    description: Optional[str] = None
+    due_date: Optional[datetime] = None
+    points: Optional[int] = None
 
 
 class CreatedAssignmentOut(BaseModel):

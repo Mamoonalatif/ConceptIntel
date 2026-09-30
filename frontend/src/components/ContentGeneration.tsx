@@ -1,3 +1,6 @@
+// ContentGeneration: AI study-material studio. A teacher picks a concept, material type (flashcards/MCQs/quiz/study guide/assignment), difficulty,
+// language and optional source document, starts an async generation job, then reviews (approve/reject) and browses the results.
+// Used as an embedded card in CourseDetail or as a standalone "page" layout.
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Sparkles, RefreshCw, Layers, ListChecks, BookOpen, Check, X, Search,
@@ -29,8 +32,10 @@ interface ContentGenerationProps {
   initialContentType?: string;
 }
 
+// Display metadata (label, icon, one-line description) for each content type.
 interface TypeMeta { label: string; icon: React.ElementType; blurb: string }
 
+// Keyed by the backend's content_type value.
 const TYPE_META: Record<string, TypeMeta> = {
   flashcard: { label: 'Flashcards', icon: Layers, blurb: 'Two-sided cards for self-testing' },
   mcq: { label: 'Practice MCQs', icon: ListChecks, blurb: 'Ungraded practice questions' },
@@ -39,6 +44,7 @@ const TYPE_META: Record<string, TypeMeta> = {
   assignment: { label: 'Assignment', icon: ClipboardCheck, blurb: 'Brief + grading rubric together' },
 };
 
+// Difficulty levels offered for generated material (and for filtering concepts).
 const DIFFICULTIES = ['Easy', 'Medium', 'Hard'] as const;
 type Difficulty = (typeof DIFFICULTIES)[number];
 
@@ -63,6 +69,7 @@ const QUESTION_STYLE_META: { key: QuestionStyle; label: string; blurb: string }[
  *  difficulty reads identically here and on the concept graph. */
 const badgeClassFor = (d: string) => `badge-${(d || 'medium').toLowerCase()}`;
 
+// Main component. Holds composer state (concept, type, difficulty, count, language, CLO, source text) plus the list of already generated items.
 export const ContentGeneration: React.FC<ContentGenerationProps> = ({
   courseId, isTeacher, variant = 'card', catalogId, initialContentType,
 }) => {
@@ -99,15 +106,18 @@ export const ContentGeneration: React.FC<ContentGenerationProps> = ({
   // row below the dropdown - the CLO -> PLO link itself lives on the CLO row.
   const [plos, setPlos] = useState<PLO[]>([]);
 
+  // Load this catalog subject's CLOs for the "Link to CLO" dropdown.
   useEffect(() => {
     if (!catalogId) { setClos([]); return; }
     outcomesService.listCLOs(catalogId).then(setClos).catch(() => setClos([]));
   }, [catalogId]);
 
+  // Load all PLOs, only used to show which PLOs a chosen CLO rolls up to.
   useEffect(() => {
     outcomesService.listPLOs().then(setPlos).catch(() => setPlos([]));
   }, []);
 
+  // Resolve the selected CLO and the PLOs it maps to, for the "Rolls up to" badges.
   const selectedClo = clos.find((c) => String(c.id) === selectedCloId);
   const selectedCloPlos = selectedClo ? plos.filter((p) => selectedClo.plo_ids.includes(p.id)) : [];
   // A one-off document to generate from. Held in memory only - it is never uploaded
@@ -129,6 +139,7 @@ export const ContentGeneration: React.FC<ContentGenerationProps> = ({
   // No library filters here any more: filtering lives in ContentLibrary, and the
   // embedded CourseDetail card shows the course's items unfiltered.
 
+  // Load this course's generated content items.
   const fetchItems = async () => {
     setLoading(true);
     try {
@@ -140,6 +151,7 @@ export const ContentGeneration: React.FC<ContentGenerationProps> = ({
     }
   };
 
+  // On mount / course change: load items, and (teachers only) the list of concepts that material can be generated for.
   useEffect(() => {
     fetchItems();
     if (isTeacher) {
@@ -151,6 +163,7 @@ export const ContentGeneration: React.FC<ContentGenerationProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [courseId]);
 
+  // The full concept object for the current dropdown selection.
   const selectedConcept = useMemo(
     () => concepts.find((c) => c.id === selectedConceptId) || null,
     [concepts, selectedConceptId]
@@ -206,6 +219,7 @@ export const ContentGeneration: React.FC<ContentGenerationProps> = ({
     if (!selectedConcept?.has_parent && target !== 'concept') setTarget('concept');
   }, [selectedConcept, target]);
 
+  // Start an asynchronous generation job with the chosen options. The request only creates the job; progress is shown in GenerationProgressModal.
   const handleGenerate = async () => {
     if (!selectedConcept) return;
     setGenerating(true);
@@ -277,6 +291,7 @@ export const ContentGeneration: React.FC<ContentGenerationProps> = ({
     }
   };
 
+  // Teacher approves or rejects a generated item (PendingReview -> Approved/Rejected) and updates it in the list.
   const handleReview = async (item: GeneratedContentItem, approve: boolean) => {
     try {
       const updated = await contentGenerationService.review(courseId, item.id, approve);
@@ -286,6 +301,7 @@ export const ContentGeneration: React.FC<ContentGenerationProps> = ({
     }
   };
 
+  // Delete a generated item after confirmation and remove it from the list.
   const handleDelete = async (item: GeneratedContentItem) => {
     if (!window.confirm(`Delete "${item.title}"?`)) return;
     try {
@@ -296,16 +312,19 @@ export const ContentGeneration: React.FC<ContentGenerationProps> = ({
     }
   };
 
+  // Students only see Approved items; teachers see everything.
   const visibleItems = useMemo(() => {
     let list = isTeacher ? items : items.filter((i) => i.status === 'Approved');
     return list;
   }, [items, isTeacher]);
 
+  // Outer wrapper styling differs between the roomy page layout and the embedded card.
   const wrapperClass =
     variant === 'page'
       ? 'space-y-6'
       : 'bg-surface rounded-2xl p-6 border border-border animate-fade-up';
 
+  // Render: card header, error banner, composer (teachers), then the library list (card variant only), plus the progress modal for an active job.
   return (
     <div className={wrapperClass}>
       {variant === 'card' && (

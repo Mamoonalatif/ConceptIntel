@@ -1,3 +1,5 @@
+# Course materials endpoints: teachers post/edit/delete reference resources (files or links);
+# enrolled students and staff list and download them.
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -21,10 +23,12 @@ router = APIRouter(prefix="/courses", tags=["Materials"])
 # Materials are reference resources, not submittable coursework, so the accepted
 # formats lean toward slides/readings/media rather than assignment deliverables -
 # mirrors assignments/routes.py's SUPPORTED_EXTENSIONS pattern.
+# File types a teacher may attach to a material.
 SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".doc", ".pptx", ".ppt", ".txt", ".zip", ".jpg", ".jpeg", ".png", ".mp4", ".mp3"}
 MAX_FILE_SIZE = 25 * 1024 * 1024  # 25 MB
 
 
+# Fetches a course by ID or raises 404.
 def _get_course_or_404(db: Session, course_id: int) -> Course:
     course = db.query(Course).filter(Course.id == course_id).first()
     if not course:
@@ -67,6 +71,7 @@ def _notify_material_posted_background(course_id: int, material_id: int) -> None
         bg_db.close()
 
 
+# Reads the uploaded file into memory after checking its extension and the 25MB size limit.
 def _read_and_validate_upload(file: UploadFile) -> tuple[bytes, str, str]:
     extension = Path(file.filename).suffix.lower()
     if extension not in SUPPORTED_EXTENSIONS:
@@ -80,6 +85,7 @@ def _read_and_validate_upload(file: UploadFile) -> tuple[bytes, str, str]:
     return content, extension, Path(file.filename).name
 
 
+# Converts a Material ORM row into the API response model (adds teacher name).
 def _to_response(m: Material) -> MaterialResponse:
     return MaterialResponse(
         id=m.id,
@@ -95,6 +101,7 @@ def _to_response(m: Material) -> MaterialResponse:
     )
 
 
+# GET /courses/{id}/materials - newest-first list, visible to users with course access.
 @router.get("/{course_id}/materials", response_model=List[MaterialResponse])
 def list_materials(
     course_id: int,
@@ -115,6 +122,8 @@ def list_materials(
     return [_to_response(m) for m in materials]
 
 
+# POST /courses/{id}/materials - the course teacher posts a material (optional file/link), then
+# students are notified in a background thread so the request returns quickly.
 @router.post("/{course_id}/materials", response_model=MaterialResponse, status_code=status.HTTP_201_CREATED)
 def create_material(
     course_id: int,
@@ -150,6 +159,7 @@ def create_material(
     return _to_response(material)
 
 
+# Loads a material in this course and checks the caller posted it (404/403 otherwise).
 def _get_owned_material(db: Session, course_id: int, material_id: int, teacher_id: int) -> Material:
     material = (
         db.query(Material)
@@ -163,6 +173,7 @@ def _get_owned_material(db: Session, course_id: int, material_id: int, teacher_i
     return material
 
 
+# PATCH .../materials/{id} - owner edits title, description or link.
 @router.patch("/{course_id}/materials/{material_id}", response_model=MaterialResponse)
 def update_material(
     course_id: int,
@@ -184,6 +195,7 @@ def update_material(
     return _to_response(material)
 
 
+# DELETE .../materials/{id} - owner deletes it; the stored file is removed best-effort.
 @router.delete("/{course_id}/materials/{material_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_material(
     course_id: int,
@@ -202,6 +214,7 @@ def delete_material(
     return None
 
 
+# GET .../materials/{id}/download - streams the attachment to users with course access.
 @router.get("/{course_id}/materials/{material_id}/download")
 def download_material_attachment(
     course_id: int,

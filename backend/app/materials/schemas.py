@@ -1,14 +1,17 @@
+# Pydantic models for course materials (teacher-posted resources).
 from datetime import datetime
 from typing import Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 
+# Partial edit payload for a material; only supplied fields change.
 class MaterialUpdate(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
     external_link: Optional[str] = None
 
 
+# Material returned to clients, including the teacher's name.
 class MaterialResponse(BaseModel):
     id: int
     course_id: int

@@ -1,3 +1,6 @@
+// Login: sign-in page. Email/password (with optional 2FA code step and "resend
+// verification" for unverified accounts) plus Google sign-in; redirects to the
+// role's dashboard or to ?redirect= after success.
 import React, { useState } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -10,6 +13,7 @@ import { FoxMascot } from '../components/FoxMascot';
 import type { MascotRole } from '../components/FoxMascot';
 import { Lock, Mail, AlertCircle, Loader2, Eye, EyeOff, ArrowLeft } from 'lucide-react';
 
+// Default landing route per role (teachers/admin get their own; everyone else goes to student).
 const dashboardPathForRole = (role: string) => {
   if (role === 'admin') return '/admin';
   if (role === 'teacher') return '/teacher';
@@ -49,6 +53,7 @@ const PANEL_TABS: { id: PanelTab; label: string; tagline: string; desc: string; 
   },
 ];
 
+/** Decorative left-hand marketing panel: role tabs that switch the fox mascot, tagline and blurb. */
 const LeftPanel: React.FC = () => {
   const [active, setActive] = useState<PanelTab>('student');
   const tab = PANEL_TABS.find(t => t.id === active)!;
@@ -121,6 +126,7 @@ const LeftPanel: React.FC = () => {
   );
 };
 
+/** Page component: login form, with a separate 2FA screen when the account requires it. */
 const Login: React.FC = () => {
   const { login, verifyTwoFactor } = useAuth();
   const navigate = useNavigate();
@@ -146,6 +152,7 @@ const Login: React.FC = () => {
 
   const emailInvalid = email.length > 0 && !isValidEmail(email);
 
+  // Password login: if the server asks for 2FA, switch to the code step; otherwise navigate away.
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -167,6 +174,7 @@ const Login: React.FC = () => {
     }
   };
 
+  // Re-sends the email verification link for an unverified account.
   const handleResendVerification = async () => {
     setResendState('sending');
     try {
@@ -177,6 +185,7 @@ const Login: React.FC = () => {
     }
   };
 
+  // Second login step: exchanges the temp token + authenticator/backup code for a real session.
   const handleVerifyTwoFactor = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!twoFactorTempToken) return;
@@ -191,6 +200,7 @@ const Login: React.FC = () => {
     }
   };
 
+  // 2FA step: shown instead of the normal form once a temp token has been issued.
   if (twoFactorTempToken) {
     return (
       <div className="h-screen bg-background flex items-center justify-center p-6">

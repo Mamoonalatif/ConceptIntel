@@ -42,6 +42,7 @@ LATE_GRACE_SECONDS = 15
 
 
 def exam_question_ids(exam: Exam) -> List[int]:
+    """Parse the exam's stored JSON list of question ids; bad data yields []."""
     try:
         ids = json.loads(exam.question_ids_json or "[]")
         return [int(i) for i in ids] if isinstance(ids, list) else []
@@ -63,6 +64,7 @@ def load_questions(db: Session, ids: List[int]) -> List[QuestionBankItem]:
 
 
 def _payload(item: QuestionBankItem) -> Dict[str, Any]:
+    """Decode a question's JSON payload; {} (with a warning) if corrupt."""
     try:
         return json.loads(item.payload_json) or {}
     except (json.JSONDecodeError, TypeError):
@@ -71,6 +73,7 @@ def _payload(item: QuestionBankItem) -> Dict[str, Any]:
 
 
 def attempts_used(db: Session, exam_id: int, student_id: int) -> int:
+    """How many attempts this student has already made on the exam."""
     return db.query(ExamAttempt).filter(
         ExamAttempt.exam_id == exam_id, ExamAttempt.student_id == student_id
     ).count()
@@ -140,6 +143,7 @@ def start_attempt(db: Session, exam: Exam, student_id: int, questions: List[Ques
 
 
 def attempt_seed_and_ids(attempt: ExamAttempt) -> Tuple[int, List[int]]:
+    """Read back the shuffle seed and question ids stored on an attempt."""
     try:
         data = json.loads(attempt.question_order_json or "{}")
         return int(data.get("seed", 0)), [int(i) for i in (data.get("ids") or [])]
@@ -156,6 +160,7 @@ def remaining_seconds(exam: Exam, attempt: ExamAttempt) -> Optional[int]:
 
 
 def is_late(exam: Exam, attempt: ExamAttempt) -> bool:
+    """True if the attempt is past the time limit plus the grace period."""
     if not exam.time_limit_seconds or not attempt.started_at:
         return False
     deadline = attempt.started_at + timedelta(seconds=exam.time_limit_seconds + LATE_GRACE_SECONDS)

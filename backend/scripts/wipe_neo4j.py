@@ -17,6 +17,7 @@ from app.config import settings
 
 
 def main():
+    """Deletes every node and relationship in the Neo4j graph (irreversible)."""
     parser = argparse.ArgumentParser(description="Delete every node/relationship in Neo4j.")
     parser.add_argument("--yes", action="store_true", help="Skip the confirmation prompt.")
     args = parser.parse_args()

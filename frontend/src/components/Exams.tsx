@@ -1,3 +1,5 @@
+// Exams: timed, graded exams built from the course question bank. Exports the Exams tab (list view) plus QuestionInput (shared answer widget).
+// Internal views: ExamBuilder (teacher creates/edits), ExamPlayer (student sits the exam with a countdown), ExamResults (teacher sees attempts).
 import React, { useEffect, useRef, useState } from 'react';
 import {
   FileCheck2, Plus, RefreshCw, Play, Timer, Users, AlertTriangle,
@@ -16,6 +18,7 @@ interface ExamsProps {
   canAuthor: boolean;
 }
 
+// Format seconds as m:ss for the countdown timer.
 const fmtTime = (secs: number) => {
   const m = Math.floor(secs / 60);
   const s = secs % 60;
@@ -40,12 +43,14 @@ const MenuItem: React.FC<{
   </button>
 );
 
+// Badge colours per exam status.
 const STATUS_STYLES: Record<string, string> = {
   Draft: 'text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-500/10 border-amber-200 dark:border-amber-500/20',
   Published: 'text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/10 border-emerald-200 dark:border-emerald-500/20',
   Closed: 'text-text-muted bg-surface border-border',
 };
 
+// Exams tab root: lists exams and switches between list / builder / player / results views with the `view` state.
 export const Exams: React.FC<ExamsProps> = ({ courseId, canAuthor }) => {
   const [exams, setExams] = useState<ExamItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -53,11 +58,13 @@ export const Exams: React.FC<ExamsProps> = ({ courseId, canAuthor }) => {
   const [view, setView] = useState<'list' | 'build' | 'sit' | 'results'>('list');
   const [editing, setEditing] = useState<ExamItem | null>(null);
   const [sitting, setSitting] = useState<ExamItem | null>(null);
+  // Note: canAuthor (teacher) sees all exams and management menus; students only see published exams and a Start button.
   // Which row's overflow menu is open, and which row is mid-request. Both are keyed by
   // exam id rather than held per-row so only one menu can ever be open at a time.
   const [menuFor, setMenuFor] = useState<number | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
 
+  // Load the exams for this course.
   const load = async () => {
     setLoading(true);
     try {
@@ -69,16 +76,19 @@ export const Exams: React.FC<ExamsProps> = ({ courseId, canAuthor }) => {
     }
   };
 
+  // Load on mount / course change.
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [courseId]);
 
+  // Return to the list view, clear selections and reload.
   const back = () => { setView('list'); setEditing(null); setSitting(null); load(); };
 
   // Publishing from the list, rather than only from inside the builder. Re-opening and
   // re-saving an exam just to flip its status is the kind of step that gets an exam
   // left in Draft on the morning it was meant to open.
+  // Change an exam's status (Draft / Published / Closed) straight from the list.
   const setStatus = async (exam: ExamItem, next: 'Draft' | 'Published' | 'Closed') => {
     setBusyId(exam.id);
     setError('');
@@ -93,6 +103,7 @@ export const Exams: React.FC<ExamsProps> = ({ courseId, canAuthor }) => {
     }
   };
 
+  // Delete an exam (after confirmation) and drop it from the list.
   const remove = async (exam: ExamItem) => {
     // An exam carries student attempts with it, so this one gets a confirmation.
     if (!window.confirm(`Delete "${exam.title}"? Any attempts students have made will go with it.`)) return;
@@ -109,6 +120,7 @@ export const Exams: React.FC<ExamsProps> = ({ courseId, canAuthor }) => {
     }
   };
 
+  // Sub-views replace the list entirely when active.
   if (view === 'build') {
     return <ExamBuilder courseId={courseId} exam={editing} onDone={back} />;
   }
@@ -119,6 +131,7 @@ export const Exams: React.FC<ExamsProps> = ({ courseId, canAuthor }) => {
     return <ExamResults courseId={courseId} exam={editing} onDone={back} />;
   }
 
+  // List view render: error banner, header with "New exam" button, then one card per exam with status badges and actions.
   return (
     <div className="space-y-4">
       {error && (
@@ -259,6 +272,7 @@ export const Exams: React.FC<ExamsProps> = ({ courseId, canAuthor }) => {
 
 /* ───────────────────────────── builder ───────────────────────────── */
 
+// ExamBuilder: form for creating or editing an exam (title, time limit, attempts, pass mark, shuffle options) and choosing questions from the bank.
 const ExamBuilder: React.FC<{ courseId: number; exam: ExamItem | null; onDone: () => void }> = ({
   courseId, exam, onDone,
 }) => {
@@ -274,9 +288,11 @@ const ExamBuilder: React.FC<{ courseId: number; exam: ExamItem | null; onDone: (
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
+  // Add or remove a question id from the selection.
   const toggle = (id: number) =>
     setIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
+  // Save the exam (create or update); when publish is true also set its status to Published, then return to the list.
   const save = async (publish: boolean) => {
     if (!title.trim()) { setError('Give the exam a title first.'); return; }
     if (publish && ids.length === 0) { setError('Add at least one question before publishing.'); return; }
@@ -393,6 +409,7 @@ const ExamBuilder: React.FC<{ courseId: number; exam: ExamItem | null; onDone: (
 
 /* ───────────────────────────── player ────────────────────────────── */
 
+// ExamPlayer: student-facing exam. Starts an attempt on the server, shows a countdown, collects answers and submits for grading.
 const ExamPlayer: React.FC<{
   courseId: number; exam: ExamItem; onDone: () => void;
 }> = ({ courseId, exam, onDone }) => {
@@ -403,8 +420,10 @@ const ExamPlayer: React.FC<{
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [remaining, setRemaining] = useState<number | null>(null);
+  // Guards against submitting automatically more than once when the timer hits zero.
   const autoSubmitted = useRef(false);
 
+  // Start the attempt on mount; the server returns the (possibly shuffled) questions and remaining time.
   useEffect(() => {
     (async () => {
       try {
@@ -419,6 +438,7 @@ const ExamPlayer: React.FC<{
     })();
   }, [courseId, exam.id]);
 
+  // Submit all responses to be graded; auto=true means the timer ran out.
   const submit = async (auto = false) => {
     if (!attempt || submitting || result) return;
     if (auto) autoSubmitted.current = true;
@@ -447,6 +467,7 @@ const ExamPlayer: React.FC<{
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [remaining, result]);
 
+  // Render states: loading, failed to start, score/result breakdown after submitting, otherwise the question paper.
   if (loading) return <div className="glass-panel rounded-2xl p-8 border border-border text-center text-sm text-text-muted">Preparing your paper...</div>;
   if (error && !attempt) {
     return (
@@ -502,6 +523,7 @@ const ExamPlayer: React.FC<{
     );
   }
 
+  // How many questions have an answer so far (shown in the header).
   const answeredCount = attempt.questions.filter((q) => responses[String(q.id)] !== undefined).length;
 
   return (
@@ -562,6 +584,7 @@ const ExamPlayer: React.FC<{
 export const QuestionInput: React.FC<{
   index: number; question: ServedQuestion; value: any; onChange: (v: any) => void;
 }> = ({ index, question: q, value, onChange }) => {
+  // Render the right input for the question type (single choice, multi-select, true/false, fill in the blank, or matching).
   const body = () => {
     if (q.question_type === 'single_choice') {
       return (
@@ -646,6 +669,7 @@ export const QuestionInput: React.FC<{
 
 /* ───────────────────────────── results ───────────────────────────── */
 
+// ExamResults: teacher view of all submitted attempts with average score and pass rate.
 const ExamResults: React.FC<{ courseId: number; exam: ExamItem; onDone: () => void }> = ({
   courseId, exam, onDone,
 }) => {
@@ -653,6 +677,7 @@ const ExamResults: React.FC<{ courseId: number; exam: ExamItem; onDone: () => vo
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
+  // Load all attempts for the exam.
   useEffect(() => {
     (async () => {
       try {
@@ -665,6 +690,7 @@ const ExamResults: React.FC<{ courseId: number; exam: ExamItem; onDone: () => vo
     })();
   }, [courseId, exam.id]);
 
+  // Only submitted attempts count towards the statistics.
   const submitted = rows.filter((r) => r.submitted_at);
   const avg = submitted.length
     ? Math.round(submitted.reduce((a, r) => a + (r.score || 0), 0) / submitted.length)

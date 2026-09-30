@@ -1,3 +1,4 @@
+// OutcomeAttainment: student card showing attainment scores for this course's CLOs and their program-wide PLOs, computed from graded assignments.
 import React, { useEffect, useState } from 'react';
 import { Target, Award } from 'lucide-react';
 import { outcomesService } from '../services/api';
@@ -7,6 +8,7 @@ interface OutcomeAttainmentProps {
   courseId: number;
 }
 
+// Colour for an attainment score: green >=75, amber >=50, red below.
 const scoreColor = (score: number) =>
   score >= 75 ? 'text-emerald-600 dark:text-emerald-400'
     : score >= 50 ? 'text-amber-600 dark:text-amber-400'
@@ -25,11 +27,13 @@ const scoreColor = (score: number) =>
  * been graded), same "don't show an empty state for a normal not-yet
  * situation" convention as RevisionPlanCard.
  */
+// Main component: loads CLO and PLO attainment (failures become empty lists).
 export const OutcomeAttainment: React.FC<OutcomeAttainmentProps> = ({ courseId }) => {
   const [clos, setClos] = useState<CLOAttainment[]>([]);
   const [plos, setPlos] = useState<PLOAttainment[]>([]);
   const [loaded, setLoaded] = useState(false);
 
+  // Fetch both attainment lists; `mounted` guards against setting state after unmount.
   useEffect(() => {
     let mounted = true;
     Promise.all([
@@ -44,6 +48,7 @@ export const OutcomeAttainment: React.FC<OutcomeAttainmentProps> = ({ courseId }
     return () => { mounted = false; };
   }, [courseId]);
 
+  // Render nothing until loaded, or when there is no CLO evidence yet.
   if (!loaded || clos.length === 0) return null;
 
   return (

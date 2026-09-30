@@ -39,6 +39,7 @@ from app.database import models
 
 
 def main():
+    """Applies the schema change described in the module docstring to the existing database, then prints a summary."""
     models.Base.metadata.create_all(bind=engine)
 
     with engine.connect() as conn:

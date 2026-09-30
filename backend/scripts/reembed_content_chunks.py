@@ -77,6 +77,7 @@ def current_column_dim(conn) -> int | None:
 
 
 def main():
+    """Parses flags, resizes the content_chunks embedding column to EMBEDDING_DIM, re-embeds every file from stored text and rebuilds the HNSW index."""
     parser = argparse.ArgumentParser(
         description="Rebuild content_chunks at the configured embedding dimension and re-embed all files."
     )

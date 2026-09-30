@@ -1,3 +1,7 @@
+// Admin console: a sidebar-driven page with six sections - user directory (search/filter/
+// edit/delete/CSV export), create teacher account, staff coordinator authorities,
+// programs CRUD, teacher access requests and activity logs. All data comes from the
+// admin APIs; most updates are applied optimistically to local state for instant feedback.
 import React, { useState, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import { adminService, programService, programCoordinatorService } from '../services/api';
@@ -11,8 +15,10 @@ import {
 } from 'lucide-react';
 import { EmptyStateIllustration } from '../components/illustrations';
 
+// Which sidebar section is currently displayed.
 type AdminSection = 'users' | 'create-teacher' | 'staff-roles' | 'programs' | 'requests' | 'logs';
 
+// A pending/approved/rejected request from someone asking for teacher access.
 interface TeacherRequest {
   id: number;
   email: string;
@@ -54,6 +60,7 @@ interface UserAccount {
   course_name?: string | null;
 }
 
+// An academic program (grouping of courses).
 interface Program {
   id: number;
   name: string;
@@ -61,12 +68,14 @@ interface Program {
   description?: string | null;
 }
 
+// A catalog subject, used as the scope option for Course Coordinators.
 interface CatalogOption {
   id: number;
   name: string;
   code?: string | null;
 }
 
+// One entry in the admin activity feed.
 interface AdminLog {
   event_type: string;
   description: string;
@@ -80,6 +89,7 @@ interface AdminLog {
   status?: string;
 }
 
+// Display names for role values stored in the database.
 const ROLE_LABELS: Record<string, string> = {
   teacher: 'Teacher',
   program_coordinator: 'Program Coordinator',
@@ -88,8 +98,10 @@ const ROLE_LABELS: Record<string, string> = {
   admin: 'Admin',
 };
 
+// Full names may contain only letters separated by single spaces.
 const FULL_NAME_PATTERN = /^[A-Za-z]+(?: [A-Za-z]+)*$/;
 
+// Page component; owns all state for every section.
 const AdminDashboard: React.FC = () => {
   const location = useLocation();
   // Arriving from another page's sidebar (see lib/roleNav.ts) passes which
@@ -160,6 +172,7 @@ const AdminDashboard: React.FC = () => {
   const [creatingProgram, setCreatingProgram] = useState(false);
   const [deletingProgramId, setDeletingProgramId] = useState<number | null>(null);
 
+  // Loads the user directory (optionally filtered by role); 'silent' skips loading/error UI.
   const fetchUsers = async (silent = false) => {
     try {
       if (!silent) setUsersLoading(true);
@@ -175,6 +188,7 @@ const AdminDashboard: React.FC = () => {
     }
   };
 
+  // Loads the activity log, optionally filtered by event type.
   const fetchLogs = async (silent = false) => {
     try {
       if (!silent) setLogsLoading(true);
@@ -187,6 +201,7 @@ const AdminDashboard: React.FC = () => {
     }
   };
 
+  // Loads teacher/staff accounts with their coordinator-authority flags.
   const fetchStaff = async (silent = false) => {
     try {
       if (!silent) setStaffLoading(true);
@@ -199,6 +214,7 @@ const AdminDashboard: React.FC = () => {
     }
   };
 
+  // Loads the list of programs.
   const fetchPrograms = async (silent = false) => {
     try {
       if (!silent) setProgramsLoading(true);
@@ -211,6 +227,7 @@ const AdminDashboard: React.FC = () => {
     }
   };
 
+  // Loads teacher access requests.
   const fetchRequests = async (silent = false) => {
     try {
       if (!silent) setLoading(true);
@@ -223,6 +240,7 @@ const AdminDashboard: React.FC = () => {
     }
   };
 
+  // Load the main lists on mount and again when the role filter or tab changes.
   useEffect(() => {
     fetchUsers();
     fetchRequests();
@@ -230,6 +248,7 @@ const AdminDashboard: React.FC = () => {
     fetchPrograms();
   }, [userRoleFilter, userTab]);
 
+  // Load the activity log whenever the Logs section is opened or its filter changes.
   useEffect(() => {
     if (activeSection === 'logs') fetchLogs();
   }, [activeSection, logsEventFilter]);
@@ -287,6 +306,9 @@ const AdminDashboard: React.FC = () => {
   // is why "no users" showed up on the Program Coordinator dashboard even
   // after checking the box. Mutually exclusive with the other dropdown -
   // picking a program clears any course assignment, and vice versa.
+  // Sets (or clears) a teacher's Program Coordinator scope. Removes any previous
+  // program/course scope first, updates the authority flags, then assigns the new program.
+  // The UI is updated optimistically and rolled back if any API call fails.
   const handleProgramDropdownChange = async (userId: number, value: string) => {
     // Optimistic - the dropdown/badge update the instant you pick a value, not
     // after every API round trip (remove old scope, flip flags, assign new
@@ -332,6 +354,7 @@ const AdminDashboard: React.FC = () => {
     }
   };
 
+  // Same as above but for the Course Coordinator authority (scoped to a catalog subject).
   const handleCourseDropdownChange = async (userId: number, value: string) => {
     // The dropdown lists catalog SUBJECTS (all 3, always) and assignment targets
     // the subject directly - no live course section is required to exist first.
@@ -386,6 +409,7 @@ const AdminDashboard: React.FC = () => {
     fetchPrograms(true);
   });
 
+  // Approves a teacher access request; the API returns temporary credentials to show the admin.
   const handleApprove = async (id: number) => {
     setProcessingId(id);
     setError('');
@@ -400,6 +424,7 @@ const AdminDashboard: React.FC = () => {
     }
   };
 
+  // Rejects a teacher access request.
   const handleReject = async (id: number) => {
     setProcessingId(id);
     setError('');
@@ -413,6 +438,7 @@ const AdminDashboard: React.FC = () => {
     }
   };
 
+  // Validates the new teacher's name and sets/clears the inline error; returns validity.
   const validateName = (value: string) => {
     if (!value.trim()) {
       setNameError('Full name is required');
@@ -426,6 +452,8 @@ const AdminDashboard: React.FC = () => {
     return true;
   };
 
+  // Creates a teacher account directly and shows the one-time temporary credentials.
+  // The new account is added to the local lists immediately.
   const handleCreateTeacher = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -463,6 +491,7 @@ const AdminDashboard: React.FC = () => {
   // scoping still exists, just lives on the Program Coordinator Dashboard's
   // "Course Coordinators" section (CourseCoordinatorAssignment), independent of
   // this flag.
+  // Downloads the currently filtered user list as a CSV file (via a temporary download link).
   const handleExportCsv = async () => {
     setExportingCsv(true);
     setError('');
@@ -493,6 +522,7 @@ const AdminDashboard: React.FC = () => {
     }
   };
 
+  // Opens the edit modal pre-filled with the chosen user's details.
   const handleOpenUserEdit = (u: UserAccount) => {
     setEditingUser(u);
     setEditForm({
@@ -503,6 +533,7 @@ const AdminDashboard: React.FC = () => {
     });
   };
 
+  // Saves the edit-user form and patches the user in local lists.
   const handleSaveUserEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingUser) return;
@@ -522,6 +553,7 @@ const AdminDashboard: React.FC = () => {
     }
   };
 
+  // Permanently deletes a user account after confirmation.
   const handleDeleteUserAccount = async (userId: number) => {
     if (!window.confirm('Are you sure you want to permanently delete this user account?')) return;
     setDeletingUserId(userId);
@@ -539,6 +571,7 @@ const AdminDashboard: React.FC = () => {
     }
   };
 
+  // Creates a program from the form.
   const handleCreateProgram = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -560,6 +593,7 @@ const AdminDashboard: React.FC = () => {
     }
   };
 
+  // Deletes a program.
   const handleDeleteProgram = async (programId: number) => {
     setDeletingProgramId(programId);
     setError('');
@@ -573,6 +607,7 @@ const AdminDashboard: React.FC = () => {
     }
   };
 
+  // Copies the temporary password to the clipboard and briefly shows a check icon.
   const copyPassword = () => {
     if (!credentials) return;
     navigator.clipboard.writeText(credentials.temporary_password).then(() => {
@@ -581,6 +616,7 @@ const AdminDashboard: React.FC = () => {
     });
   };
 
+  // Split requests into pending ones (shown first) and already-decided ones.
   const pendingRequests = requests.filter(r => r.status === 'pending');
   const otherRequests = requests.filter(r => r.status !== 'pending');
 
@@ -598,6 +634,7 @@ const AdminDashboard: React.FC = () => {
     return true;
   });
 
+  // Sidebar entries; the requests entry shows a badge with the pending count.
   const navItems: NavItem[] = [
     { key: 'users', label: 'All Students & Users', icon: Users, active: activeSection === 'users', onClick: () => setActiveSection('users') },
     { key: 'create-teacher', label: 'Create Teacher Account', icon: UserPlus, active: activeSection === 'create-teacher', onClick: () => setActiveSection('create-teacher') },

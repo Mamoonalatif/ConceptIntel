@@ -1,6 +1,8 @@
+// Purpose: reusable loading indicator (bouncing fox mascot with an optional label).
 import React from 'react';
 import { FoxMascot } from './FoxMascot';
 
+// Props: extra CSS classes, the caption under the fox, and the mascot size in px.
 interface FoxSpinnerProps {
   className?: string;
   label?: string;

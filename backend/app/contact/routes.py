@@ -1,3 +1,4 @@
+# Public contact-form endpoint: emails the submitted message to the platform's own mailbox.
 import logging
 
 from fastapi import APIRouter
@@ -11,6 +12,7 @@ logger = logging.getLogger("conceptintel")
 router = APIRouter(prefix="/contact", tags=["Contact"])
 
 
+# POST /contact - no login required; see docstring for the SMTP-not-configured behaviour.
 @router.post("", response_model=ContactMessageResponse)
 def submit_contact_message(payload: ContactMessageCreate):
     """Public (no-auth) contact form submission - forwards the message to the
@@ -20,6 +22,7 @@ def submit_contact_message(payload: ContactMessageCreate):
     sends in this codebase (see app/email_service.py) treat a missing SMTP config
     as non-fatal rather than user-facing failure."""
     subject = f"Contact form: {payload.name}"
+    # Simple HTML email shown to the platform owner.
     html_body = f"""
     <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
       <h2 style="color: #0f766e;">New ConceptIntel contact form message</h2>

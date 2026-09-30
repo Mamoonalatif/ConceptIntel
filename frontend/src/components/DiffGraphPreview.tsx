@@ -12,12 +12,14 @@ import type { ConceptDiffItem } from '../services/api';
 // inside a modal - nodes appear but no connections ever draw. Laying the tree out
 // directly has no such dependency.
 
+// Layout constants (pixels): node radius for new concepts, smaller radius for concepts already in the graph, horizontal/vertical spacing and canvas padding.
 const NODE_R = 34;
 const EXISTING_R = 26;
 const H_SPACING = 190;
 const V_SPACING = 165;
 const PADDING = 48;
 
+// Fill/stroke/text colours for a node by difficulty (easy = green, hard = red, anything else = amber).
 const difficultyColors = (difficulty: string) => {
   switch ((difficulty || '').toLowerCase()) {
     case 'easy': return { fill: '#6ee7b7', stroke: '#10b981', text: '#022c22' };
@@ -26,6 +28,7 @@ const difficultyColors = (difficulty: string) => {
   }
 };
 
+// A concept node after layout: its position, radius, label, difficulty and whether it already exists in the shared graph.
 interface PositionedNode {
   id: string;
   label: string;
@@ -36,11 +39,13 @@ interface PositionedNode {
   difficulty: string;
 }
 
+// Props: the proposed concepts (each listing its prerequisites) and an optional CSS height class for the inline canvas.
 interface DiffGraphPreviewProps {
   concepts: ConceptDiffItem[];
   className?: string;
 }
 
+// DiffGraphPreview: draws the proposed concepts and their prerequisite links as a read-only layered SVG tree, with zoom and fullscreen controls.
 export const DiffGraphPreview: React.FC<DiffGraphPreviewProps> = ({ concepts, className }) => {
   // Fullscreen review. Both people who ever look at this - the teacher checking
   // their own draft and the coordinator deciding whether to merge it - were doing
@@ -62,6 +67,7 @@ export const DiffGraphPreview: React.FC<DiffGraphPreviewProps> = ({ concepts, cl
   const [zoomFactor, setZoomFactor] = useState(1);
   const [canvasSize, setCanvasSize] = useState({ w: 0, h: 0 });
 
+  // Keep isFullscreen in sync with the browser's fullscreen state (also covers leaving with Esc).
   useEffect(() => {
     // Read from the browser rather than assuming, so Esc (which bypasses the
     // button entirely) still leaves the icon and layout in the right state.
@@ -81,6 +87,7 @@ export const DiffGraphPreview: React.FC<DiffGraphPreviewProps> = ({ concepts, cl
     return () => document.removeEventListener('fullscreenchange', sync);
   }, []);
 
+  // Track the canvas size so fullscreen can compute a fit-to-screen scale.
   // The fit scale depends on the container's actual size, which changes when
   // entering fullscreen and when the window resizes.
   useEffect(() => {
@@ -94,6 +101,7 @@ export const DiffGraphPreview: React.FC<DiffGraphPreviewProps> = ({ concepts, cl
     return () => observer.disconnect();
   }, []);
 
+  // Enter or leave fullscreen for this preview; browser refusals are ignored.
   const toggleFullscreen = async () => {
     try {
       if (document.fullscreenElement) await document.exitFullscreen();
@@ -103,6 +111,7 @@ export const DiffGraphPreview: React.FC<DiffGraphPreviewProps> = ({ concepts, cl
     }
   };
 
+  // Compute the layout once per `concepts` change: find referenced-but-undefined prerequisites, assign levels (longest path), reduce edge crossings, then turn levels/rows into x/y positions and the list of links to draw.
   const { positioned, links, width, height } = useMemo(() => {
     const defined = new Map(concepts.map(c => [c.name, c]));
     // Prerequisite names this diff references but doesn't define - they already
@@ -217,6 +226,7 @@ export const DiffGraphPreview: React.FC<DiffGraphPreviewProps> = ({ concepts, cl
     };
   }, [concepts]);
 
+  // Nothing to draw for an empty diff.
   if (concepts.length === 0) return null;
 
   // Inline the diff renders at natural size and scrolls (a small diff shouldn't
@@ -231,9 +241,11 @@ export const DiffGraphPreview: React.FC<DiffGraphPreviewProps> = ({ concepts, cl
     ? Math.min(1, (canvasSize.w - 4) / width, (canvasSize.h - 4) / height)
     : 1;
   const scale = Math.max(0.1, Math.min(4, baseScale * zoomFactor));
+  // Zoom in/out by 25% steps, clamped between 0.25x and 6x.
   const stepZoom = (direction: 1 | -1) =>
     setZoomFactor(z => Math.max(0.25, Math.min(6, z * (direction === 1 ? 1.25 : 1 / 1.25))));
 
+  // Render: legend and zoom/fullscreen toolbar, then the SVG with curved prerequisite links and difficulty-coloured circles.
   return (
     <div
       ref={wrapRef}
@@ -354,6 +366,7 @@ export const DiffGraphPreview: React.FC<DiffGraphPreviewProps> = ({ concepts, cl
           );
         })}
 
+        {/* Draw each node: a circle (dashed if it already exists in the graph) with its name wrapped over up to three short lines. */}
         {positioned.map(n => {
           const colors = difficultyColors(n.difficulty);
           const words = n.label.split(' ');

@@ -1,3 +1,6 @@
+// Public marketing/landing page: hero, about, how-it-works, roles, what makes the product
+// different, FAQ (searchable accordion) and a contact form. Content is driven by the
+// constant arrays below; only the FAQ and contact form hold interactive state.
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
@@ -38,6 +41,7 @@ const sectionSub = 'text-text-secondary text-base mt-3 leading-relaxed';
 /* ─────────────────────────────────────────────
    Hero visual featuring the Neutral Fox Mascot Starter Animation!
 ───────────────────────────────────────────── */
+// Hero illustration: floating fox mascot with two stat callouts (static decorative content).
 const HeroVisual: React.FC = () => (
   <div className="relative w-full flex items-center justify-center py-8">
     <div className="relative z-20 flex flex-col items-center justify-center" style={{ animation: 'ci-float 5s ease-in-out infinite' }}>
@@ -63,6 +67,7 @@ const HeroVisual: React.FC = () => (
   </div>
 );
 
+// Data for the four 'How it works' step cards (rendered in a loop below).
 const HOW_IT_WORKS = [
   {
     step: '01',
@@ -94,12 +99,14 @@ const HOW_IT_WORKS = [
   },
 ];
 
+// One role card: name, description and its illustration component.
 interface RoleInfo {
   role: string;
   desc: string;
   Visual: React.FC<{ className?: string }>;
 }
 
+// Data for the role cards (Student / Teacher / Admin).
 const ROLES: RoleInfo[] = [
   {
     role: 'Student',
@@ -126,6 +133,7 @@ const TEACHER_SUBROLES = [
   { label: 'Program Coordinator', icon: ShieldCheck },
 ];
 
+// Question/answer pairs for the FAQ accordion.
 const FAQS = [
   {
     q: 'Is this a real product or a student project?',
@@ -226,11 +234,13 @@ const BENEFITS = [
 /* ─────────────────────────────────────────────
    Main LandingPage
 ───────────────────────────────────────────── */
+// Landing page component. Holds FAQ open/search state and contact form state.
 export const LandingPage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const [openFaq, setOpenFaq] = useState<string | null>(FAQS[0]?.q ?? null);
   const [faqQuery, setFaqQuery] = useState('');
+  // FAQs whose question matches the search box text (case-insensitive).
   const filteredFaqs = FAQS.filter(item => item.q.toLowerCase().includes(faqQuery.trim().toLowerCase()));
 
   const [contactForm, setContactForm] = useState({ name: '', email: '', message: '' });
@@ -249,6 +259,7 @@ export const LandingPage: React.FC = () => {
     }
   }, [location]);
 
+  // Sends the contact form via the API and tracks idle/sending/success/error status.
   const handleContactSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setContactStatus('sending');

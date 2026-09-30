@@ -34,6 +34,7 @@ def main():
     # Ensure tables exist first (creates `programs`, `program_coordinator_assignments`,
     # `course_coordinator_assignments`, etc. - all brand-new tables `create_all` can
     # handle on its own; only the ALTER below is something it can't do).
+    """Applies the schema change described in the module docstring to the existing database, then prints a summary."""
     models.Base.metadata.create_all(bind=engine)
 
     with engine.connect() as conn:

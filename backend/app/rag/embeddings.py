@@ -67,10 +67,12 @@ _MRL_MODEL_PREFIXES = ("openai/text-embedding-3", "text-embedding-3")
 
 
 def _is_local() -> bool:
+    """True when the local (offline fastembed) provider is configured instead of OpenRouter."""
     return settings.EMBEDDING_PROVIDER.strip().lower() == "local"
 
 
 def _local_family() -> str:
+    """Identifies the local model family (bge/e5/nomic) from its name so the right prefix is used."""
     name = settings.EMBEDDING_LOCAL_MODEL.lower()
     for family in ("bge", "e5", "nomic"):
         if family in name:
@@ -79,6 +81,7 @@ def _local_family() -> str:
 
 
 def _supports_dimensions() -> bool:
+    """True if the hosted model accepts the `dimensions` (truncation) parameter."""
     return settings.EMBEDDING_MODEL.startswith(_MRL_MODEL_PREFIXES)
 
 
@@ -108,6 +111,7 @@ def _normalize(vectors: List[List[float]]) -> List[List[float]]:
 
 
 def _check_dim(vectors: List[List[float]]) -> None:
+    """Raises if vector width differs from EMBEDDING_DIM, since pgvector cannot store a mismatched width."""
     if not vectors:
         return
     actual = len(vectors[0])

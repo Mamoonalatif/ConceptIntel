@@ -28,6 +28,7 @@ from app.database import models
 def main():
     # Creates every brand-new table this change adds - only the ALTERs below are
     # something create_all() can't do on its own.
+    """Applies the schema change described in the module docstring to the existing database, then prints a summary."""
     models.Base.metadata.create_all(bind=engine)
 
     with engine.connect() as conn:

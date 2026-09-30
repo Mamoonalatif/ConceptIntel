@@ -1,3 +1,4 @@
+# Endpoints for reading and updating the logged-in user's notification preferences.
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
@@ -9,6 +10,7 @@ from app.auth.routes import get_current_user
 router = APIRouter(prefix="/notification-preferences", tags=["Notification Preferences"])
 
 
+# Returns the user's preference row, creating a default (all on) one if missing.
 def _get_or_create_preference(db: Session, user_id: int) -> NotificationPreference:
     pref = db.query(NotificationPreference).filter(NotificationPreference.user_id == user_id).first()
     if pref is None:
@@ -21,6 +23,7 @@ def _get_or_create_preference(db: Session, user_id: int) -> NotificationPreferen
     return pref
 
 
+# GET /notification-preferences/me - current settings (see docstring).
 @router.get("/me", response_model=NotificationPreferenceResponse)
 def get_my_preferences(
     db: Session = Depends(get_db),
@@ -31,6 +34,7 @@ def get_my_preferences(
     return _get_or_create_preference(db, current_user.id)
 
 
+# PATCH /notification-preferences/me - changes only the supplied switches (see docstring).
 @router.patch("/me", response_model=NotificationPreferenceResponse)
 def update_my_preferences(
     payload: NotificationPreferenceUpdate,

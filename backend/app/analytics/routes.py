@@ -1,3 +1,5 @@
+# Analytics API routes (mounted at /analytics): per-course class analytics for teachers, platform-wide
+# overview for admins, and a student's own progress. Heavy results are cached briefly.
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func
@@ -26,6 +28,7 @@ AT_RISK_COMPLETION_THRESHOLD = 50.0
 
 
 def _get_course_or_404(db: Session, course_id: int) -> Course:
+    """Loads a course by id or raises 404."""
     course = db.query(Course).filter(Course.id == course_id).first()
     if not course:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
@@ -33,6 +36,7 @@ def _get_course_or_404(db: Session, course_id: int) -> Course:
 
 
 def _avg(values: List[float]) -> Optional[float]:
+    """Mean rounded to 1 decimal, or None for an empty list."""
     return round(sum(values) / len(values), 1) if values else None
 
 
@@ -59,6 +63,7 @@ def get_course_analytics(
         # trip for graph_stats - and the result is identical for every teacher/
         # coordinator who views this same course, so it's cached for a short
         # window rather than recomputed on every single dashboard load/switch.
+        """Builds the full course analytics response (cached by the caller): per-assignment and per-student stats, graph counts, mastery heatmap."""
         roster = (
             db.query(Enrollment)
             .filter(Enrollment.course_id == course_id, Enrollment.status.in_(ACTIVE_ENROLLMENT_STATUSES))
@@ -158,6 +163,7 @@ def get_platform_overview(
     coordinators use at /analytics/course/{id}."""
 
     def _compute() -> PlatformOverviewResponse:
+        """Builds the admin platform overview (cached by the caller): role counts, per-course summaries, platform mastery heatmap."""
         role_counts = {"student": 0, "teacher": 0, "admin": 0}
         program_coordinators = 0
         course_coordinators = 0

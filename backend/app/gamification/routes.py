@@ -1,3 +1,5 @@
+# Gamification API: course leaderboard, a student's own points/badges summary, and the
+# global badge catalog. Awarding itself happens in service.py, not via these endpoints.
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -9,11 +11,13 @@ from app.auth.routes import get_current_user, get_current_student
 from app.courses.access import assert_course_access
 from app.core import simple_cache
 
+# Two routers: course-scoped endpoints under /courses, and the badge catalog under /gamification.
 router = APIRouter(prefix="/courses", tags=["Gamification"])
 catalog_router = APIRouter(prefix="/gamification", tags=["Gamification"])
 
 
 def _get_course_or_404(db: Session, course_id: int) -> Course:
+    """Fetch the course by id or raise a 404."""
     course = db.query(Course).filter(Course.id == course_id).first()
     if not course:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
@@ -32,6 +36,7 @@ def get_leaderboard(
     course = _get_course_or_404(db, course_id)
     assert_course_access(db, course, current_user)
 
+    # Builds the leaderboard rows; wrapped so the result can be cached briefly.
     def _compute():
         rows = gamification_service.get_leaderboard(db, course_id, limit=20)
         return [

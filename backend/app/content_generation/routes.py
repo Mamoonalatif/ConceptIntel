@@ -1,20 +1,25 @@
+# Content-generation API routes (mounted under /courses): generate flashcards/quizzes/study guides/assignment
+# drafts for a concept (sync or as a background job), list/edit/refine/review them, turn an assignment draft
+# into a real Assignment, and let students attempt approved quizzes.
 import json
 from typing import Optional
 import tempfile
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Response, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.core import quota
 from app.database.connection import get_db
 from app.database.models import (
-    ContentGenerationJob, Course, GeneratedContent, QuizAttempt, User, CLO, Assignment, Rubric, RubricCriterion,
+    ContentGenerationJob, Course, GeneratedContent, QuizAttempt, User, CLO, Assignment, Rubric, RubricCriterion, RubricLevel,
 )
 from app.content_generation.schemas import (
     GenerateContentRequest, GeneratedContentOut, ReviewContentRequest, EditContentRequest, RefineContentRequest,
     QuizSubmitRequest, QuizResultOut, ContentAttemptSummary, GenerationJobOut, CreatedAssignmentOut,
+    CreateAssignmentRequest,
 )
+from app.assignments.docx_builder import build_assignment_docx
 from app.content_generation import service as generation_service
 from app.content_generation.jobs import run_generation_job
 from app.auth.routes import get_current_user, get_current_teacher, get_current_student
@@ -28,19 +33,21 @@ from app.notifications.service import notify_course_students
 from app.notifications.types import NotificationType
 
 from app.rag.validation import validate_file_content
-from app.upload.services import extract_text_from_file
+from app.upload.services import extract_text_from_file, store_file
 
 router = APIRouter(prefix="/courses", tags=["Content Generation"])
 
 # A one-off generation source, not course material - so the limits are tighter than
 # the 25MB upload cap. Anything past MAX_SOURCE_CHARS would be truncated by the model
 # anyway; truncating here means we can tell the teacher it happened.
+# Limits for a one-off generation source document (tighter than the normal upload cap).
 SOURCE_EXTENSIONS = {".pdf", ".docx", ".pptx", ".ppt", ".txt"}
 MAX_SOURCE_BYTES = 5 * 1024 * 1024
 MAX_SOURCE_CHARS = 20000
 
 
 def _get_course_or_404(db: Session, course_id: int) -> Course:
+    """Loads a course by id or raises 404."""
     course = db.query(Course).filter(Course.id == course_id).first()
     if not course:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
@@ -48,6 +55,7 @@ def _get_course_or_404(db: Session, course_id: int) -> Course:
 
 
 def _get_owned_content(db: Session, course_id: int, content_id: int, teacher_id: int) -> GeneratedContent:
+    """Loads a generated item in this course, raising 404 if missing and 403 if another teacher created it."""
     item = db.query(GeneratedContent).filter(
         GeneratedContent.id == content_id, GeneratedContent.course_id == course_id
     ).first()
@@ -59,6 +67,7 @@ def _get_owned_content(db: Session, course_id: int, content_id: int, teacher_id:
 
 
 def _to_out(item: GeneratedContent, db: Session) -> GeneratedContentOut:
+    """Converts a GeneratedContent row to its API model (parses payload JSON, adds CLO code and linked assignment id)."""
     clo_code = None
     if item.clo_id:
         clo = db.query(CLO).filter(CLO.id == item.clo_id).first()
@@ -515,6 +524,7 @@ def get_content(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    """Returns one generated item (access rules are enforced inside)."""
     course = _get_course_or_404(db, course_id)
     assert_course_access(db, course, current_user)
     item = db.query(GeneratedContent).filter(
@@ -678,10 +688,34 @@ def review_content(
     return _to_out(item, db)
 
 
+@router.get("/{course_id}/content/{content_id}/assignment-docx")
+def download_assignment_docx(
+    course_id: int,
+    content_id: int,
+    db: Session = Depends(get_db),
+    current_teacher: User = Depends(get_current_teacher),
+):
+    """Teacher downloads an assignment draft as a formal Word document (assignment
+    handout + detailed rubric) - the same file that is attached when it is posted."""
+    course = _get_course_or_404(db, course_id)
+    item = _get_owned_content(db, course_id, content_id, current_teacher.id)
+    if item.content_type != "assignment":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This content item is not an assignment draft.")
+    draft = json.loads(item.payload_json)
+    docx_bytes = build_assignment_docx(draft, course.name, course.code, course.semester, current_teacher.full_name)
+    safe_name = "".join(ch if ch.isalnum() or ch in " -_" else "_" for ch in (draft.get("title") or "Assignment")).strip() or "Assignment"
+    return Response(
+        content=docx_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}.docx"'},
+    )
+
+
 @router.post("/{course_id}/content/{content_id}/create-assignment", response_model=CreatedAssignmentOut, status_code=status.HTTP_201_CREATED)
 def create_assignment_from_content(
     course_id: int,
     content_id: int,
+    payload: Optional[CreateAssignmentRequest] = None,
     db: Session = Depends(get_db),
     current_teacher: User = Depends(get_current_teacher),
 ):
@@ -714,13 +748,21 @@ def create_assignment_from_content(
         )
 
     draft = json.loads(item.payload_json)
+    # The teacher may have edited title/description/due date/points on the Assignments
+    # tab before posting - anything they left out falls back to the AI draft.
+    overrides = payload or CreateAssignmentRequest()
+    final_title = (overrides.title or "").strip() or draft["title"]
+    final_description = overrides.description if overrides.description is not None else draft["instructions"]
+    final_points = overrides.points if overrides.points is not None else (
+        round(draft["points"]) if draft.get("points") is not None else None
+    )
     assignment = Assignment(
         course_id=course_id, teacher_id=current_teacher.id,
-        title=draft["title"], description=draft["instructions"],
+        title=final_title, description=final_description, due_date=overrides.due_date,
         # `or 0 ... or None` collapsed a genuine 0-point draft to NULL (0 is falsy
         # in Python, same as missing) - `is not None` distinguishes "really absent"
         # from "the AI actually drafted 0 points".
-        points=round(draft["points"]) if draft.get("points") is not None else None,
+        points=final_points,
         concept_node_id=item.concept_node_id, concept_name=item.concept_name,
         source_content_id=item.id,
     )
@@ -732,11 +774,36 @@ def create_assignment_from_content(
     db.add(rubric)
     db.flush()
     for i, c in enumerate(draft.get("criteria") or []):
-        db.add(RubricCriterion(
+        criterion = RubricCriterion(
             rubric_id=rubric.id, title=c["title"], description=c.get("description"),
             max_points=max(0.0, float(c.get("max_points") or 0)),
             clo_id=clo_by_code.get(c.get("clo_code")), order_index=i,
-        ))
+        )
+        db.add(criterion)
+        db.flush()
+        # Performance levels (Excellent/Good/Fair/Poor) drafted with the assignment
+        # become real RubricLevel rows so AI grading picks a level, not a free number.
+        # order_index mirrors the rubric grid: highest points first.
+        for j, lv in enumerate(sorted(c.get("levels") or [], key=lambda l: -float(l.get("points") or 0))):
+            db.add(RubricLevel(
+                criterion_id=criterion.id, label=lv["label"], points=float(lv.get("points") or 0),
+                description=lv.get("description"), order_index=len(c["levels"]) - j,
+            ))
+
+    # Attach the formal Word handout (assignment + detailed rubric) so students
+    # download exactly the document the teacher reviewed. Best-effort: a storage
+    # hiccup must not block posting the assignment itself.
+    try:
+        docx_bytes = build_assignment_docx(
+            draft, course.name, course.code, course.semester, current_teacher.full_name,
+            due_date=assignment.due_date, title=assignment.title,
+            total_marks=assignment.points if assignment.points is not None else draft.get("points"),
+        )
+        safe_name = "".join(ch if ch.isalnum() or ch in " -_" else "_" for ch in assignment.title).strip() or "Assignment"
+        assignment.attachment_url = store_file(docx_bytes, f"{safe_name}.docx", ".docx", f"assignments/{course_id}")
+        assignment.attachment_filename = f"{safe_name}.docx"
+    except Exception as e:
+        print(f"Warning: failed to attach Word document to assignment: {str(e)}")
 
     # Approving the draft this way is equivalent to /review's approve=True for
     # every other content type - the item is no longer just a pending draft,
@@ -772,6 +839,7 @@ def delete_content(
     db: Session = Depends(get_db),
     current_teacher: User = Depends(get_current_teacher),
 ):
+    """Deletes a generated item owned by the current teacher."""
     item = _get_owned_content(db, course_id, content_id, current_teacher.id)
     db.delete(item)
     db.commit()

@@ -1,3 +1,5 @@
+// CalendarPage: month-grid calendar of the user's assignment due dates and meetings
+// (fetched from calendarService), with a day-detail panel when a day is clicked.
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AppShell, type NavItem } from '../components/AppShell';
@@ -27,6 +29,7 @@ interface DayCell {
   events: CalendarEventItem[];
 }
 
+/** True if both dates fall on the same calendar day (ignores time). */
 function isSameDay(a: Date, b: Date): boolean {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 }
@@ -64,6 +67,7 @@ function buildMonthGrid(monthAnchor: Date, events: CalendarEventItem[]): DayCell
   return cells;
 }
 
+// Per-event-type look (colour classes, icon, label) for assignments vs meetings.
 const EVENT_STYLES: Record<CalendarEventItem['type'], { className: string; Icon: React.FC<{ className?: string }>; label: string }> = {
   assignment: {
     className: 'bg-primary/10 text-primary dark:text-primary-light border-primary/20',
@@ -77,6 +81,7 @@ const EVENT_STYLES: Record<CalendarEventItem['type'], { className: string; Icon:
   },
 };
 
+/** Page component: owns the visible month, loaded events and selected day. */
 const CalendarPage: React.FC = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -90,6 +95,7 @@ const CalendarPage: React.FC = () => {
   const [error, setError] = useState('');
   const [selectedDay, setSelectedDay] = useState<Date | null>(null);
 
+  // Fetch all events once on mount; the `cancelled` flag avoids setting state after unmount.
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -112,10 +118,12 @@ const CalendarPage: React.FC = () => {
     };
   }, []);
 
+  // Recompute the 42-cell grid only when the month or events change.
   const grid = useMemo(() => buildMonthGrid(monthAnchor, events), [monthAnchor, events]);
 
   const monthLabel = monthAnchor.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
 
+  // Month navigation handlers: jump to current month, previous month, next month.
   const goToToday = () => {
     const now = new Date();
     setMonthAnchor(new Date(now.getFullYear(), now.getMonth(), 1));

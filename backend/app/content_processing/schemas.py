@@ -1,14 +1,17 @@
+# Pydantic request/response models for the content-processing (graph build and review) API.
 from pydantic import BaseModel
-from typing import Optional, List, Any
+from typing import Optional, List
 from datetime import datetime
 
 
+# Body for starting a pipeline run.
 class TriggerPipelineRequest(BaseModel):
     # Optional free-text hint from the teacher (e.g. "these are CLOs for chapters 3-5,
     # treat as authoritative outcomes") - folded into the AI cleaning/structuring prompt.
     teacher_notes: Optional[str] = None
 
 
+# API view of a pipeline job and its current status.
 class GraphBuildJobResponse(BaseModel):
     id: int
     catalog_id: int
@@ -24,6 +27,7 @@ class GraphBuildJobResponse(BaseModel):
         from_attributes = True
 
 
+# One concept in a proposed diff, flagged new or matched to an existing catalog concept.
 class ConceptDiffItem(BaseModel):
     name: str
     description: str
@@ -34,6 +38,7 @@ class ConceptDiffItem(BaseModel):
     is_new: bool = True  # False if it matched an existing concept already in the catalog graph
 
 
+# The proposed set of concept changes plus summary counts.
 class GraphDiff(BaseModel):
     concepts: List[ConceptDiffItem] = []
     new_concept_count: int = 0
@@ -41,6 +46,7 @@ class GraphDiff(BaseModel):
     new_relationship_count: int = 0
 
 
+# API view of a proposed graph revision and its teacher/coordinator review state.
 class GraphRevisionResponse(BaseModel):
     id: int
     job_id: int
@@ -58,12 +64,14 @@ class GraphRevisionResponse(BaseModel):
     created_at: datetime
 
 
+# Teacher decision on a revision (optionally with an edited diff).
 class TeacherReviewRequest(BaseModel):
     action: str  # "confirm" or "reject"
     edited_diff: Optional[GraphDiff] = None  # if provided, replaces the proposed diff before it moves on
     notes: Optional[str] = None
 
 
+# Coordinator approve/reject decision on a revision.
 class CoordinatorDecisionRequest(BaseModel):
     action: str  # "approve" or "reject"
     notes: Optional[str] = None

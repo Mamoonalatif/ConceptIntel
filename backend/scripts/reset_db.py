@@ -28,6 +28,7 @@ from app.database import models
 
 
 def main():
+    """Drops every table and recreates an empty schema (destructive)."""
     parser = argparse.ArgumentParser(description="Drop and recreate all database tables.")
     parser.add_argument("--seed-catalog", action="store_true", help="Re-seed the 3 predefined courses after recreating tables.")
     parser.add_argument("--yes", action="store_true", help="Skip the confirmation prompt.")

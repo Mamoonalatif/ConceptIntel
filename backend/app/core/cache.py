@@ -1,3 +1,4 @@
+# Redis cache wrapper with graceful fallback when Redis is unavailable.
 import hashlib
 import json
 import logging
@@ -17,6 +18,7 @@ class RedisCache:
     cost-savings until Redis is actually running."""
 
     def __init__(self):
+        """Try to connect to Redis and ping it; on any failure leave client as None."""
         self.client: Optional[redis.Redis] = None
         try:
             self.client = redis.Redis.from_url(settings.REDIS_URL, decode_responses=True)
@@ -27,6 +29,7 @@ class RedisCache:
             self.client = None
 
     def get_json(self, key: str) -> Optional[Any]:
+        """Return the cached JSON value for `key`, or None on miss/error/no Redis."""
         if not self.client:
             return None
         try:
@@ -37,6 +40,7 @@ class RedisCache:
             return None
 
     def set_json(self, key: str, value: Any, ttl_seconds: Optional[int] = None) -> None:
+        """Store `value` as JSON under `key` with an expiry (default from settings)."""
         if not self.client:
             return
         try:
@@ -45,6 +49,7 @@ class RedisCache:
             logger.warning("Redis SET failed for key %s: %s", key, str(e))
 
     def invalidate(self, key: str) -> None:
+        """Delete `key` from the cache (used when the underlying data changes)."""
         if not self.client:
             return
         try:
@@ -63,4 +68,5 @@ def content_hash(*parts: str) -> str:
     return h.hexdigest()
 
 
+# Shared singleton used by the rest of the app (and by rate_limit.py).
 cache = RedisCache()

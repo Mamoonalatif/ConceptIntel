@@ -1,3 +1,4 @@
+// Purpose: React error boundary that shows a recoverable fallback screen instead of a blank page when rendering crashes.
 import React from 'react';
 import { AlertTriangle } from 'lucide-react';
 
@@ -21,16 +22,20 @@ interface State {
    it exists for whatever the next unexpected one is, so it degrades to a
    recoverable screen instead of a silent blank one. */
 export class ErrorBoundary extends React.Component<Props, State> {
+  // Holds the caught error; null means everything rendered fine.
   state: State = { error: null };
 
+  // React calls this when a child throws during render; storing the error switches render() to the fallback UI.
   static getDerivedStateFromError(error: Error): State {
     return { error };
   }
 
+  // Logs the error and the component stack to the console for debugging.
   componentDidCatch(error: Error, info: React.ErrorInfo) {
     console.error('Unhandled render error caught by ErrorBoundary:', error, info.componentStack);
   }
 
+  // Shows the fallback screen if an error was caught (Reload resets state and goes to '/'), otherwise renders children normally.
   render() {
     if (this.state.error) {
       return (

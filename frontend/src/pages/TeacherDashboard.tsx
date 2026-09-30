@@ -1,3 +1,6 @@
+// Teacher dashboard: lists the teacher's courses as cards (join code, theme colour, link
+// to manage), shows summary stats and provides a modal to create a new course from the
+// predefined catalog with live form validation.
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -14,6 +17,7 @@ import {
   Check, Link as LinkIcon
 } from 'lucide-react';
 
+// A course the teacher owns, as returned by the API.
 interface Course {
   id: number;
   name: string;
@@ -32,6 +36,7 @@ interface Course {
   theme_color: string | null;
 }
 
+// A predefined catalog course that a new course instance is based on.
 interface CatalogEntry {
   id: number;
   name: string;
@@ -39,11 +44,14 @@ interface CatalogEntry {
   prerequisite_catalog_id: number | null;
 }
 
+// Description length limits (in words) enforced by the create-course form.
+// wordCount counts whitespace-separated words; todayStr gives today's date as YYYY-MM-DD.
 const DESCRIPTION_MIN_WORDS = 5;
 const DESCRIPTION_MAX_WORDS = 250;
 const wordCount = (text: string) => (text.trim() ? text.trim().split(/\s+/).length : 0);
 const todayStr = () => new Date().toISOString().slice(0, 10);
 
+// Main page component.
 const TeacherDashboard: React.FC = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -66,6 +74,7 @@ const TeacherDashboard: React.FC = () => {
   const [formError, setFormError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
+  // Loads this teacher's courses; 'silent' is used by auto-refresh (no spinner/error).
   const fetchCourses = async (silent = false) => {
     try {
       if (!silent) setLoading(true);
@@ -78,6 +87,7 @@ const TeacherDashboard: React.FC = () => {
     }
   };
 
+  // Loads the catalog used by the course-creation dropdown.
   const fetchCatalog = async () => {
     try {
       const data = await courseService.getCatalog();
@@ -87,6 +97,7 @@ const TeacherDashboard: React.FC = () => {
     }
   };
 
+  // Load courses and catalog once on mount.
   useEffect(() => {
     fetchCourses();
     fetchCatalog();
@@ -96,6 +107,7 @@ const TeacherDashboard: React.FC = () => {
   // or graph_status changing in the background).
   useAutoRefresh(() => fetchCourses(true));
 
+  // Clear every field of the create-course form.
   const resetForm = () => {
     setCatalogId('');
     setSemester('Semester 2');
@@ -108,6 +120,7 @@ const TeacherDashboard: React.FC = () => {
     setFormError('');
   };
 
+  // Catalog entry picked in the form and its prerequisite (shown read-only).
   const selectedCatalogEntry = catalog.find(c => c.id === parseInt(catalogId));
   const prerequisiteEntry = selectedCatalogEntry?.prerequisite_catalog_id
     ? catalog.find(c => c.id === selectedCatalogEntry.prerequisite_catalog_id)
@@ -138,6 +151,8 @@ const TeacherDashboard: React.FC = () => {
 
   const hasFieldErrors = Boolean(descriptionError || enrollmentStartError || enrollmentEndError || startDateError || endDateError);
 
+  // Submit handler for the create-course form: runs final checks, calls the API, then
+  // closes the modal and reloads the list.
   const handleCreateCourse = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -178,8 +193,10 @@ const TeacherDashboard: React.FC = () => {
     }
   };
 
+  // Number of courses currently open for enrolment (for the stats card).
   const totalOpen = courses.filter(c => c.status.toLowerCase() === 'open').length;
 
+  // Copy a shareable student join URL to the clipboard and flash a 'Copied' state for 2s.
   const copyJoinLink = (courseId: number, code: string) => {
     const link = `${window.location.origin}/join/${code}`;
     navigator.clipboard.writeText(link).then(() => {
@@ -188,6 +205,7 @@ const TeacherDashboard: React.FC = () => {
     });
   };
 
+  // Change a course's banner colour.
   const handleSetThemeColor = (courseId: number, themeColor: string) => {
     // Optimistic - recolors instantly on click, not after the network round trip.
     const previous = courses.find((c) => c.id === courseId)?.theme_color ?? null;
@@ -197,6 +215,7 @@ const TeacherDashboard: React.FC = () => {
     });
   };
 
+  // Sidebar navigation entries for the app shell.
   const navItems: NavItem[] = [
     { key: 'courses', label: 'My Courses', icon: BookOpen, active: true },
     // Coordinator authority is additive on top of the teacher role - if this

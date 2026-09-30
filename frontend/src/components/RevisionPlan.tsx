@@ -1,3 +1,5 @@
+// RevisionPlan: student card with the adaptive engine's personalised revision plan (weakest concepts first, with reasons and recommended materials)
+// and an "I don't understand this" button that generates an AI mini-game for the concept and plays it in a sandboxed iframe.
 import React, { useEffect, useState } from 'react';
 import { Compass, AlertTriangle, BookOpen, ChevronRight, Gamepad2, RefreshCw, X } from 'lucide-react';
 import { adaptiveEngineService, gameService } from '../services/api';
@@ -10,6 +12,7 @@ interface RevisionPlanProps {
 
 // Student-only widget - the Adaptive Engine's "Act" step made visible: a
 // personalized, explainable list of what to review next and why.
+// Component name is RevisionPlanCard: loads the student's plan and handles game generation/playback for a weak concept.
 export const RevisionPlanCard: React.FC<RevisionPlanProps> = ({ courseId }) => {
   const [plan, setPlan] = useState<RevisionPlan | null>(null);
   const [loading, setLoading] = useState(true);
@@ -25,6 +28,7 @@ export const RevisionPlanCard: React.FC<RevisionPlanProps> = ({ courseId }) => {
   const [playingHtml, setPlayingHtml] = useState('');
   const [notice, setNotice] = useState('');
 
+  // Load the student's revision plan for the course.
   useEffect(() => {
     let mounted = true;
     adaptiveEngineService.getMyPlan(courseId)
@@ -34,6 +38,7 @@ export const RevisionPlanCard: React.FC<RevisionPlanProps> = ({ courseId }) => {
     return () => { mounted = false; };
   }, [courseId]);
 
+  // Generate an easy game for the chosen concept, fetch its HTML and open the player overlay.
   const handleMakeGame = async (conceptNodeId: string) => {
     setGeneratingFor(conceptNodeId);
     setGameError('');
@@ -55,6 +60,7 @@ export const RevisionPlanCard: React.FC<RevisionPlanProps> = ({ courseId }) => {
   // Same untrusted-postMessage contract as ConceptGames.tsx: the sandboxed frame
   // (allow-scripts, no allow-same-origin) reports its own score, shape-checked and
   // clamped before it's recorded.
+  // Listen for the game's completion message and record the (clamped) score once.
   useEffect(() => {
     if (!playing) return;
     let recorded = false;
@@ -75,6 +81,7 @@ export const RevisionPlanCard: React.FC<RevisionPlanProps> = ({ courseId }) => {
     return () => window.removeEventListener('message', onMessage);
   }, [playing]);
 
+  // Loading state.
   if (loading) {
     return (
       <div className="bg-surface rounded-2xl p-6 border border-border animate-fade-up">
@@ -83,6 +90,7 @@ export const RevisionPlanCard: React.FC<RevisionPlanProps> = ({ courseId }) => {
     );
   }
 
+  // Empty state: no plan yet (no evidence) or nothing weak detected.
   if (!plan || plan.plan.length === 0) {
     return (
       <div className="bg-surface rounded-2xl p-6 border border-border animate-fade-up">
@@ -99,6 +107,7 @@ export const RevisionPlanCard: React.FC<RevisionPlanProps> = ({ courseId }) => {
     );
   }
 
+  // Main render: progress header, up to six plan items with recommended materials and the make-a-game button, plus the player overlay.
   return (
     <div className="bg-surface rounded-2xl p-6 border border-border animate-fade-up">
       <div className="flex items-center justify-between mb-1">

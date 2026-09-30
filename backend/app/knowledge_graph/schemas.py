@@ -1,8 +1,10 @@
-from pydantic import BaseModel, Field
+# Pydantic models for the knowledge-graph API (concept nodes, edges, stats, search, edit proposals).
+from pydantic import BaseModel
 from typing import List, Optional, Any, Dict
 from datetime import datetime
 
 
+# A concept as returned to the client.
 class ConceptNode(BaseModel):
     id: str
     name: str
@@ -14,6 +16,7 @@ class ConceptNode(BaseModel):
     material: Optional[str] = ""
 
 
+# Body for adding a concept manually.
 class ConceptNodeCreate(BaseModel):
     name: str
     description: str
@@ -23,6 +26,7 @@ class ConceptNodeCreate(BaseModel):
     material: Optional[str] = ""
 
 
+# Body for editing a concept; every field is optional.
 class ConceptNodeUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
@@ -44,17 +48,20 @@ class MaterialEditRequest(BaseModel):
     instruction: str
 
 
+# A prerequisite link between two concept ids.
 class GraphEdge(BaseModel):
     id: str
     source: str
     target: str
 
 
+# Full graph payload: nodes and edges.
 class GraphResponse(BaseModel):
     nodes: List[Any]
     edges: List[Any]
 
 
+# Whether the course graph is built/pending.
 class CourseGraphStatusResponse(BaseModel):
     id: int
     graph_status: str
@@ -63,12 +70,14 @@ class CourseGraphStatusResponse(BaseModel):
         from_attributes = True
 
 
+# Body for adding a prerequisite link by concept names.
 class RelationshipCreate(BaseModel):
     course_id: int
     source_name: str
     target_name: str
 
 
+# Counts shown on the analytics/graph dashboards.
 class GraphStats(BaseModel):
     node_count: int
     edge_count: int
@@ -77,6 +86,7 @@ class GraphStats(BaseModel):
     hard_count: int
 
 
+# One hit from concept search.
 class ConceptSearchResult(BaseModel):
     id: str
     name: str

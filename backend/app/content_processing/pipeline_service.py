@@ -1,3 +1,6 @@
+# Graph-build pipeline: three stages (extract text -> AI structuring -> diff and propose).
+# Each stage opens its own DB session, updates GraphBuildJob.status, and marks the job Failed on error.
+# Run by the Airflow DAG task-by-task, or all at once via run_pipeline_sync.
 import logging
 from typing import Any, Dict, List
 
@@ -11,6 +14,7 @@ logger = logging.getLogger("conceptintel.pipeline")
 
 
 def _get_job_or_raise(db, job_id: int) -> GraphBuildJob:
+    """Loads a GraphBuildJob by id or raises ValueError if it does not exist."""
     job = db.query(GraphBuildJob).filter(GraphBuildJob.id == job_id).first()
     if not job:
         raise ValueError(f"GraphBuildJob {job_id} not found")
@@ -18,11 +22,13 @@ def _get_job_or_raise(db, job_id: int) -> GraphBuildJob:
 
 
 def _update_status(db, job: GraphBuildJob, new_status: str) -> None:
+    """Sets the job status and commits so pollers see the new stage."""
     job.status = new_status
     db.commit()
 
 
 def _fail_job(job_id: int, error_message: str) -> None:
+    """Marks a job Failed (with a truncated error message) using a fresh session, since the stage session may be broken."""
     db = SessionLocal()
     try:
         job = db.query(GraphBuildJob).filter(GraphBuildJob.id == job_id).first()

@@ -1,9 +1,11 @@
+# Pydantic request/response models for assignments, submissions, rubrics and grade review.
 from datetime import datetime
 from typing import Optional
 from pydantic import BaseModel
 
 
 class SubmissionSummary(BaseModel):
+    """A student's own submission as shown on the assignment (grade hidden until approved)."""
     id: int
     file_filename: str
     submitted_at: datetime
@@ -15,12 +17,15 @@ class SubmissionSummary(BaseModel):
     # this is "Approved" (see app/assignments/routes.py _student_facing_submission) -
     # the AI's proposal is only shown here after a teacher approves it.
     grade_status: str = "Ungraded"
+    # Misconceptions the AI found, shown to the student only once the grade is approved.
+    misconceptions: Optional[list[dict]] = None
 
     class Config:
         from_attributes = True
 
 
 class AssignmentResponse(BaseModel):
+    """An assignment as returned to the client; my_submission/submission_count depend on the viewer's role."""
     id: int
     course_id: int
     teacher_id: int
@@ -47,6 +52,7 @@ class AssignmentResponse(BaseModel):
 
 
 class AssignmentUpdate(BaseModel):
+    """Partial update of an assignment's editable fields (only those sent are changed)."""
     title: Optional[str] = None
     description: Optional[str] = None
     due_date: Optional[datetime] = None
@@ -78,6 +84,7 @@ class RubricCriterionScoreOut(BaseModel):
 
 
 class SubmissionResponse(BaseModel):
+    """A submission as seen by staff: student info, grade, feedback and rubric breakdown."""
     id: int
     assignment_id: int
     student_id: int
@@ -92,9 +99,21 @@ class SubmissionResponse(BaseModel):
     # used for this grading pass - see RubricCriterionScoreOut. None otherwise.
     rubric_scores: Optional[list[dict]] = None
     grade_status: str = "Ungraded"
+    # Similar-assignment report (teacher-only): {"level", "max_score", "matches": [...]}.
+    similarity: Optional[dict] = None
+    # AI-detected misconceptions: from the approved grade, or the pending AI draft.
+    misconceptions: Optional[list[dict]] = None
 
     class Config:
         from_attributes = True
+
+
+class MisconceptionGroupOut(BaseModel):
+    """One concept's misconceptions aggregated across the class, for the teacher's
+    "common misconceptions" panel."""
+    concept_name: str
+    count: int
+    examples: list[dict]
 
 
 class RubricLevelIn(BaseModel):
@@ -134,6 +153,7 @@ class RubricSaveRequest(BaseModel):
 
 
 class RubricLevelOut(BaseModel):
+    """A saved performance level of a rubric criterion, as returned to the client."""
     id: int
     label: str
     points: float
@@ -145,6 +165,7 @@ class RubricLevelOut(BaseModel):
 
 
 class RubricCriterionOut(BaseModel):
+    """A saved rubric criterion with its CLO code and levels."""
     id: int
     title: str
     description: Optional[str] = None
@@ -159,6 +180,7 @@ class RubricCriterionOut(BaseModel):
 
 
 class RubricOut(BaseModel):
+    """A whole rubric: status, criteria and total points."""
     id: int
     assignment_id: int
     status: str

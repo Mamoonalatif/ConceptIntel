@@ -1,11 +1,13 @@
-from sqlalchemy import Column, Integer, String, Float, ForeignKey, DateTime, Date, Text, Boolean, UniqueConstraint, JSON, func
-from sqlalchemy.dialects.postgresql import ARRAY
+# SQLAlchemy ORM models: one class per database table (users, courses, content, graph jobs, assessments, outcomes...).
+# Tables are created from these classes at startup via Base.metadata.create_all (see main.py).
+from sqlalchemy import Column, Integer, String, Float, ForeignKey, DateTime, Date, Text, Boolean, UniqueConstraint, func
 from sqlalchemy.orm import relationship
 from pgvector.sqlalchemy import Vector
 from app.config import settings
 from app.database.connection import Base
 
 class User(Base):
+    """Every account (student, teacher or admin): credentials link, role flags, 2FA state and token version."""
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -164,6 +166,7 @@ class CourseCatalog(Base):
 
 
 class Course(Base):
+    """A course instance taught by one teacher in a semester; students join via enrollment_code."""
     __tablename__ = "courses"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -211,6 +214,7 @@ class Course(Base):
 
 
 class Enrollment(Base):
+    """Links a student to a course; the unique constraint prevents duplicate enrollments."""
     __tablename__ = "enrollments"
     __table_args__ = (
         UniqueConstraint("student_id", "course_id", name="uq_student_course_enrollment"),
@@ -289,6 +293,7 @@ class ScheduleSession(Base):
 
 
 class UploadedFile(Base):
+    """A teacher-uploaded course file (PDF, slides, image...) whose content feeds the concept graph and RAG."""
     __tablename__ = "uploaded_files"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -557,6 +562,15 @@ class AssignmentSubmission(Base):
     # happens on approval, not at grading time). Present only while
     # grade_status="PendingReview"; cleared back to null on approve or reject.
     pending_result_json = Column(Text, nullable=True)
+    # Plain text extracted from the submitted file, cached so similarity checks do not
+    # re-run text extraction/OCR for every comparison (see similarity_service.py).
+    extracted_text = Column(Text, nullable=True)
+    # Similar-assignment report: {"level": "none|low|medium|high", "max_score": 0-1,
+    # "matches": [{"student_name", "score", "same_assignment", ...}]} - teacher-only.
+    similarity_json = Column(Text, nullable=True)
+    # Misconceptions the AI found in this submission, copied from the grading result
+    # when the grade is approved: [{"concept_name", "misconception", "correction"}].
+    misconceptions_json = Column(Text, nullable=True)
 
     assignment = relationship("Assignment", back_populates="submissions")
     student = relationship("User")

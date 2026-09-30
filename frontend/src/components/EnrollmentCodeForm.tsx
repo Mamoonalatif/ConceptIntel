@@ -1,13 +1,16 @@
+// Purpose: "Join class" dialog where a student enters a course enrollment code (or pastes a join link) to enroll.
 import React, { useState } from 'react';
 import { X, RefreshCw, CheckCircle2 } from 'lucide-react';
 import { enrollmentService, courseService } from '../services/api';
 import { apiErrorMessage } from '../lib/apiError';
 
+// Code format rules: exactly 8 characters, uppercase letters and digits only.
 const CODE_LENGTH = 8;
 const CODE_PATTERN = /^[A-Z0-9]+$/;
 const ILLEGAL_CHAR_PATTERN = /[^A-Z0-9]/;
 const ILLEGAL_CHAR_MESSAGE = 'Code must be 8 uppercase letters/numbers (no spaces or symbols).';
 
+// Props: callbacks for a successful join (with a message) and for closing the dialog.
 interface EnrollmentCodeFormProps {
   /** Called with a ready-to-display success message after a successful join. */
   onEnrolled: (message: string) => void;
@@ -24,6 +27,7 @@ interface EnrollmentCodeFormProps {
  * remains the single source of truth for all enrollment business rules.
  */
 const EnrollmentCodeForm: React.FC<EnrollmentCodeFormProps> = ({ onEnrolled, onClose }) => {
+  // code = field value; touched = field was blurred/submitted (enables error display); joining = request in flight; serverError/preview = backend results.
   const [code, setCode] = useState('');
   const [touched, setTouched] = useState(false);
   // Tracks whether the user has clicked into (or started typing in) the code
@@ -33,6 +37,7 @@ const EnrollmentCodeForm: React.FC<EnrollmentCodeFormProps> = ({ onEnrolled, onC
   const [serverError, setServerError] = useState('');
   const [preview, setPreview] = useState<{ name: string; code: string | null } | null>(null);
 
+  // Returns a message describing why the code's format is invalid, or '' if it is fine.
   const formatError = (): string => {
     const trimmed = code.trim();
     if (!trimmed) return 'Enrollment code is required.';
@@ -46,10 +51,12 @@ const EnrollmentCodeForm: React.FC<EnrollmentCodeFormProps> = ({ onEnrolled, onC
   // immediately as the user types it - no need to wait for blur/submit.
   // Other errors (empty, wrong length) only show after blur/submit so users
   // aren't flagged as "wrong" mid-way through typing a valid code.
+  // Decide which error to show: illegal characters immediately, other format errors only after touch, else any server error.
   const hasIllegalChars = ILLEGAL_CHAR_PATTERN.test(code);
   const clientError = hasIllegalChars ? ILLEGAL_CHAR_MESSAGE : touched ? formatError() : '';
   const displayedError = clientError || serverError;
 
+  // Keeps the field uppercase, extracts the code from a pasted /join/CODE link, and clears old errors/preview.
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     // A pasted join link (e.g. https://app/join/ABCD1234) works here too - only the
     // trailing code segment is kept, so students can paste either the code or the link.
@@ -61,8 +68,10 @@ const EnrollmentCodeForm: React.FC<EnrollmentCodeFormProps> = ({ onEnrolled, onC
     setPreview(null);
   };
 
+  // Remember the user has started interacting so the format hint can appear.
   const handleFocus = () => setInteracted(true);
 
+  // On leaving the field, if the format is valid, look up the course name to preview it (silent on failure).
   const handleBlur = async () => {
     setTouched(true);
     setPreview(null);
@@ -79,6 +88,7 @@ const EnrollmentCodeForm: React.FC<EnrollmentCodeFormProps> = ({ onEnrolled, onC
     }
   };
 
+  // Validates the code and calls the join endpoint; on success informs the parent, on failure shows the server's error.
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setTouched(true);
@@ -142,6 +152,7 @@ const EnrollmentCodeForm: React.FC<EnrollmentCodeFormProps> = ({ onEnrolled, onC
             onBlur={handleBlur}
           />
 
+          {/* Helper text: error, course preview, or the format hint (in that priority). */}
           {displayedError ? (
             <p className="text-xs text-red-500 mt-1.5">{displayedError}</p>
           ) : preview ? (

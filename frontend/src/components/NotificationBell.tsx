@@ -1,3 +1,4 @@
+// Purpose: header bell icon with an unread badge and a dropdown list of notifications, plus native desktop pop-ups for new ones.
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -9,6 +10,7 @@ import { useAutoRefresh } from '../hooks/useAutoRefresh';
 import { timeAgo } from '../lib/time';
 import { EmptyStateIllustration } from './illustrations';
 
+// Icon and colour classes for each notification priority; unknown priorities fall back to 'info'.
 const PRIORITY_STYLES: Record<string, { icon: React.ElementType; className: string }> = {
   info: { icon: Info, className: 'text-blue-600 bg-blue-50 dark:text-blue-400 dark:bg-blue-500/10' },
   success: { icon: CheckCircle2, className: 'text-emerald-600 bg-emerald-50 dark:text-emerald-400 dark:bg-emerald-500/10' },
@@ -16,6 +18,7 @@ const PRIORITY_STYLES: Record<string, { icon: React.ElementType; className: stri
   error: { icon: XCircle, className: 'text-rose-600 bg-rose-50 dark:text-rose-400 dark:bg-rose-500/10' },
 };
 
+// Props: optional controlled open state so a parent (e.g. the profile menu) can open/close the dropdown.
 interface NotificationBellProps {
   /** Controlled open state (e.g. driven by the profile dropdown's "Notifications"
    *  entry). When omitted, the bell manages its own open/close state as before. */
@@ -23,15 +26,18 @@ interface NotificationBellProps {
   onOpenChange?: (open: boolean) => void;
 }
 
+// Bell + dropdown. Works either controlled (parent passes `open`) or on its own.
 export const NotificationBell: React.FC<NotificationBellProps> = ({ open: controlledOpen, onOpenChange }) => {
   const navigate = useNavigate();
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  // Effective open state, and a setter that notifies the parent and also updates internal state.
   const open = controlledOpen !== undefined ? controlledOpen : uncontrolledOpen;
   const setOpen = (value: boolean | ((prev: boolean) => boolean)) => {
     const resolved = typeof value === 'function' ? (value as (prev: boolean) => boolean)(open) : value;
     onOpenChange?.(resolved);
     setUncontrolledOpen(resolved);
   };
+  // items = notifications shown; unreadCount = badge number; loading = initial list load; containerRef = used for click-outside detection.
   const [items, setItems] = useState<NotificationItem[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -41,6 +47,7 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({ open: contro
   // re-fire desktop notifications for everything already unread.
   const lastSeenIdRef = useRef<number | null>(null);
 
+  // Shows a browser (OS-level) notification for one item, if the user granted permission; clicking it focuses the tab and opens its link.
   const fireDesktopNotification = (item: NotificationItem) => {
     if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
     const popup = new Notification(item.title, {
@@ -54,6 +61,7 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({ open: contro
     };
   };
 
+  // Loads the latest 20 notifications and unread count. `silent` skips the loading indicator (background refreshes).
   const fetchList = async (silent = false) => {
     if (!silent) setLoading(true);
     try {
@@ -70,6 +78,7 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({ open: contro
   // Polls the small unread-only list (not just the count) so newly-arrived items
   // can be diffed against lastSeenIdRef and popped as native desktop notifications
   // even while the dropdown is closed - a plain count can't tell us what's new.
+  // Background check for new notifications: updates the badge, pops desktop notifications for ids newer than the last seen, and refreshes the list if it is open.
   const pollForNew = async () => {
     try {
       const data = await notificationService.list({ unread_only: true, limit: 10 });
@@ -92,6 +101,7 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({ open: contro
     if (open) fetchList(true);
   };
 
+  // On mount: ask for desktop-notification permission (once) and do the first poll.
   useEffect(() => {
     if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
       Notification.requestPermission();
@@ -100,12 +110,15 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({ open: contro
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Poll for new notifications every 15 seconds.
   useAutoRefresh(() => pollForNew(), 15000);
 
+  // Load the full list each time the dropdown opens.
   useEffect(() => {
     if (open) fetchList();
   }, [open]);
 
+  // Close the dropdown when the user clicks anywhere outside it.
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
@@ -116,6 +129,7 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({ open: contro
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  // Marks a notification as read (optimistically, then on the server), closes the dropdown and follows its link.
   const handleItemClick = async (item: NotificationItem) => {
     if (!item.is_read) {
       setItems((prev) => prev.map((n) => (n.id === item.id ? { ...n, is_read: true } : n)));
@@ -130,6 +144,7 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({ open: contro
     if (item.link) navigate(item.link);
   };
 
+  // Marks everything read immediately; re-syncs from the server if the request fails.
   const handleMarkAllRead = async () => {
     setItems((prev) => prev.map((n) => ({ ...n, is_read: true })));
     setUnreadCount(0);
@@ -140,6 +155,7 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({ open: contro
     }
   };
 
+  // Removes all already-read notifications (optimistic update, re-sync on failure).
   const handleClearRead = async () => {
     setItems((prev) => prev.filter((n) => !n.is_read));
     try {
@@ -149,6 +165,7 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({ open: contro
     }
   };
 
+  // Deletes one notification without triggering the row's click handler; adjusts the unread count if needed.
   const handleDelete = async (e: React.MouseEvent, id: number) => {
     e.stopPropagation();
     const removed = items.find((n) => n.id === id);
@@ -161,6 +178,7 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({ open: contro
     }
   };
 
+  // Whether to show the "Clear" button.
   const hasReadItems = items.some((n) => n.is_read);
 
   return (
@@ -178,6 +196,7 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({ open: contro
         )}
       </button>
 
+      {/* Dropdown panel: header actions, then loading / empty / list states. */}
       {open && (
         <div className="absolute right-0 mt-2 w-96 max-w-[90vw] bg-surface rounded-2xl shadow-hover border border-border overflow-hidden z-50 animate-fade-in">
           <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-background">

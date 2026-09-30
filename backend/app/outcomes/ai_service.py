@@ -26,6 +26,9 @@ logger = logging.getLogger("conceptintel.outcomes.ai")
 
 
 def _call_json(system_prompt: str, user_content: str, max_tokens: int = 2500) -> Dict[str, Any]:
+    """Send one system+user prompt to the model in JSON mode and return the parsed object.
+    Retries up to 3 times on bad output; raises RuntimeError if no key is configured, on a
+    payment error, or after 3 failures."""
     client = _get_client()
     if client is None:
         raise RuntimeError(

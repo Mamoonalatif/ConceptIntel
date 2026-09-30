@@ -1,3 +1,4 @@
+// NotFoundPage: catch-all 404 screen shown for unknown routes.
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';

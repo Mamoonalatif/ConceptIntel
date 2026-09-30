@@ -1,6 +1,10 @@
+// Authentication context: holds the current user + JWT, and provides login, 2FA, Google
+// sign-in, register, logout and refreshUser to the whole app via useAuth().
+// Also handles token storage (remember-me), cross-tab session sharing and a cached profile.
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { authService, clearApiCache } from '../services/api';
 
+// The logged-in user's profile as returned by the API (/auth/me).
 interface User {
   id: number;
   email: string;
@@ -14,6 +18,7 @@ interface User {
   avatar_url?: string | null;
 }
 
+// Everything exposed to components through useAuth().
 interface AuthContextType {
   user: User | null;
   token: string | null;
@@ -26,6 +31,7 @@ interface AuthContextType {
   refreshUser: () => Promise<void>;
 }
 
+// The context object; undefined default lets useAuth detect a missing provider.
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 // Token may live in localStorage ("remember me" - survives browser restart) or
@@ -40,6 +46,7 @@ const getStoredToken = (): string | null =>
 // login page rendered. Deliberately just a flag; the token itself never lands here.
 const SESSION_HINT_KEY = 'session_active';
 
+// Saves access/refresh tokens in localStorage (remember me) or sessionStorage, clearing any old copy.
 const storeToken = (accessToken: string, refreshToken: string | undefined, rememberMe: boolean) => {
   // Clear both first so switching remember-me preference doesn't leave a stale copy
   localStorage.removeItem('token');
@@ -72,11 +79,13 @@ const storeToken = (accessToken: string, refreshToken: string | undefined, remem
 const AUTH_CHANNEL = 'conceptintel-auth';
 const HANDSHAKE_TIMEOUT_MS = 400;
 
+// Messages exchanged between tabs over the BroadcastChannel.
 type AuthMessage =
   | { type: 'request-token' }
   | { type: 'share-token'; token: string; user: string | null }
   | { type: 'logout' };
 
+// Opens the cross-tab channel, or returns null where unsupported/blocked.
 const openAuthChannel = (): BroadcastChannel | null => {
   try {
     return typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel(AUTH_CHANNEL) : null;
@@ -123,6 +132,7 @@ const requestTokenFromOtherTabs = (): Promise<{ token: string; user: string | nu
 // profile buys nothing: the API would simply 403.
 const USER_CACHE_KEY = 'cached_user';
 
+// Reads the cached profile from storage, validating its shape; null if missing/invalid.
 const readCachedUser = (): User | null => {
   try {
     const raw = localStorage.getItem(USER_CACHE_KEY) || sessionStorage.getItem(USER_CACHE_KEY);
@@ -135,6 +145,7 @@ const readCachedUser = (): User | null => {
   }
 };
 
+// Stores (or clears, when null) the cached profile alongside wherever the token lives.
 const writeCachedUser = (user: User | null) => {
   localStorage.removeItem(USER_CACHE_KEY);
   sessionStorage.removeItem(USER_CACHE_KEY);
@@ -149,6 +160,7 @@ const writeCachedUser = (user: User | null) => {
   }
 };
 
+// Provider: owns auth state and all auth actions; wrap the app with it.
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   // Both initialisers run synchronously on the very first render, so a returning
   // user's dashboard paints on frame one instead of after a network round trip.
@@ -175,6 +187,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // the app.
   const fetchedForToken = useRef<string | null>(null);
 
+  // On mount / token change: resolve the session (borrow from another tab if needed),
+  // then fetch /auth/me to validate and refresh the user profile.
   useEffect(() => {
     const initAuth = async () => {
       let storedToken = getStoredToken();
@@ -309,6 +323,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // all on Google sign-in, where it lands right after the token-verification
   // call. Still falls back to fetching it if a response is ever missing it (an
   // older cached deploy, a hand-rolled test response, etc).
+  // Shared tail of every sign-in path: store the token, set the user, then set the token state.
   const completeSignIn = async (
     accessToken: string, refreshToken: string | undefined, rememberMe: boolean, profile?: any,
   ) => {
@@ -325,6 +340,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setToken(accessToken);
   };
 
+  // Email/password login. Returns early with requires_2fa data if a second factor is needed.
   const login = async (credentials: any, rememberMe: boolean = false) => {
     const data = await authService.login(credentials);
     // A 2FA-enabled account: the password was correct, but this is NOT a completed
@@ -338,12 +354,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return data;
   };
 
+  // Second step for 2FA accounts: exchange temp token + code for a real session.
   const verifyTwoFactor = async (tempToken: string, code: string, rememberMe: boolean = false) => {
     const data = await authService.verifyTwoFactorLogin(tempToken, code);
     await completeSignIn(data.access_token, data.refresh_token, rememberMe, data.user);
     return data;
   };
 
+  // Google sign-in using the ID token from Google's button.
   const loginWithGoogle = async (idToken: string, rememberMe: boolean = false) => {
     const data = await authService.google(idToken);
     // Same 2FA handshake as login() above - a linked Google account does not skip
@@ -356,10 +374,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return data;
   };
 
+  // Creates an account; does not log in (email verification comes first).
   const register = async (userData: any) => {
     return authService.register(userData);
   };
 
+  // Clears tokens, caches and state in this tab and tells other tabs to sign out too.
   const logout = () => {
     localStorage.removeItem('token');
     localStorage.removeItem('refresh_token');
@@ -400,6 +420,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   );
 };
 
+// Hook for components to access auth state/actions; must be used inside AuthProvider.
 export const useAuth = () => {
   const context = useContext(AuthContext);
   if (!context) {

@@ -1,3 +1,4 @@
+// Date helpers: parse backend UTC timestamps and format them as relative "time ago" text.
 // Backend timestamps are naive UTC (Postgres `now()` with no offset info) - the
 // Date constructor treats a date-time string with no timezone suffix as LOCAL
 // time, not UTC, which silently skews "time ago" by the viewer's UTC offset.
@@ -6,6 +7,7 @@ export function parseUtc(iso: string): Date {
   return new Date(/[Z+-]\d{2}:?\d{2}$|Z$/.test(iso) ? iso : `${iso}Z`);
 }
 
+/** Formats a timestamp as 'just now', '5m ago', '3h ago', '2d ago', or a plain date after a week. */
 export function timeAgo(iso: string): string {
   const seconds = Math.floor((Date.now() - parseUtc(iso).getTime()) / 1000);
   if (seconds < 60) return 'just now';

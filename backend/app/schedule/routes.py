@@ -1,3 +1,5 @@
+# Course schedule endpoints: teachers generate (AI) or edit the week-by-week schedule; course members read it
+# and see what is being taught this week.
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -11,6 +13,7 @@ from app.schedule.schemas import CourseScheduleResponse, CourseScheduleUpdate, T
 router = APIRouter(prefix="/schedule", tags=["Course Schedule"])
 
 
+# Returns the course only if the caller is its teacher, otherwise 404.
 def _get_owned_course(db: Session, course_id: int, current_teacher: User) -> Course:
     course = db.query(Course).filter(Course.id == course_id, Course.teacher_id == current_teacher.id).first()
     if not course:
@@ -21,6 +24,7 @@ def _get_owned_course(db: Session, course_id: int, current_teacher: User) -> Cou
     return course
 
 
+# POST /schedule/course/{id}/generate - AI builds the schedule from the uploaded outline (see docstring).
 @router.post("/course/{course_id}/generate", response_model=CourseScheduleResponse)
 def generate_schedule(
     course_id: int,
@@ -35,6 +39,7 @@ def generate_schedule(
     return schedule_service.serialize_schedule(schedule)
 
 
+# PUT /schedule/course/{id} - teacher saves a hand-edited list of sessions.
 @router.put("/course/{course_id}", response_model=CourseScheduleResponse)
 def update_schedule(
     course_id: int,
@@ -51,6 +56,7 @@ def update_schedule(
     return schedule_service.serialize_schedule(schedule)
 
 
+# GET /schedule/course/{id} - the stored schedule for anyone with course access (404 if none yet).
 @router.get("/course/{course_id}", response_model=CourseScheduleResponse)
 def get_schedule(
     course_id: int,
@@ -69,6 +75,7 @@ def get_schedule(
     return schedule_service.serialize_schedule(schedule)
 
 
+# GET /schedule/course/{id}/today - this week's topics (see docstring).
 @router.get("/course/{course_id}/today", response_model=TodayTopicsResponse)
 def get_today_topics(
     course_id: int,

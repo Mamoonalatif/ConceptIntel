@@ -1,3 +1,5 @@
+// AboutPage: public "About" page. Purely static marketing content (origin story,
+// the 12 platform modules, differentiators, CTA); no API calls.
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -33,6 +35,7 @@ const sectionEyebrow = 'inline-flex items-center gap-2 px-3.5 py-1.5 rounded-ful
 const sectionHeading = 'text-3xl sm:text-4xl font-extrabold text-text-primary tracking-tight';
 const sectionSub = 'text-text-secondary text-base mt-3 leading-relaxed';
 
+// Data for the "12 modules" card grid: title, blurb, icon and gradient per card.
 const ALL_12_MODULES = [
   {
     title: 'AI Content Upload',
@@ -108,6 +111,7 @@ const ALL_12_MODULES = [
   },
 ];
 
+// Data for the three "what's different" cards.
 const DIFFERENTIATORS = [
   {
     icon: Network,
@@ -129,6 +133,7 @@ const DIFFERENTIATORS = [
   },
 ];
 
+/** Renders the About page: Nav, hero, origin story, module grid, differentiators, team and CTA, then Footer. */
 export const AboutPage: React.FC = () => {
   const navigate = useNavigate();
 

@@ -28,17 +28,20 @@ logger = logging.getLogger("conceptintel.practice")
 
 
 class MockTestRequest(BaseModel):
+    """Request to start a mock test: how many questions (validated below)."""
     size: int = practice_service.DEFAULT_MOCK_SIZE
 
     @field_validator("size")
     @classmethod
     def sane_size(cls, v: int) -> int:
+        """Keep the requested size between 1 and the maximum allowed."""
         if not (1 <= v <= practice_service.MAX_MOCK_SIZE):
             raise ValueError(f"size must be between 1 and {practice_service.MAX_MOCK_SIZE}")
         return v
 
 
 class MockTestOut(BaseModel):
+    """A freshly built mock test: the token to submit back plus the student-facing questions."""
     attempt_token: str
     question_count: int
     total_points: int
@@ -46,12 +49,14 @@ class MockTestOut(BaseModel):
 
 
 class SubmitMockRequest(BaseModel):
+    """Student's submission: the attempt token, answers keyed by question id, and time taken."""
     attempt_token: str
     responses: Dict[str, Any] = {}
     duration_seconds: Optional[int] = None
 
 
 def _get_course(db: Session, course_id: int, user: User) -> Course:
+    """Fetch the course (404 if missing) and check the user has access to it."""
     course = db.query(Course).filter(Course.id == course_id).first()
     if not course:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
@@ -60,6 +65,7 @@ def _get_course(db: Session, course_id: int, user: User) -> Course:
 
 
 def _require_student(user: User) -> None:
+    """Raise 403 unless the user is a student (mock tests are student-only)."""
     if user.role.lower() != "student":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -100,6 +106,8 @@ def submit_mock_test(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    """Grade a mock test from its token, log a study session, record per-concept mastery
+    evidence, award points, and return the score breakdown."""
     course = _get_course(db, course_id, current_user)
     _require_student(current_user)
     try:
