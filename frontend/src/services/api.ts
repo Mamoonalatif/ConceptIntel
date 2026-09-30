@@ -250,6 +250,10 @@ export const authService = {
     const res = await api.post('/auth/verify-email', { token });
     return res.data;
   },
+  verifyEmailCode: async (email: string, code: string) => {
+    const res = await api.post('/auth/verify-email-code', { email, code });
+    return res.data;
+  },
   resendVerification: async (email: string) => {
     const res = await api.post('/auth/resend-verification', { email });
     return res.data;
@@ -1541,6 +1545,13 @@ export interface GeneratedContentItem {
    *  picked one from the "Link to CLO" dropdown at generation time. */
   clo_id: number | null;
   clo_code: string | null;
+  /** content_type === 'assignment' only: the real Assignment row this draft was
+   *  turned into, if any (see backend Assignment.source_content_id). This is the
+   *  only reliable "has this already become a real assignment?" signal - status
+   *  alone is ambiguous (it's also set to 'Approved' by the same action that
+   *  creates the Assignment, so a draft whose creation never actually happened
+   *  can look identical to one that has it). */
+  assignment_id: number | null;
   status: 'PendingReview' | 'Approved' | 'Rejected';
   created_by_teacher_id: number;
   reviewed_by_id: number | null;

@@ -57,7 +57,13 @@ def get_graph_by_course(
         )
 
     # Return graph representation from Neo4j, keyed by the shared catalog_id
-    return neo4j_service.get_catalog_graph(_resolve_catalog_id(course))
+    try:
+        return neo4j_service.get_catalog_graph(_resolve_catalog_id(course), strict=True)
+    except ConnectionError:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="The knowledge graph database (Neo4j) is unreachable right now. Please retry in a moment.",
+        )
 
 
 @router.post("/course/{course_id}/approve", response_model=CourseGraphStatusResponse)

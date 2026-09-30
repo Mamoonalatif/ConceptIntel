@@ -646,8 +646,13 @@ const AssignmentDraftView: React.FC<{
   const draft = item.payload as AssignmentDraft;
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState('');
+  // Driven by item.assignment_id, NOT item.status - status alone can't tell
+  // "was a real Assignment actually created?" apart from "marked Approved by
+  // some other path with no Assignment behind it" (see the field's own comment
+  // in services/api.ts). A draft stuck in the latter state used to have no way
+  // back to the Create Assignment button that could fix it.
   const [createdAssignmentId, setCreatedAssignmentId] = useState<number | null>(
-    item.status === 'Approved' ? -1 : null // -1 = "approved before this view mounted, id unknown"
+    item.assignment_id ?? null
   );
   const [refineOpen, setRefineOpen] = useState(false);
   const [refineInstruction, setRefineInstruction] = useState('');
@@ -754,7 +759,7 @@ const AssignmentDraftView: React.FC<{
 
       {isTeacher && createdAssignmentId !== null && (
         <button
-          onClick={() => navigate(createdAssignmentId > 0 ? `/course/${courseId}?tab=classwork` : `/course/${courseId}?tab=classwork`)}
+          onClick={() => navigate(`/course/${courseId}?tab=classwork`)}
           className="btn-primary text-sm"
         >
           <CheckCircle2 className="w-4 h-4" /> View in Classwork <ArrowRight className="w-4 h-4" />

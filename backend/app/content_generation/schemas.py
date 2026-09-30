@@ -225,6 +225,14 @@ class GeneratedContentOut(BaseModel):
     language: str = "English"
     clo_id: Optional[int] = None
     clo_code: Optional[str] = None
+    # Only meaningful when content_type == "assignment": the real Assignment row
+    # this draft was turned into, if any (see Assignment.source_content_id).
+    # This - NOT status == "Approved" - is the only reliable signal for whether
+    # an assignment draft has actually become a real Assignment. status alone is
+    # ambiguous: it's also set to "Approved" by create_assignment_from_content
+    # itself, so a draft whose Assignment was never actually created (an old
+    # code path, a failed request) looked identical to one that has it.
+    assignment_id: Optional[int] = None
     status: str
     created_by_teacher_id: int
     reviewed_by_id: Optional[int] = None

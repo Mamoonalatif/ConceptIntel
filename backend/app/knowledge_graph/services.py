@@ -104,10 +104,14 @@ class Neo4jService:
             raise ConnectionError("Neo4j database connection is not available.")
         return self.driver.session()
 
-    def query(self, query_str: str, parameters: Dict[str, Any] = None):
-        """Execute a general Cypher query."""
+    def query(self, query_str: str, parameters: Dict[str, Any] = None, raise_on_error: bool = False):
+        """Execute a general Cypher query. With raise_on_error=True an unavailable
+        database raises ConnectionError instead of returning [] - callers that must
+        tell "no data" apart from "couldn't reach Neo4j" (the graph view) use this."""
         self._ensure_connected()
         if not self.driver:
+            if raise_on_error:
+                raise ConnectionError("Neo4j database connection is not available.")
             logger.warning("Neo4j not connected. Mocking query execution.")
             return []
         try:
@@ -129,6 +133,8 @@ class Neo4jService:
             # restart.
             logger.error(f"Neo4j query failed ({type(e).__name__}: {e}) - marking connection dead for reconnect.")
             self.driver = None
+            if raise_on_error:
+                raise ConnectionError(f"Neo4j query failed: {e}") from e
             return []
 
     def create_concept_node(self, catalog_id: int, name: str, description: str, difficulty: str,
@@ -241,11 +247,20 @@ class Neo4jService:
         ]
         self.query(query, {"catalog_id": catalog_id, "rows": rows})
 
-    def get_catalog_graph(self, catalog_id: int) -> Dict[str, List[Dict[str, Any]]]:
-        """Fetch all concept nodes and their relationships shared by a catalog course."""
+    def get_catalog_graph(self, catalog_id: int, strict: bool = False) -> Dict[str, List[Dict[str, Any]]]:
+        """Fetch all concept nodes and their relationships shared by a catalog course.
+
+        Never fabricates data: when Neo4j is unreachable this used to return a
+        hard-coded "Fundamentals of Programming -> ... -> Sorting" placeholder graph
+        for EVERY course, so e.g. Calculus showed unrelated programming concepts with
+        made-up links (and rubrics/content were generated from them). It now returns
+        an empty graph, or raises ConnectionError when strict=True so the graph
+        endpoint can report a real 503 instead of a wrong picture."""
         self._ensure_connected()
         if not self.driver:
-            return get_mock_graph_data(catalog_id)
+            if strict:
+                raise ConnectionError("Neo4j database connection is not available.")
+            return {"nodes": [], "edges": []}
 
         node_query = """
         MATCH (c:Concept {catalog_id: $catalog_id})
@@ -255,13 +270,13 @@ class Neo4jService:
                c.learning_outcomes AS learning_outcomes,
                c.material AS material
         """
-        nodes_res = self.query(node_query, {"catalog_id": catalog_id})
+        nodes_res = self.query(node_query, {"catalog_id": catalog_id}, raise_on_error=strict)
 
         rel_query = """
         MATCH (src:Concept {catalog_id: $catalog_id})-[r:PREREQUISITE]->(tgt:Concept {catalog_id: $catalog_id})
         RETURN src.id AS source, tgt.id AS target
         """
-        edges_res = self.query(rel_query, {"catalog_id": catalog_id})
+        edges_res = self.query(rel_query, {"catalog_id": catalog_id}, raise_on_error=strict)
 
         return {
             "nodes": nodes_res,

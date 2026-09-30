@@ -91,6 +91,11 @@ class VerifyEmailRequest(BaseModel):
     token: str
 
 
+class VerifyEmailCodeRequest(BaseModel):
+    email: EmailStr
+    code: str
+
+
 class ResendVerificationRequest(BaseModel):
     email: EmailStr
 

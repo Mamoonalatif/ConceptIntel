@@ -288,7 +288,7 @@ const Login: React.FC = () => {
               {!error && justRegistered && (
                 <div className="bg-primary-muted border border-primary/20 text-primary rounded-xl p-3.5 flex items-center gap-2 mb-6 text-sm animate-fade-in">
                   <Mail className="w-4 h-4 shrink-0" />
-                  <span>Account created! Check your email for a verification link before signing in.</span>
+                  <span>Account created! Check your email, then click the verification link or <Link to="/verify-email" className="font-semibold underline">enter the verification code</Link>, before signing in.</span>
                 </div>
               )}
 

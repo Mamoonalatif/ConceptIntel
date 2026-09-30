@@ -38,7 +38,7 @@ from app.auth.schemas import (
     RefreshRequest, RefreshResponse,
     TwoFactorRequiredResponse, TwoFactorLoginVerify, TwoFactorSetupResponse,
     TwoFactorEnableRequest, TwoFactorEnableResponse, TwoFactorDisableRequest, TwoFactorStatusResponse,
-    VerifyEmailRequest, ResendVerificationRequest,
+    VerifyEmailRequest, VerifyEmailCodeRequest, ResendVerificationRequest,
 )
 from app.auth.utils import (
     hash_password, verify_password, create_access_token, create_refresh_token,
@@ -832,9 +832,11 @@ def _send_verification_email(db: Session, user: User) -> None:
     request. Best-effort either way: if email delivery isn't configured, the account
     is simply left unverified until resend_verification/an admin intervenes."""
     raw_token = secrets.token_urlsafe(32)
+    code = f"{secrets.randbelow(10**6):06d}"
     db.add(EmailVerificationToken(
         user_id=user.id,
         token_hash=_hash_verification_token(raw_token),
+        code_hash=_hash_verification_token(f"{user.id}:{code}"),
         expires_at=datetime.utcnow() + VERIFICATION_TOKEN_TTL,
     ))
     db.commit()
@@ -843,7 +845,7 @@ def _send_verification_email(db: Session, user: User) -> None:
     verify_link = f"{frontend_url}/verify-email?token={raw_token}"
     threading.Thread(
         target=send_verification_email,
-        args=(user.email, user.full_name, verify_link),
+        args=(user.email, user.full_name, verify_link, code),
         daemon=True,
     ).start()
 
@@ -877,6 +879,44 @@ def verify_email(payload: VerifyEmailRequest, db: Session = Depends(get_db)):
     verification_token.used_at = datetime.utcnow()
     db.commit()
 
+    return {"message": "Your email has been verified. You can now sign in."}
+
+
+MAX_VERIFICATION_CODE_ATTEMPTS = 5
+
+
+@router.post("/verify-email-code")
+def verify_email_code(payload: VerifyEmailCodeRequest, db: Session = Depends(get_db)):
+    """Typed-code alternative to the emailed link. Only the user's newest unused
+    token counts, and it dies after MAX_VERIFICATION_CODE_ATTEMPTS wrong guesses
+    (a 6-digit code is otherwise brute-forceable)."""
+    invalid = HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="That code is invalid or has expired. Request a new one.",
+    )
+    user = db.query(User).filter(func.lower(User.email) == payload.email.lower()).first()
+    if not user:
+        raise invalid
+    record = (
+        db.query(EmailVerificationToken)
+        .filter(EmailVerificationToken.user_id == user.id, EmailVerificationToken.used_at.is_(None))
+        .order_by(EmailVerificationToken.id.desc())
+        .first()
+    )
+    if (
+        not record or not record.code_hash
+        or record.expires_at < datetime.utcnow()
+        or (record.attempts or 0) >= MAX_VERIFICATION_CODE_ATTEMPTS
+    ):
+        raise invalid
+    if not secrets.compare_digest(record.code_hash, _hash_verification_token(f"{user.id}:{payload.code.strip()}")):
+        record.attempts = (record.attempts or 0) + 1
+        db.commit()
+        raise invalid
+
+    user.is_verified = True
+    record.used_at = datetime.utcnow()
+    db.commit()
     return {"message": "Your email has been verified. You can now sign in."}
 
 

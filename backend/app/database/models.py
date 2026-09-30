@@ -105,6 +105,10 @@ class EmailVerificationToken(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     token_hash = Column(String, nullable=False, index=True)
+    # sha256 of "<user_id>:<6-digit code>" - the typed alternative to the emailed
+    # link, for people who read the email on another device. `attempts` caps guesses.
+    code_hash = Column(String, nullable=True)
+    attempts = Column(Integer, nullable=False, server_default="0", default=0)
     expires_at = Column(DateTime, nullable=False)
     used_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, server_default=func.now(), nullable=False)
@@ -485,6 +489,18 @@ class Assignment(Base):
     # for the assignment's whole lifetime, not just until approval.
     concept_node_id = Column(String, nullable=True)
     concept_name = Column(String, nullable=True)
+    # The AI-drafted GeneratedContent row (content_type="assignment") this was
+    # created from, if any - null for a plain manually-created assignment. This is
+    # the ONLY reliable way to answer "has this draft already become a real
+    # assignment?" - GeneratedContent.status alone can't: it's also set to
+    # "Approved" by create_assignment_from_content itself, so a draft whose
+    # Assignment creation partially failed, or that was marked Approved by an
+    # older code path before this link existed, looked identical to one that
+    # genuinely has an Assignment - the frontend's Create Assignment button then
+    # hid itself based on that status with no way back in, even though nothing
+    # had actually been created. See content_generation/routes.py
+    # create_assignment_from_content, which is also now idempotent against this.
+    source_content_id = Column(Integer, ForeignKey("generated_content.id"), nullable=True, index=True)
     created_at = Column(DateTime, server_default=func.now(), index=True)
     updated_at = Column(DateTime, nullable=True)
 

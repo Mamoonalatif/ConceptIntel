@@ -14,8 +14,25 @@ import { AlertCircle, Loader2, CheckCircle2 } from 'lucide-react';
 const VerifyEmail: React.FC = () => {
   const [searchParams] = useSearchParams();
   const token = searchParams.get('token') || '';
-  const [status, setStatus] = useState<'loading' | 'success' | 'error'>(token ? 'loading' : 'error');
-  const [error, setError] = useState(token ? '' : 'This verification link is missing its token.');
+  const [status, setStatus] = useState<'loading' | 'success' | 'error' | 'code'>(token ? 'loading' : 'code');
+  const [error, setError] = useState('');
+  const [email, setEmail] = useState('');
+  const [code, setCode] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  const submitCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSubmitting(true);
+    setError('');
+    try {
+      await authService.verifyEmailCode(email.trim(), code.trim());
+      setStatus('success');
+    } catch (err) {
+      setError(apiErrorMessage(err, 'That code is invalid or has expired.'));
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   useEffect(() => {
     if (!token) return;
@@ -59,6 +76,29 @@ const VerifyEmail: React.FC = () => {
                   <Loader2 className="w-8 h-8 text-primary animate-spin mx-auto mb-4" />
                   <h1 className="text-xl font-extrabold text-text-primary leading-none">Verifying your email...</h1>
                 </>
+              )}
+
+              {status === 'code' && (
+                <form onSubmit={submitCode} className="text-left">
+                  <h1 className="text-xl font-extrabold text-text-primary leading-none text-center">Enter your verification code</h1>
+                  <p className="text-text-secondary text-sm mt-3 text-center">
+                    Type the 6-digit code from your verification email.
+                  </p>
+                  <input
+                    type="email" required value={email} onChange={(e) => setEmail(e.target.value)}
+                    placeholder="you@university.edu" className="input-field w-full mt-5"
+                  />
+                  <input
+                    type="text" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} required
+                    value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
+                    placeholder="123456" className="input-field w-full mt-3 text-center tracking-[0.5em] font-bold"
+                  />
+                  {error && <p className="text-red-600 text-sm mt-3">{error}</p>}
+                  <button type="submit" disabled={submitting || code.length !== 6} className="btn-primary w-full justify-center mt-5 inline-flex">
+                    {submitting ? 'Verifying...' : 'Verify'}
+                  </button>
+                  <Link to="/login" className="block text-center text-sm text-text-secondary mt-4">Back to Sign In</Link>
+                </form>
               )}
 
               {status === 'success' && (

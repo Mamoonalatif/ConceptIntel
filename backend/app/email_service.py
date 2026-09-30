@@ -76,14 +76,20 @@ def send_password_reset_email(to_email: str, full_name: str, reset_link: str) ->
     return send_email(to_email, subject, html_body)
 
 
-def send_verification_email(to_email: str, full_name: str, verify_link: str) -> bool:
+def send_verification_email(to_email: str, full_name: str, verify_link: str, code: str = "") -> bool:
     subject = "Verify your ConceptIntel email address"
+    code_block = (
+        '<p style="margin-top: 20px;">Or enter this verification code on the verification page:</p>'
+        f'<p style="font-size: 28px; font-weight: 700; letter-spacing: 6px; color: #1e293b; background: #f8faff; '
+        f'border: 1px solid #dde3f0; border-radius: 8px; padding: 12px; text-align: center;">{code}</p>'
+    ) if code else ""
     html_body = f"""
     <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
       <h2 style="color: #4f46e5;">Verify your email</h2>
       <p>Hi {full_name},</p>
       <p>Thanks for signing up for ConceptIntel. Please confirm this is your email address:</p>
       <p><a href="{verify_link}" style="display: inline-block; background: #4f46e5; color: white; padding: 10px 20px; border-radius: 8px; text-decoration: none;">Verify email address</a></p>
+      {code_block}
       <p style="color: #94a3b8; font-size: 12px;">This link expires in 24 hours. If you didn't create a ConceptIntel account, you can safely ignore this email.</p>
     </div>
     """

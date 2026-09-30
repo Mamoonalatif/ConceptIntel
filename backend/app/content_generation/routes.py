@@ -63,6 +63,10 @@ def _to_out(item: GeneratedContent, db: Session) -> GeneratedContentOut:
     if item.clo_id:
         clo = db.query(CLO).filter(CLO.id == item.clo_id).first()
         clo_code = clo.code if clo else None
+    assignment_id = None
+    if item.content_type == "assignment":
+        assignment = db.query(Assignment).filter(Assignment.source_content_id == item.id).first()
+        assignment_id = assignment.id if assignment else None
     return GeneratedContentOut(
         id=item.id, course_id=item.course_id, concept_node_id=item.concept_node_id,
         concept_name=item.concept_name, content_type=item.content_type, title=item.title,
@@ -70,7 +74,7 @@ def _to_out(item: GeneratedContent, db: Session) -> GeneratedContentOut:
         difficulty=item.difficulty or "Medium",
         grounded_excerpts=item.grounded_excerpts or 0,
         language=item.language or "English",
-        clo_id=item.clo_id, clo_code=clo_code,
+        clo_id=item.clo_id, clo_code=clo_code, assignment_id=assignment_id,
         created_by_teacher_id=item.created_by_teacher_id, reviewed_by_id=item.reviewed_by_id,
         reviewed_at=item.reviewed_at, review_notes=item.review_notes, created_at=item.created_at,
     )
@@ -696,6 +700,19 @@ def create_assignment_from_content(
     if item.content_type != "assignment":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This content item is not an assignment draft.")
 
+    # Idempotent: nothing below previously checked whether this draft already
+    # had an Assignment, so a double-click (or a retry after a slow/ambiguous
+    # response) created two separate Assignment + Rubric rows for the same
+    # draft. Returning the existing one instead means calling this twice is
+    # always safe.
+    existing = db.query(Assignment).filter(Assignment.source_content_id == item.id).first()
+    if existing:
+        existing_rubric = db.query(Rubric).filter(Rubric.assignment_id == existing.id).first()
+        return CreatedAssignmentOut(
+            assignment_id=existing.id, course_id=existing.course_id,
+            rubric_id=existing_rubric.id if existing_rubric else 0,
+        )
+
     draft = json.loads(item.payload_json)
     assignment = Assignment(
         course_id=course_id, teacher_id=current_teacher.id,
@@ -705,6 +722,7 @@ def create_assignment_from_content(
         # from "the AI actually drafted 0 points".
         points=round(draft["points"]) if draft.get("points") is not None else None,
         concept_node_id=item.concept_node_id, concept_name=item.concept_name,
+        source_content_id=item.id,
     )
     db.add(assignment)
     db.flush()
