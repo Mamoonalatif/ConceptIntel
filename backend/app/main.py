@@ -3,8 +3,10 @@ import uvicorn
 import logging
 import threading
 import time
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, status
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from app.config import settings
 from app.database.connection import engine
@@ -154,6 +156,30 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc"
 )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """FastAPI's default 422 response shape for a body/query validation failure is
+    `{"detail": [{"type", "loc", "msg", "input", "ctx", "url"}, ...]}` - a list of
+    structured error OBJECTS, not the plain string every other error response in
+    this app uses (every `raise HTTPException(detail="...")` sends a string).
+    Every frontend screen that does `setError(err.response?.data?.detail || '...')`
+    assumes it's always a string and renders it directly as text - confirmed live:
+    an email that fails validate_deliverable_email (or any other field_validator
+    ValueError, or simply a missing/malformed field) crashed the whole page with
+    "Objects are not valid as a React child" and a blank white screen, no error
+    shown to the user at all. Reformatting here, once, fixes it for every endpoint
+    and every existing/future frontend call site - not just the one that was hit."""
+    messages = []
+    for err in exc.errors():
+        loc = ".".join(str(p) for p in err.get("loc", []) if p != "body")
+        msg = err.get("msg", "Invalid value")
+        messages.append(f"{loc}: {msg}" if loc else msg)
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content={"detail": "; ".join(messages) or "Invalid request."},
+    )
 
 # Enable CORS for frontend API calls - origins come from ALLOWED_ORIGINS (comma-
 # separated), defaulting to the local Vite dev server. Auth here is a Bearer

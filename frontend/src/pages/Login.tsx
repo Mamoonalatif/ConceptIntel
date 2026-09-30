@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { GoogleSignInButton } from '../components/GoogleSignInButton';
 import { isValidEmail } from '../lib/validators';
+import { apiErrorMessage } from '../lib/apiError';
 import { authService } from '../services/api';
 import { FoxMark } from '../components/FoxMark';
 import { FoxMascot } from '../components/FoxMascot';
@@ -160,8 +161,8 @@ const Login: React.FC = () => {
       }
       navigate(redirect || dashboardPathForRole(data.role));
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Invalid email or password');
-      setUnverified(err.response?.status === 403 && /verify your email/i.test(err.response?.data?.detail || ''));
+      setError(apiErrorMessage(err, 'Invalid email or password'));
+      setUnverified(err.response?.status === 403 && /verify your email/i.test(apiErrorMessage(err, '')));
       setLoading(false);
     }
   };
@@ -185,7 +186,7 @@ const Login: React.FC = () => {
       const data = await verifyTwoFactor(twoFactorTempToken, twoFactorCode.trim(), rememberMe);
       navigate(redirect || dashboardPathForRole(data.role));
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Invalid authentication code.');
+      setError(apiErrorMessage(err, 'Invalid authentication code.'));
       setLoading(false);
     }
   };

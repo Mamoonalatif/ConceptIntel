@@ -2,6 +2,7 @@ import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 // Pages
 import { LandingPage } from './pages/LandingPage';
@@ -104,6 +105,7 @@ const GuestRoute: React.FC<{ children: React.ReactElement }> = ({ children }) =>
 const AppContent: React.FC = () => {
   return (
     <Router>
+      <ErrorBoundary>
       <Routes>
         {/* Public Guest Routes */}
         <Route path="/" element={<LandingPage />} />
@@ -278,6 +280,7 @@ const AppContent: React.FC = () => {
         {/* Catch-all */}
         <Route path="*" element={<NotFoundPage />} />
       </Routes>
+      </ErrorBoundary>
     </Router>
   );
 };

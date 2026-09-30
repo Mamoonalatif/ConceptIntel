@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import { adminService, programService, programCoordinatorService } from '../services/api';
+import { apiErrorMessage } from '../lib/apiError';
 import { AppShell, type NavItem } from '../components/AppShell';
 import { useAutoRefresh } from '../hooks/useAutoRefresh';
 import {
@@ -325,7 +326,7 @@ const AdminDashboard: React.FC = () => {
       setCoordinatorCourse(prev => ({ ...prev, [userId]: previousCourse }));
       setStaff(previousStaff);
       setUsers(previousUsers);
-      setError(err.response?.data?.detail || 'Failed to update Program Coordinator assignment.');
+      setError(apiErrorMessage(err, 'Failed to update Program Coordinator assignment.'));
     } finally {
       setAssigningProgramFor(null);
     }
@@ -370,7 +371,7 @@ const AdminDashboard: React.FC = () => {
       setCoordinatorPrograms(prev => ({ ...prev, [userId]: previousPrograms }));
       setStaff(previousStaff);
       setUsers(previousUsers);
-      setError(err.response?.data?.detail || 'Failed to update Course Coordinator assignment.');
+      setError(apiErrorMessage(err, 'Failed to update Course Coordinator assignment.'));
     } finally {
       setAssigningCourseFor(null);
     }
@@ -393,7 +394,7 @@ const AdminDashboard: React.FC = () => {
       setCredentials({ email: data.email, temporary_password: data.temporary_password });
       fetchRequests();
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to approve request');
+      setError(apiErrorMessage(err, 'Failed to approve request'));
     } finally {
       setProcessingId(null);
     }
@@ -406,7 +407,7 @@ const AdminDashboard: React.FC = () => {
       await adminService.rejectTeacherRequest(id);
       fetchRequests();
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to reject request');
+      setError(apiErrorMessage(err, 'Failed to reject request'));
     } finally {
       setProcessingId(null);
     }
@@ -447,7 +448,7 @@ const AdminDashboard: React.FC = () => {
       setNewTeacherEmail('');
       setNewTeacherName('');
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to create teacher account');
+      setError(apiErrorMessage(err, 'Failed to create teacher account'));
     } finally {
       setCreating(false);
     }
@@ -515,7 +516,7 @@ const AdminDashboard: React.FC = () => {
       setStaff(prev => prev.map(s => (s.id === updated.id ? { ...s, ...updated } : s)));
       setEditingUser(null);
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to update user profile');
+      setError(apiErrorMessage(err, 'Failed to update user profile'));
     } finally {
       setUpdatingUser(false);
     }
@@ -532,7 +533,7 @@ const AdminDashboard: React.FC = () => {
       setUsers(prev => prev.filter(u => u.id !== userId));
       setStaff(prev => prev.filter(s => s.id !== userId));
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to delete user');
+      setError(apiErrorMessage(err, 'Failed to delete user'));
     } finally {
       setDeletingUserId(null);
     }
@@ -553,7 +554,7 @@ const AdminDashboard: React.FC = () => {
       setNewProgramName('');
       setNewProgramCode('');
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to create program');
+      setError(apiErrorMessage(err, 'Failed to create program'));
     } finally {
       setCreatingProgram(false);
     }
@@ -566,7 +567,7 @@ const AdminDashboard: React.FC = () => {
       await programService.delete(programId);
       setPrograms(prev => prev.filter(p => p.id !== programId));
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to delete program');
+      setError(apiErrorMessage(err, 'Failed to delete program'));
     } finally {
       setDeletingProgramId(null);
     }

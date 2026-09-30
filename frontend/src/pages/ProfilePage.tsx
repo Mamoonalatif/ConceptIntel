@@ -3,6 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { AppShell, type NavItem } from '../components/AppShell';
 import { ChangePasswordModal } from '../components/ChangePasswordModal';
 import { Avatar } from '../components/Avatar';
+import { apiErrorMessage } from '../lib/apiError';
 import { StudyIllustration, TeachIllustration } from '../components/illustrations';
 import { authService } from '../services/api';
 import { getPrimaryNavItems } from '../lib/roleNav';
@@ -112,7 +113,7 @@ const ProfilePage: React.FC = () => {
       await authService.uploadAvatar(file);
       await refreshUser();
     } catch (err: any) {
-      setPhotoError(err.response?.data?.detail || 'Failed to upload photo.');
+      setPhotoError(apiErrorMessage(err, 'Failed to upload photo.'));
     } finally {
       setPhotoBusy(false);
     }
@@ -125,7 +126,7 @@ const ProfilePage: React.FC = () => {
       await authService.deleteAvatar();
       await refreshUser();
     } catch (err: any) {
-      setPhotoError(err.response?.data?.detail || 'Failed to remove photo.');
+      setPhotoError(apiErrorMessage(err, 'Failed to remove photo.'));
     } finally {
       setPhotoBusy(false);
     }

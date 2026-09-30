@@ -167,7 +167,7 @@ const CourseDetail: React.FC = () => {
       const results = await uploadService.searchContent(idNum, searchQuery.trim());
       setSearchResults(results);
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Search failed.');
+      setError(apiErrorMessage(err, 'Search failed.'));
     } finally {
       setSearching(false);
     }
@@ -268,7 +268,7 @@ const CourseDetail: React.FC = () => {
       setSuccess(`"${selectedFile.name}" uploaded successfully, replacing the old file. AI processing started.`);
       fetchData();
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to replace file');
+      setError(apiErrorMessage(err, 'Failed to replace file'));
     } finally {
       setUploading(false);
     }
@@ -304,7 +304,7 @@ const CourseDetail: React.FC = () => {
       setPipelineJobs((prev) => [job, ...prev]);
       setSuccess('AI review pipeline started - this runs in the background and can take a minute or more.');
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to start the AI review pipeline.');
+      setError(apiErrorMessage(err, 'Failed to start the AI review pipeline.'));
     } finally {
       setTriggeringPipeline(false);
     }
@@ -318,7 +318,7 @@ const CourseDetail: React.FC = () => {
       const revision = await contentProcessingService.getJobRevision(jobId);
       setReviewRevision(revision);
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Could not load the proposed changes for review.');
+      setError(apiErrorMessage(err, 'Could not load the proposed changes for review.'));
     } finally {
       setLoadingRevision(false);
     }
@@ -340,7 +340,7 @@ const CourseDetail: React.FC = () => {
       const jobsData = await contentProcessingService.listJobsForCourse(idNum);
       setPipelineJobs(jobsData);
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to submit your review decision.');
+      setError(apiErrorMessage(err, 'Failed to submit your review decision.'));
     } finally {
       setDecidingRevision(false);
     }

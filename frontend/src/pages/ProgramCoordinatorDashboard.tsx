@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { programCoordinatorService, courseService, adminService } from '../services/api';
+import { apiErrorMessage } from '../lib/apiError';
 import type { CourseCoordinatorEntry } from '../services/api';
 import { AppShell, type NavItem } from '../components/AppShell';
 import { useAutoRefresh } from '../hooks/useAutoRefresh';
@@ -146,7 +147,7 @@ const ProgramCoordinatorDashboard: React.FC = () => {
       setNewPrereq('');
       fetchAll();
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to add course to catalog.');
+      setError(apiErrorMessage(err, 'Failed to add course to catalog.'));
     } finally {
       setCreating(false);
     }
@@ -173,7 +174,7 @@ const ProgramCoordinatorDashboard: React.FC = () => {
       setEditingId(null);
       fetchAll();
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to update catalog entry.');
+      setError(apiErrorMessage(err, 'Failed to update catalog entry.'));
     } finally {
       setSavingEdit(false);
     }
@@ -185,7 +186,7 @@ const ProgramCoordinatorDashboard: React.FC = () => {
       await programCoordinatorService.deleteCatalogEntry(id);
       fetchAll();
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to delete catalog entry.');
+      setError(apiErrorMessage(err, 'Failed to delete catalog entry.'));
     }
   };
 
@@ -197,7 +198,7 @@ const ProgramCoordinatorDashboard: React.FC = () => {
       });
       fetchAll();
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to update prerequisite mapping.');
+      setError(apiErrorMessage(err, 'Failed to update prerequisite mapping.'));
     }
   };
 
@@ -207,7 +208,7 @@ const ProgramCoordinatorDashboard: React.FC = () => {
       await programCoordinatorService.deleteCourse(courseId);
       fetchAll();
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to delete course.');
+      setError(apiErrorMessage(err, 'Failed to delete course.'));
     }
   };
 
@@ -238,7 +239,7 @@ const ProgramCoordinatorDashboard: React.FC = () => {
       // A 403 here means this course's program isn't actually in this coordinator's
       // scope (shouldn't normally happen given server-side scoping / the client-side
       // filter above) - surface it instead of letting the rejection go unhandled.
-      setError(err.response?.data?.detail || 'Failed to assign Course Coordinator.');
+      setError(apiErrorMessage(err, 'Failed to assign Course Coordinator.'));
     } finally {
       setAssigningCourseId(null);
     }
@@ -251,7 +252,7 @@ const ProgramCoordinatorDashboard: React.FC = () => {
       await programCoordinatorService.removeCourseCoordinator(courseId, userId);
       await refreshCourseCoordinators(courseId);
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to unassign Course Coordinator.');
+      setError(apiErrorMessage(err, 'Failed to unassign Course Coordinator.'));
     } finally {
       setRemovingKey(null);
     }

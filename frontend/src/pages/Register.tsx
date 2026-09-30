@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { PasswordChecklist, isPasswordValid } from '../components/PasswordChecklist';
 import { isValidEmail } from '../lib/validators';
+import { apiErrorMessage } from '../lib/apiError';
 import { FoxMark } from '../components/FoxMark';
 import { FoxMascot } from '../components/FoxMascot';
 import type { MascotRole } from '../components/FoxMascot';
@@ -110,7 +111,7 @@ const Register: React.FC = () => {
       const base = redirect ? `/login?redirect=${encodeURIComponent(redirect)}` : '/login';
       navigate(`${base}${base.includes('?') ? '&' : '?'}verify=1`);
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Registration failed. Check inputs.');
+      setError(apiErrorMessage(err, 'Registration failed. Check inputs.'));
       setLoading(false);
     }
   };

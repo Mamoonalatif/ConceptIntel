@@ -224,7 +224,7 @@ export const Assignments: React.FC<AssignmentsProps> = ({ courseId, isTeacher, c
       setRubricDraft([]);
       handleGenerateRubric(created.id);
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to post assignment.');
+      setError(apiErrorMessage(err, 'Failed to post assignment.'));
     } finally {
       setPosting(false);
     }
@@ -253,7 +253,7 @@ export const Assignments: React.FC<AssignmentsProps> = ({ courseId, isTeacher, c
       setItems((prev) => prev.map((n) => (n.id === id ? { ...n, ...updated } : n)));
       setEditingId(null);
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to update assignment.');
+      setError(apiErrorMessage(err, 'Failed to update assignment.'));
     } finally {
       setSaving(false);
     }
@@ -295,7 +295,7 @@ export const Assignments: React.FC<AssignmentsProps> = ({ courseId, isTeacher, c
         [assignmentId]: (prev[assignmentId] || []).map((s) => (s.id === submissionId ? updated : s)),
       }));
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to grade submission.');
+      setError(apiErrorMessage(err, 'Failed to grade submission.'));
     } finally {
       setGradingSubmissionId(null);
     }
@@ -321,7 +321,7 @@ export const Assignments: React.FC<AssignmentsProps> = ({ courseId, isTeacher, c
       }));
       setEditingGradeId(null);
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to save grade.');
+      setError(apiErrorMessage(err, 'Failed to save grade.'));
     } finally {
       setSavingGrade(false);
     }
@@ -348,7 +348,7 @@ export const Assignments: React.FC<AssignmentsProps> = ({ courseId, isTeacher, c
         return next;
       });
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to approve grade.');
+      setError(apiErrorMessage(err, 'Failed to approve grade.'));
     } finally {
       setApprovingId(null);
     }
@@ -364,7 +364,7 @@ export const Assignments: React.FC<AssignmentsProps> = ({ courseId, isTeacher, c
         [assignmentId]: (prev[assignmentId] || []).map((s) => (s.id === submissionId ? updated : s)),
       }));
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to reject grade.');
+      setError(apiErrorMessage(err, 'Failed to reject grade.'));
     } finally {
       setRejectingId(null);
     }
@@ -377,7 +377,7 @@ export const Assignments: React.FC<AssignmentsProps> = ({ courseId, isTeacher, c
       const summary = await assignmentService.submit(courseId, assignmentId, file);
       setItems((prev) => prev.map((n) => (n.id === assignmentId ? { ...n, my_submission: summary } : n)));
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to submit assignment.');
+      setError(apiErrorMessage(err, 'Failed to submit assignment.'));
     } finally {
       setSubmittingId(null);
     }

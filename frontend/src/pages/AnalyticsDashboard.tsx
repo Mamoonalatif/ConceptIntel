@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { AppShell, type NavItem } from '../components/AppShell';
 import { courseService, analyticsService, type CourseAnalytics, type MyCourseProgress, type PlatformOverview } from '../services/api';
+import { apiErrorMessage } from '../lib/apiError';
 import { getPrimaryNavItems } from '../lib/roleNav';
 import {
   BarChart3, TrendingUp, AlertTriangle, Users, Flame, RefreshCw, Info,
@@ -52,7 +53,7 @@ const AnalyticsDashboard: React.FC = () => {
     if (!isAdmin) return;
     analyticsService.getPlatformOverview()
       .then(setPlatform)
-      .catch((err) => setError(err.response?.data?.detail || 'Failed to load platform analytics.'))
+      .catch((err) => setError(apiErrorMessage(err, 'Failed to load platform analytics.')))
       .finally(() => setPlatformLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAdmin]);
@@ -75,7 +76,7 @@ const AnalyticsDashboard: React.FC = () => {
           if (opts.length) setCourseId(opts[0].id);
         }
       } catch (err: any) {
-        setError(err.response?.data?.detail || 'Failed to load analytics.');
+        setError(apiErrorMessage(err, 'Failed to load analytics.'));
       } finally {
         if (isStudent) setLoading(false);
       }
@@ -94,7 +95,7 @@ const AnalyticsDashboard: React.FC = () => {
         setData(result);
       } catch (err: any) {
         setData(null);
-        setError(err.response?.data?.detail || 'Failed to load analytics for this course.');
+        setError(apiErrorMessage(err, 'Failed to load analytics for this course.'));
       } finally {
         setLoading(false);
       }

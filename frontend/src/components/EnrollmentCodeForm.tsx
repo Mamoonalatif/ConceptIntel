@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { X, RefreshCw, CheckCircle2 } from 'lucide-react';
 import { enrollmentService, courseService } from '../services/api';
+import { apiErrorMessage } from '../lib/apiError';
 
 const CODE_LENGTH = 8;
 const CODE_PATTERN = /^[A-Z0-9]+$/;
@@ -93,7 +94,7 @@ const EnrollmentCodeForm: React.FC<EnrollmentCodeFormProps> = ({ onEnrolled, onC
       const codeLabel = enrollment.course_code ? ` (${enrollment.course_code})` : '';
       onEnrolled(`Successfully enrolled in ${name}${codeLabel}.`);
     } catch (err: any) {
-      setServerError(err.response?.data?.detail || 'Failed to join course. Double-check the code.');
+      setServerError(apiErrorMessage(err, 'Failed to join course. Double-check the code.'));
     } finally {
       setJoining(false);
     }

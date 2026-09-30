@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { authService } from '../services/api';
+import { apiErrorMessage } from '../lib/apiError';
 import { useAuth } from '../context/AuthContext';
 import { PasswordChecklist, isPasswordValid } from './PasswordChecklist';
 import { X, Lock, Eye, EyeOff, AlertCircle, CheckCircle2, XCircle, RefreshCw } from 'lucide-react';
@@ -48,7 +49,7 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({ onClos
       });
       setSuccess(true);
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to update password.');
+      setError(apiErrorMessage(err, 'Failed to update password.'));
     } finally {
       setSubmitting(false);
     }

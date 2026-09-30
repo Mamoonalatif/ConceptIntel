@@ -79,7 +79,7 @@ export const ClassStream: React.FC<ClassStreamProps> = ({ courseId, isTeacher })
       setDraft('');
       fetchItems();
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to post announcement.');
+      setError(apiErrorMessage(err, 'Failed to post announcement.'));
     } finally {
       setPosting(false);
     }
@@ -103,7 +103,7 @@ export const ClassStream: React.FC<ClassStreamProps> = ({ courseId, isTeacher })
       setEditingId(null);
       fetchItems();
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to update announcement.');
+      setError(apiErrorMessage(err, 'Failed to update announcement.'));
     } finally {
       setSaving(false);
     }
@@ -159,7 +159,7 @@ export const ClassStream: React.FC<ClassStreamProps> = ({ courseId, isTeacher })
       resetComposer();
       fetchItems();
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to post material.');
+      setError(apiErrorMessage(err, 'Failed to post material.'));
     } finally {
       setComposerPosting(false);
     }
@@ -180,7 +180,7 @@ export const ClassStream: React.FC<ClassStreamProps> = ({ courseId, isTeacher })
       resetComposer();
       fetchItems();
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to schedule meeting.');
+      setError(apiErrorMessage(err, 'Failed to schedule meeting.'));
     } finally {
       setComposerPosting(false);
     }

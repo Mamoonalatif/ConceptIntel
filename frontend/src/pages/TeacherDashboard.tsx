@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { courseService } from '../services/api';
+import { apiErrorMessage } from '../lib/apiError';
 import { AppShell, type NavItem } from '../components/AppShell';
 import { TodayTeachingWidget } from '../components/TodayTeachingWidget';
 import { EmptyStateIllustration } from '../components/illustrations';
@@ -171,7 +172,7 @@ const TeacherDashboard: React.FC = () => {
       setShowModal(false);
       fetchCourses();
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to create course');
+      setError(apiErrorMessage(err, 'Failed to create course'));
     } finally {
       setSubmitting(false);
     }

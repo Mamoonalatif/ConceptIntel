@@ -233,7 +233,7 @@ const CourseCoordinatorDashboard: React.FC = () => {
       setEditingId(null);
       fetchCourses();
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to update course info.');
+      setError(apiErrorMessage(err, 'Failed to update course info.'));
     } finally {
       setSavingEdit(false);
     }

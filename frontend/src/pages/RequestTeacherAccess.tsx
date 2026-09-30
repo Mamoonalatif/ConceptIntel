@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { authService } from '../services/api';
+import { apiErrorMessage } from '../lib/apiError';
 import { AuthVisualPanel } from '../components/AuthVisualPanel';
 import { TeacherAccessIllustration } from '../components/illustrations';
 import { FoxMark } from '../components/FoxMark';
@@ -40,7 +41,7 @@ const RequestTeacherAccess: React.FC = () => {
       await authService.requestTeacherAccess({ email, full_name: fullName.trim(), reason: reason || undefined });
       setSubmitted(true);
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to submit request. Please try again.');
+      setError(apiErrorMessage(err, 'Failed to submit request. Please try again.'));
     } finally {
       setLoading(false);
     }

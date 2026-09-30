@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { authService } from '../services/api';
+import { apiErrorMessage } from '../lib/apiError';
 import { X, ShieldCheck, AlertCircle, CheckCircle2, RefreshCw, Copy } from 'lucide-react';
 
 interface TwoFactorSetupModalProps {
@@ -29,7 +30,7 @@ export const TwoFactorSetupModal: React.FC<TwoFactorSetupModalProps> = ({ onClos
         setQrCode(data.qr_code_base64);
         setSecret(data.secret);
       } catch (err: any) {
-        if (!cancelled) setError(err.response?.data?.detail || 'Could not start two-factor setup.');
+        if (!cancelled) setError(apiErrorMessage(err, 'Could not start two-factor setup.'));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -45,7 +46,7 @@ export const TwoFactorSetupModal: React.FC<TwoFactorSetupModalProps> = ({ onClos
       const data = await authService.twoFactorEnable(code.trim());
       setBackupCodes(data.backup_codes);
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Invalid code. Check your authenticator app and try again.');
+      setError(apiErrorMessage(err, 'Invalid code. Check your authenticator app and try again.'));
     } finally {
       setSubmitting(false);
     }
@@ -183,7 +184,7 @@ export const TwoFactorDisableModal: React.FC<TwoFactorDisableModalProps> = ({ on
       await authService.twoFactorDisable(useCode ? { code: value.trim() } : { password: value });
       onDisabled();
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Could not verify your password or authentication code.');
+      setError(apiErrorMessage(err, 'Could not verify your password or authentication code.'));
     } finally {
       setSubmitting(false);
     }

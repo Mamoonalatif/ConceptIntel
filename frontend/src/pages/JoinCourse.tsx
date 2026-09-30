@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { courseService, enrollmentService, type CourseLookup } from '../services/api';
+import { apiErrorMessage } from '../lib/apiError';
 import { CheckCircle2, AlertCircle, Loader2, LogIn } from 'lucide-react';
 import { FoxSpinner } from '../components/FoxSpinner';
 import { FoxMark } from '../components/FoxMark';
@@ -39,7 +40,7 @@ const JoinCourse: React.FC = () => {
       const result = await enrollmentService.join(code.toUpperCase());
       setJoined(result.course_name || preview?.name || 'the course');
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to join course. The code may be invalid or expired.');
+      setError(apiErrorMessage(err, 'Failed to join course. The code may be invalid or expired.'));
     } finally {
       setJoining(false);
     }

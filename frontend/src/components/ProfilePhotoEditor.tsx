@@ -2,6 +2,7 @@ import React, { useRef, useState } from 'react';
 import { Camera, Loader2 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { authService } from '../services/api';
+import { apiErrorMessage } from '../lib/apiError';
 import { Avatar } from './Avatar';
 
 interface ProfilePhotoEditorProps {
@@ -34,7 +35,7 @@ export const ProfilePhotoEditor: React.FC<ProfilePhotoEditorProps> = ({ size = '
       await authService.uploadAvatar(file);
       await refreshUser();
     } catch (err: any) {
-      onError?.(err.response?.data?.detail || 'Failed to upload photo.');
+      onError?.(apiErrorMessage(err, 'Failed to upload photo.'));
     } finally {
       setBusy(false);
     }

@@ -2,6 +2,7 @@ import React from 'react';
 import { GoogleLogin, type CredentialResponse } from '@react-oauth/google';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
+import { apiErrorMessage } from '../lib/apiError';
 
 interface GoogleSignInButtonProps {
   rememberMe?: boolean;
@@ -50,7 +51,7 @@ export const GoogleSignInButton: React.FC<GoogleSignInButtonProps> = ({
       }
       onSuccess(data.role);
     } catch (err: any) {
-      onError(err.response?.data?.detail || 'Google sign-in failed.');
+      onError(apiErrorMessage(err, 'Google sign-in failed.'));
     }
   };
 
