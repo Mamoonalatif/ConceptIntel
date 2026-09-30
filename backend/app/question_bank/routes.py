@@ -336,6 +336,9 @@ def generate_questions(
             payload_json=json.dumps(g["payload"]), explanation=g.get("explanation"),
             difficulty=payload.difficulty, points=1,
             source="generated", created_by_id=current_teacher.id,
+            # AI-written questions wait for the teacher, like every other AI output -
+            # practice tests and exams only draw on Approved items.
+            status="PendingReview",
         )
         db.add(item)
         created.append(item)

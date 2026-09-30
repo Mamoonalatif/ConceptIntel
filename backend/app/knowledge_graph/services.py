@@ -234,7 +234,10 @@ class Neo4jService:
             }
             for c in concepts
         ]
-        self.query(query, {"catalog_id": catalog_id, "rows": rows})
+        # raise_on_error: this runs at coordinator approval - an unreachable Neo4j
+        # (e.g. Aura free tier auto-paused) must fail the approval, not silently
+        # no-op and leave the revision marked Approved with nothing written.
+        self.query(query, {"catalog_id": catalog_id, "rows": rows}, raise_on_error=True)
 
     def create_prerequisite_relationships_bulk(self, catalog_id: int, pairs: List[Dict[str, str]]):
         """Create many PREREQUISITE relationships in a single statement. `pairs`
@@ -252,7 +255,7 @@ class Neo4jService:
             {"source_name": p["source_name"].strip(), "target_name": p["target_name"].strip()}
             for p in pairs
         ]
-        self.query(query, {"catalog_id": catalog_id, "rows": rows})
+        self.query(query, {"catalog_id": catalog_id, "rows": rows}, raise_on_error=True)
 
     def get_catalog_graph(self, catalog_id: int, strict: bool = False) -> Dict[str, List[Dict[str, Any]]]:
         """Fetch all concept nodes and their relationships shared by a catalog course.

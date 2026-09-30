@@ -9,7 +9,7 @@ import {
   courseService, uploadService, enrollmentService, contentProcessingService,
   API_URL, type ContentSearchResult,
 } from '../services/api';
-import type { GraphBuildJob, GraphRevision } from '../services/api';
+import type { GraphBuildJob, GraphDiff, GraphRevision } from '../services/api';
 import { useAutoRefresh } from '../hooks/useAutoRefresh';
 import { ClassStream } from '../components/ClassStream';
 import { Assignments } from '../components/Assignments';
@@ -146,6 +146,8 @@ const CourseDetail: React.FC = () => {
   const [loadingRevision, setLoadingRevision] = useState(false);
   const [decidingRevision, setDecidingRevision] = useState(false);
   const [reviewNotes, setReviewNotes] = useState('');
+  // Concept names the teacher dropped from the proposal during review.
+  const [removedConcepts, setRemovedConcepts] = useState<Set<string>>(new Set());
 
   const isTeacher = user?.role === 'teacher';
   const latestJob = pipelineJobs[0] || null;
@@ -335,6 +337,7 @@ const CourseDetail: React.FC = () => {
     setLoadingRevision(true);
     setError('');
     setReviewNotes('');
+    setRemovedConcepts(new Set());
     try {
       const revision = await contentProcessingService.getJobRevision(jobId);
       setReviewRevision(revision);
@@ -351,7 +354,21 @@ const CourseDetail: React.FC = () => {
     setDecidingRevision(true);
     setError('');
     try {
-      await contentProcessingService.teacherReview(reviewRevision.id, action, undefined, reviewNotes || undefined);
+      // If the teacher removed concepts, send the trimmed diff so only what they kept
+      // goes on to the coordinator (links pointing at a removed concept go too).
+      let editedDiff: GraphDiff | undefined;
+      if (action === 'confirm' && removedConcepts.size > 0) {
+        const kept = reviewRevision.diff.concepts
+          .filter((c) => !removedConcepts.has(c.name))
+          .map((c) => ({ ...c, prerequisites: c.prerequisites.filter((p) => !removedConcepts.has(p)) }));
+        editedDiff = {
+          ...reviewRevision.diff,
+          concepts: kept,
+          new_concept_count: kept.filter((c) => c.is_new).length,
+          new_relationship_count: kept.reduce((n, c) => n + c.prerequisites.length, 0),
+        };
+      }
+      await contentProcessingService.teacherReview(reviewRevision.id, action, editedDiff, reviewNotes || undefined);
       setSuccess(
         action === 'confirm'
           ? 'Sent to the course coordinator for final approval.'
@@ -359,6 +376,7 @@ const CourseDetail: React.FC = () => {
       );
       setReviewRevision(null);
       setReviewNotes('');
+      setRemovedConcepts(new Set());
       const jobsData = await contentProcessingService.listJobsForCourse(idNum);
       setPipelineJobs(jobsData);
     } catch (err: any) {
@@ -1003,18 +1021,34 @@ const CourseDetail: React.FC = () => {
                 <span>{reviewRevision.diff.new_concept_count} new concept(s)</span>
                 <span>{reviewRevision.diff.matched_existing_count} already existed</span>
                 <span>{reviewRevision.diff.new_relationship_count} new prerequisite link(s)</span>
+                {removedConcepts.size > 0 && (
+                  <span className="text-rose-500 font-semibold">{removedConcepts.size} removed by you</span>
+                )}
               </div>
 
               <DiffGraphPreview concepts={reviewRevision.diff.concepts} className="h-72 mb-2" />
 
               {reviewRevision.diff.concepts.map((concept, i) => (
-                <div key={i} className="bg-background border border-border rounded-xl p-4">
+                <div key={i} className={`bg-background border border-border rounded-xl p-4 ${removedConcepts.has(concept.name) ? 'opacity-50' : ''}`}>
                   <div className="flex items-center justify-between gap-2">
-                    <p className="font-semibold text-text-primary text-sm">{concept.name}</p>
-                    <span className={
-                      concept.difficulty === 'Easy' ? 'badge-easy' :
-                      concept.difficulty === 'Hard' ? 'badge-hard' : 'badge-medium'
-                    }>{concept.difficulty}</span>
+                    <p className={`font-semibold text-text-primary text-sm ${removedConcepts.has(concept.name) ? 'line-through' : ''}`}>{concept.name}</p>
+                    <div className="flex items-center gap-2">
+                      <span className={
+                        concept.difficulty === 'Easy' ? 'badge-easy' :
+                        concept.difficulty === 'Hard' ? 'badge-hard' : 'badge-medium'
+                      }>{concept.difficulty}</span>
+                      <button
+                        type="button"
+                        onClick={() => setRemovedConcepts((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(concept.name)) next.delete(concept.name); else next.add(concept.name);
+                          return next;
+                        })}
+                        className="text-[11px] font-semibold text-text-muted hover:text-rose-500 underline"
+                      >
+                        {removedConcepts.has(concept.name) ? 'Restore' : 'Remove'}
+                      </button>
+                    </div>
                   </div>
                   <p className="text-text-secondary text-xs mt-1.5">{concept.description}</p>
                   <p className="text-text-muted text-[12px] mt-1.5 italic">{concept.learning_outcomes}</p>

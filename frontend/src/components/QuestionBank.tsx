@@ -118,15 +118,28 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({
     }
   };
 
+  // Teacher sign-off on an AI-generated question: only Approved items reach
+  // practice tests and exams.
+  const handleApprove = async (q: BankQuestion) => {
+    try {
+      const updated = await questionBankService.update(courseId, q.id, { status: 'Approved' });
+      setQuestions((prev) => prev.map((x) => (x.id === q.id ? updated : x)));
+    } catch (err) {
+      setError(apiErrorMessage(err, 'Could not approve this question.'));
+    }
+  };
+
   // Apply the type / difficulty / search filters to the question list.
   const filtered = useMemo(() => {
     const s = fSearch.trim().toLowerCase();
     return questions.filter((q) =>
+      // Exam / live-quiz pickers only offer teacher-approved questions.
+      (!selectable || q.status === 'Approved') &&
       (!fType || q.question_type === fType) &&
       (!fDiff || q.difficulty === fDiff) &&
       (!s || q.prompt.toLowerCase().includes(s) || (q.concept_name || '').toLowerCase().includes(s))
     );
-  }, [questions, fType, fDiff, fSearch]);
+  }, [questions, fType, fDiff, fSearch, selectable]);
 
   // Ask the AI to generate questions for the chosen concept/type/count/difficulty and prepend them to the list.
   const handleGenerate = async () => {
@@ -330,6 +343,11 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({
                         </span>
                         <span className={badgeClassFor(q.difficulty)}>{q.difficulty}</span>
                         <span className="text-[11px] text-text-muted">{q.points} pt{q.points === 1 ? '' : 's'}</span>
+                        {q.status === 'PendingReview' && (
+                          <span className="text-[11px] font-semibold rounded-full px-2 py-0.5 border text-amber-600 bg-amber-50 border-amber-200">
+                            Pending review
+                          </span>
+                        )}
                         {q.concept_name && <span className="text-[11px] text-text-muted truncate">· {q.concept_name}</span>}
                         {q.clo_code && (
                           <span className="text-[11px] font-semibold rounded-full px-2 py-0.5 border text-primary bg-primary-muted border-primary/20">
@@ -342,6 +360,11 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({
                       <button onClick={() => setExpanded(isOpen ? null : q.id)} className="p-1 text-text-muted hover:text-text-primary rounded">
                         {isOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
                       </button>
+                      {!selectable && q.status === 'PendingReview' && (
+                        <button onClick={() => handleApprove(q)} className="btn-primary text-[11px] px-2 py-1" title="Approve for students">
+                          Approve
+                        </button>
+                      )}
                       {!selectable && (
                         <button onClick={() => handleDelete(q)} className="p-1 text-text-muted hover:text-rose-500 rounded" title="Remove">
                           <Trash2 className="w-3.5 h-3.5" />

@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Optional, Set, Union
 import qrcode
-from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile, status
 from fastapi.responses import StreamingResponse
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy import func
@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token as google_id_token
 from app.config import settings
+from app.core.rate_limit import enforce_rate_limit
 from app.email_service import send_staff_credentials_email, send_password_reset_email, send_verification_email
 from app.database.connection import get_db, SessionLocal
 from app.database.models import (
@@ -108,6 +109,26 @@ def _prewarm_google_certs_cache() -> None:
         print(f"Warning: could not prewarm Google OAuth certs cache: {e}")
 
 
+# Brute-force limits for the unauthenticated endpoints. Deliberately generous so a
+# legitimate user (or a live demo) never trips them, but tight enough to make
+# password / 2FA-code guessing impractical.
+AUTH_RATE_WINDOW_SECONDS = 15 * 60
+LOGIN_LIMIT_PER_EMAIL = 10
+LOGIN_LIMIT_PER_IP = 40
+TWO_FA_LIMIT_PER_IP = 15
+FORGOT_LIMIT_PER_EMAIL = 5
+REGISTER_LIMIT_PER_IP = 15
+
+
+def _client_ip(request: Request) -> str:
+    """Caller's IP, honouring X-Forwarded-For since the API sits behind a proxy
+    on the hosting platform (request.client would otherwise be the proxy)."""
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
 def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
     """FastAPI dependency to retrieve the currently logged-in user from the JWT."""
     credentials_exception = HTTPException(
@@ -117,6 +138,11 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     )
     payload = decode_access_token(token)
     if payload is None:
+        raise credentials_exception
+
+    # Only access tokens authenticate API calls - a long-lived refresh token (or a
+    # 2FA-pending token) must not be usable as one. Access tokens carry no "type".
+    if payload.get("type") is not None:
         raise credentials_exception
 
     email: str = payload.get("sub")
@@ -286,9 +312,10 @@ def get_current_course_manager(current_user: User = Depends(get_current_user)) -
 
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-def register(user_in: UserCreate, db: Session = Depends(get_db)):
+def register(user_in: UserCreate, request: Request, db: Session = Depends(get_db)):
     """Self-register a new student: reject duplicate emails, create the account
     (in Supabase Auth when configured), then email a verification link/code."""
+    enforce_rate_limit("register-ip", _client_ip(request), REGISTER_LIMIT_PER_IP, 60 * 60)
     # Check if user already exists
     existing_user = db.query(User).filter(User.email == user_in.email).first()
     if existing_user:
@@ -366,9 +393,11 @@ def _issue_tokens_for_user(user: User) -> dict:
 
 
 @router.post("/login", response_model=Union[Token, TwoFactorRequiredResponse])
-def login(credentials: UserLogin, db: Session = Depends(get_db)):
+def login(credentials: UserLogin, request: Request, db: Session = Depends(get_db)):
     """Email/password login. Checks the password (Supabase or legacy bcrypt), then
     active/verified status, and either returns tokens or a 2FA-pending token."""
+    enforce_rate_limit("login-email", credentials.email.strip().lower(), LOGIN_LIMIT_PER_EMAIL, AUTH_RATE_WINDOW_SECONDS)
+    enforce_rate_limit("login-ip", _client_ip(request), LOGIN_LIMIT_PER_IP, AUTH_RATE_WINDOW_SECONDS)
     user = db.query(User).filter(User.email == credentials.email).first()
     if not user:
         raise HTTPException(
@@ -415,10 +444,11 @@ def login(credentials: UserLogin, db: Session = Depends(get_db)):
 
 
 @router.post("/2fa/verify-login", response_model=Token)
-def two_factor_verify_login(payload: TwoFactorLoginVerify, db: Session = Depends(get_db)):
+def two_factor_verify_login(payload: TwoFactorLoginVerify, request: Request, db: Session = Depends(get_db)):
     """Completes a login for a 2FA-enabled account - exchanges the temp_token from
     /auth/login's TwoFactorRequiredResponse plus a code for real access/refresh
     tokens, the same shape a normal /auth/login returns."""
+    enforce_rate_limit("2fa-ip", _client_ip(request), TWO_FA_LIMIT_PER_IP, AUTH_RATE_WINDOW_SECONDS)
     decoded = decode_access_token(payload.temp_token)
     if decoded is None or decoded.get("type") != "2fa_pending":
         raise HTTPException(
@@ -755,6 +785,7 @@ def forgot_password(payload: ForgotPasswordRequest, db: Session = Depends(get_db
     """Requests a password-reset link. Always returns the same generic message
     regardless of whether the email exists - a distinct "no account found" response
     would let anyone enumerate registered emails one guess at a time."""
+    enforce_rate_limit("forgot-email", payload.email.strip().lower(), FORGOT_LIMIT_PER_EMAIL, 60 * 60)
     generic_response = {
         "message": "If an account exists for that email, a password reset link has been sent."
     }
