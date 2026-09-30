@@ -278,9 +278,17 @@ def download_stored_file(file_ref: str) -> bytes:
 
 
 def delete_stored_file(file_ref: str) -> None:
-    """Mirror of store_file's backend dispatch, for deletion."""
+    """Mirror of store_file's backend dispatch, for deletion. Best-effort on every
+    backend, matching the Supabase/local branches below: the caller (upload/routes.py
+    delete_file) only removes the UploadedFile row AFTER this returns, so an
+    unhandled storage-layer exception here used to leave the database row (and the
+    file, as far as the user could tell) fully intact - the delete looked like it
+    silently did nothing."""
     if file_ref.startswith("s3://"):
-        delete_file_from_s3(file_ref)
+        try:
+            delete_file_from_s3(file_ref)
+        except Exception as e:
+            print(f"Warning: Failed to delete file from S3 storage: {str(e)}")
     elif file_ref.startswith("supabase://"):
         try:
             delete_file_from_supabase(file_ref)
