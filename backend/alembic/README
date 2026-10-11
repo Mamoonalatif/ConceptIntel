@@ -1,0 +1,24 @@
+ConceptIntel migrations (Alembic)
+=================================
+Run everything from backend/ with the venv active.
+
+Change the schema (add a column/table/index):
+  1. Edit app/database/models.py
+  2. alembic revision --autogenerate -m "add foo column to bar"
+  3. READ the new file in alembic/versions/ (autogenerate is a draft, not magic)
+  4. alembic upgrade head          # applies it, records it in the alembic_version table
+
+Useful commands:
+  alembic current                  # which revision the DB is on
+  alembic history                  # list of all migrations, newest first
+  alembic check                    # fails if models.py and the DB have drifted
+  alembic upgrade head --sql       # print the SQL without running it
+  alembic downgrade -1             # undo the last migration
+
+One-time, on the existing database (already matches the models):
+  alembic stamp head               # marks it as "at baseline" without changing any table
+
+Legacy: scripts/add_*.py were the pre-Alembic manual migrations. They stay for history
+and are all already applied. Do not write new ones - use `alembic revision`.
+HNSW vector index: created by scripts/reembed_content_chunks.py, ignored by autogenerate
+(see include_object in env.py).

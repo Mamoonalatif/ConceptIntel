@@ -49,7 +49,7 @@ class User(Base):
     # app/upload/services.py). NOT a directly-loadable URL - the frontend fetches the
     # actual bytes through GET /auth/users/{id}/avatar (see auth/routes.py), same
     # pattern as course material attachments.
-    avatar_url = Column(String, nullable=True)
+    avatar_url = Column(Text, nullable=True)  # TEXT: base64 data URLs exceed VARCHAR limits (scripts/add_avatar_column.py)
 
     # --- Two-factor authentication (TOTP, RFC 6238) ---
     # Set as soon as /auth/2fa/setup is called, but 2FA only actually gates login
@@ -155,13 +155,13 @@ class CourseCatalog(Base):
     code = Column(String, nullable=False)
 
     # Self-referencing prerequisite mapping (lives on the catalog, not the course instance)
-    prerequisite_catalog_id = Column(Integer, ForeignKey("course_catalog.id"), nullable=True)
+    prerequisite_catalog_id = Column(Integer, ForeignKey("course_catalog.id"), index=True, nullable=True)
     prerequisite = relationship("CourseCatalog", remote_side=[id], backref="dependent_catalog_entries")
 
     # Nullable because this column was added after CourseCatalog already existed in
     # production (see backend/scripts/add_program_column.py for the one-time backfill) -
     # new rows should always set it going forward.
-    program_id = Column(Integer, ForeignKey("programs.id"), nullable=True)
+    program_id = Column(Integer, ForeignKey("programs.id"), index=True, nullable=True)
     program = relationship("Program", back_populates="catalog_entries")
 
 
@@ -190,7 +190,7 @@ class Course(Base):
     end_date = Column(Date, nullable=True)
 
     # Catalog entry this course instance was created from
-    catalog_id = Column(Integer, ForeignKey("course_catalog.id"), nullable=True)
+    catalog_id = Column(Integer, ForeignKey("course_catalog.id"), index=True, nullable=True)
     catalog_entry = relationship("CourseCatalog")
 
     # Concept graph review state, set by a Course Coordinator - students may only
@@ -200,9 +200,9 @@ class Course(Base):
     # Self-referencing prerequisite course relationship. Derived server-side from the
     # catalog entry's prerequisite_catalog_id at creation time (see courses/routes.py) -
     # not directly editable by teachers.
-    prerequisite_course_id = Column(Integer, ForeignKey("courses.id"), nullable=True)
+    prerequisite_course_id = Column(Integer, ForeignKey("courses.id"), index=True, nullable=True)
 
-    teacher_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    teacher_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
 
     # Relationships
     teacher = relationship("User", back_populates="courses_taught")
@@ -221,8 +221,8 @@ class Enrollment(Base):
     )
 
     id = Column(Integer, primary_key=True, index=True)
-    student_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    course_id = Column(Integer, ForeignKey("courses.id"), nullable=False)
+    student_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
+    course_id = Column(Integer, ForeignKey("courses.id"), index=True, nullable=False)
     status = Column(String, default="Active")  # "Active", "Completed", "Dropped"
     enrolled_at = Column(DateTime, server_default=func.now())
     progress = Column(Float, default=0.0)  # Completion progress percentage (0.0 to 100.0)
@@ -254,15 +254,15 @@ class CourseSchedule(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     course_id = Column(Integer, ForeignKey("courses.id"), nullable=False, unique=True, index=True)
-    source_file_id = Column(Integer, ForeignKey("uploaded_files.id"), nullable=True)
+    source_file_id = Column(Integer, ForeignKey("uploaded_files.id"), index=True, nullable=True)
     status = Column(String, nullable=False, default="Draft")
     # "Draft" | "Approved" | "Failed" - "Approved" just means "has sessions", not
     # "was approved by someone"; kept from the earlier approval-gated version.
     generated_by_ai = Column(Boolean, nullable=False, default=False)
     pending_sessions_json = Column(Text, nullable=True)  # unused, see class docstring
     # Who most recently generated/edited this schedule.
-    submitted_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
-    decided_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # unused, see class docstring
+    submitted_by_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=True)
+    decided_by_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=True)  # unused, see class docstring
     decision_notes = Column(Text, nullable=True)  # unused, see class docstring
     error_message = Column(Text, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
@@ -297,8 +297,8 @@ class UploadedFile(Base):
     __tablename__ = "uploaded_files"
 
     id = Column(Integer, primary_key=True, index=True)
-    course_id = Column(Integer, ForeignKey("courses.id"), nullable=False)
-    teacher_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    course_id = Column(Integer, ForeignKey("courses.id"), index=True, nullable=False)
+    teacher_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
     filename = Column(String, nullable=False)
     file_url = Column(String, nullable=False)  # Path relative to local upload folder or Supabase URL
     file_type = Column(String, nullable=False)  # "pdf", "docx", "pptx", "txt", "jpg", "jpeg", "png"
@@ -459,7 +459,7 @@ class Announcement(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     course_id = Column(Integer, ForeignKey("courses.id"), nullable=False, index=True)
-    teacher_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    teacher_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
     content = Column(Text, nullable=False)
     created_at = Column(DateTime, server_default=func.now(), index=True)
     updated_at = Column(DateTime, nullable=True)
@@ -477,7 +477,7 @@ class Assignment(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     course_id = Column(Integer, ForeignKey("courses.id"), nullable=False, index=True)
-    teacher_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    teacher_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
     title = Column(String, nullable=False)
     description = Column(Text, nullable=True)
     due_date = Column(DateTime, nullable=True)
@@ -586,7 +586,7 @@ class Material(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     course_id = Column(Integer, ForeignKey("courses.id"), nullable=False, index=True)
-    teacher_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    teacher_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
     title = Column(String, nullable=False)
     description = Column(Text, nullable=True)
     attachment_url = Column(String, nullable=True)
@@ -606,7 +606,7 @@ class Meeting(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     course_id = Column(Integer, ForeignKey("courses.id"), nullable=False, index=True)
-    teacher_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    teacher_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
     title = Column(String, nullable=False)
     description = Column(Text, nullable=True)
     meeting_link = Column(String, nullable=False)
@@ -631,7 +631,7 @@ class Comment(Base):
     course_id = Column(Integer, ForeignKey("courses.id"), nullable=False, index=True)
     target_type = Column(String, nullable=False, index=True)  # "assignment" | "announcement" | "material"
     target_id = Column(Integer, nullable=False, index=True)
-    author_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    author_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
     content = Column(Text, nullable=False)
     created_at = Column(DateTime, server_default=func.now(), index=True)
 
@@ -790,8 +790,8 @@ class GeneratedContent(Base):
     clo_id = Column(Integer, ForeignKey("clos.id"), nullable=True, index=True)
 
     status = Column(String, default="PendingReview", nullable=False)  # "PendingReview", "Approved", "Rejected"
-    created_by_teacher_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    reviewed_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_by_teacher_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
+    reviewed_by_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=True)
     reviewed_at = Column(DateTime, nullable=True)
     review_notes = Column(Text, nullable=True)
 
@@ -839,7 +839,7 @@ class ContentGenerationJob(Base):
     request_json = Column(Text, nullable=False, default="{}")
 
     # Set once the job succeeds; this is what the "View it" action links to.
-    result_content_id = Column(Integer, ForeignKey("generated_content.id"), nullable=True)
+    result_content_id = Column(Integer, ForeignKey("generated_content.id"), index=True, nullable=True)
     error_message = Column(Text, nullable=True)
 
     created_at = Column(DateTime, server_default=func.now(), index=True)
@@ -953,7 +953,7 @@ class LiveQuizAnswer(Base):
     session_id = Column(Integer, ForeignKey("live_quiz_sessions.id"), nullable=False, index=True)
     participant_id = Column(Integer, ForeignKey("live_quiz_participants.id"), nullable=False, index=True)
     question_index = Column(Integer, nullable=False)
-    question_id = Column(Integer, ForeignKey("question_bank_items.id"), nullable=False)
+    question_id = Column(Integer, ForeignKey("question_bank_items.id"), index=True, nullable=False)
     response_json = Column(Text, nullable=True)
     correct = Column(Boolean, nullable=False, default=False)
     points_awarded = Column(Float, nullable=False, default=0.0)
@@ -1010,7 +1010,7 @@ class QuestionBankItem(Base):
 
     # "generated" (AI), "imported" (lifted out of a GeneratedContent set), "manual".
     source = Column(String, nullable=False, default="generated")
-    source_content_id = Column(Integer, ForeignKey("generated_content.id"), nullable=True)
+    source_content_id = Column(Integer, ForeignKey("generated_content.id"), index=True, nullable=True)
     status = Column(String, nullable=False, default="Approved")  # "Approved" | "PendingReview" | "Retired"
     created_by_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     created_at = Column(DateTime, server_default=func.now(), index=True)
@@ -1279,9 +1279,9 @@ class GraphBuildJob(Base):
     __tablename__ = "graph_build_jobs"
 
     id = Column(Integer, primary_key=True, index=True)
-    catalog_id = Column(Integer, ForeignKey("course_catalog.id"), nullable=False)
-    course_id = Column(Integer, ForeignKey("courses.id"), nullable=False)  # the section that triggered it
-    triggered_by_teacher_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    catalog_id = Column(Integer, ForeignKey("course_catalog.id"), index=True, nullable=False)
+    course_id = Column(Integer, ForeignKey("courses.id"), index=True, nullable=False)  # the section that triggered it
+    triggered_by_teacher_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
 
     # "Queued", "ExtractingText", "CleaningAndStructuring", "Diffing",
     # "AwaitingTeacherReview", "AwaitingCoordinatorApproval", "Merged", "Rejected", "Failed"
@@ -1301,22 +1301,22 @@ class GraphRevision(Base):
     __tablename__ = "graph_revisions"
 
     id = Column(Integer, primary_key=True, index=True)
-    job_id = Column(Integer, ForeignKey("graph_build_jobs.id"), nullable=False)
-    catalog_id = Column(Integer, ForeignKey("course_catalog.id"), nullable=False)
+    job_id = Column(Integer, ForeignKey("graph_build_jobs.id"), index=True, nullable=False)
+    catalog_id = Column(Integer, ForeignKey("course_catalog.id"), index=True, nullable=False)
 
     is_initial = Column(Boolean, default=False, nullable=False)  # True if the catalog had no graph yet
     diff_json = Column(Text, nullable=False)  # JSON: added/modified concepts + relationships
 
-    submitted_by_teacher_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    submitted_by_teacher_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
 
     # "PendingTeacherReview", "PendingCoordinatorApproval", "Approved", "Rejected"
     status = Column(String, default="PendingTeacherReview", nullable=False)
 
-    teacher_reviewed_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    teacher_reviewed_by_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=True)
     teacher_reviewed_at = Column(DateTime, nullable=True)
     teacher_edit_notes = Column(Text, nullable=True)
 
-    coordinator_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    coordinator_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=True)
     coordinator_decision_at = Column(DateTime, nullable=True)
     coordinator_notes = Column(Text, nullable=True)
 
@@ -1389,7 +1389,7 @@ class CLO(Base):
     code = Column(String, nullable=False)  # e.g. "CLO1", scoped unique per catalog subject
     title = Column(String, nullable=False)
     description = Column(Text, nullable=True)
-    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_by_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
     created_at = Column(DateTime, server_default=func.now())
 
     catalog_entry = relationship("CourseCatalog")
@@ -1443,7 +1443,7 @@ class Rubric(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     assignment_id = Column(Integer, ForeignKey("assignments.id"), nullable=False, unique=True, index=True)
-    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_by_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
     # "Draft" (AI-generated, not yet reviewed) | "Published" (teacher approved/edited -
     # this is the version grading uses). Mirrors the review-gate pattern used by
     # GraphRevision/GeneratedContent elsewhere in this app.
@@ -1582,9 +1582,9 @@ class GraphEditProposal(Base):
     __tablename__ = "graph_edit_proposals"
 
     id = Column(Integer, primary_key=True, index=True)
-    catalog_id = Column(Integer, ForeignKey("course_catalog.id"), nullable=False)
-    course_id = Column(Integer, ForeignKey("courses.id"), nullable=False)  # the section the teacher edited from
-    teacher_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    catalog_id = Column(Integer, ForeignKey("course_catalog.id"), index=True, nullable=False)
+    course_id = Column(Integer, ForeignKey("courses.id"), index=True, nullable=False)  # the section the teacher edited from
+    teacher_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
 
     # "create_node", "update_node", "delete_node", "create_relationship",
     # "delete_relationship", "update_material" (AI-generated/refined concept material)
@@ -1594,7 +1594,7 @@ class GraphEditProposal(Base):
     # "Pending", "Approved", "Rejected"
     status = Column(String, default="Pending", nullable=False)
 
-    coordinator_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    coordinator_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=True)
     coordinator_decision_at = Column(DateTime, nullable=True)
     coordinator_notes = Column(Text, nullable=True)
 
